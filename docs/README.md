@@ -1,31 +1,34 @@
 ---
-schema_version: "1.0"
+schema_version: "1.1"
 document_id: VEP-DOCS-INDEX
 title: "設計ドキュメント索引"
 document_type: documentation-index
 status: active
 canonical: true
 canonical_for: documentation-index
-created_at: 2026-08-06T16:07:00+09:00
-updated_at: 2026-08-06T16:28:00+09:00
-authors: ["Xpotato1024", "OpenAI ChatGPT"]
-owners: ["Xpotato1024"]
-reviewers: []
-source_issue: 3
-change_control: pull-request
+owners:
+  - Xpotato1024
 supersedes: []
 superseded_by: null
-related_documents: ["VEP-GOV-DOCUMENTS", "VEP-DOC-REGISTRY", "VEP-README", "VEP-AGENT-INDEX", "VEP-OPS-CI"]
+related_documents:
+  - VEP-GOV-DOCUMENTS
+  - VEP-DOC-REGISTRY
+  - VEP-README
+  - VEP-AGENT-INDEX
+  - VEP-OPS-CI
 ---
 # 設計ドキュメント索引
 
 機械可読な正本一覧は[`registry/documents.yaml`](registry/documents.yaml)です。索引と台帳が
 矛盾した場合は変更を停止し、同じPRで整合させます。
 
+文書ごとのfront matter有無は台帳の`metadata_mode`で決まります。READMEやAI入口は
+`registry-only`、内部設計文書は原則`front-matter`です。
+
 ## Governance
 
 - [`governance/document-governance.md`](governance/document-governance.md): canonical／historical
-- [`governance/metadata-schema.md`](governance/metadata-schema.md): document metadata
+- [`governance/metadata-schema.md`](governance/metadata-schema.md): metadata modeとfield
 - [`governance/change-control.md`](governance/change-control.md): 作成・更新・置換
 - [`governance/ai-instruction-governance.md`](governance/ai-instruction-governance.md): AI adapter／Skill SoT
 

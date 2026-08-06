@@ -1,22 +1,3 @@
----
-schema_version: "1.0"
-document_id: VEP-README
-title: "Video Evidence Pipeline"
-document_type: repository-overview
-status: draft
-canonical: true
-canonical_for: repository-overview
-created_at: 2026-08-06T16:07:00+09:00
-updated_at: 2026-08-06T16:28:00+09:00
-authors: ["Xpotato1024", "OpenAI ChatGPT"]
-owners: ["Xpotato1024"]
-reviewers: []
-source_issue: 3
-change_control: pull-request
-supersedes: []
-superseded_by: null
-related_documents: ["VEP-DOCS-INDEX", "VEP-AGENT-POLICY", "VEP-ARCH-PIPELINE", "VEP-GOV-DOCUMENTS", "VEP-OPS-CI"]
----
 # Video Evidence Pipeline
 
 認可済み動画を取得・正規化し、検証可能な証拠層を構築したうえで、レポート・要約等の生成、
@@ -46,9 +27,13 @@ related_documents: ["VEP-DOCS-INDEX", "VEP-AGENT-POLICY", "VEP-ARCH-PIPELINE", "
 - 共通AIポリシー: [`.agents/policy.md`](.agents/policy.md)
 - Skillガバナンス: [`.agents/governance.md`](.agents/governance.md)
 - Skill台帳: [`.agents/skill-system.toml`](.agents/skill-system.toml)
+- 文書メタデータ: [`docs/governance/metadata-schema.md`](docs/governance/metadata-schema.md)
 - CI品質ゲート: [`docs/operations/ci-quality-gates.md`](docs/operations/ci-quality-gates.md)
 - contribution: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - security: [`SECURITY.md`](SECURITY.md)
+
+READMEやAI入口文書の識別情報は文書台帳だけで管理し、本文先頭へ汎用YAML front matterを
+重複させません。
 
 ## AI entrypoints
 
@@ -78,4 +63,3 @@ uv run python scripts/validate_repository.py --root .
 
 - Foundation: design SoT、agent governance、Skills contracts、CI／quality gates
 - Next: deterministic domain implementation
-- Tracking: Issue #3

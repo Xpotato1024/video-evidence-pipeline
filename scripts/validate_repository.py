@@ -17,7 +17,17 @@ FENCED_CODE_RE = re.compile(r"```.*?```|~~~.*?~~~", re.DOTALL)
 ACTION_RE = re.compile(r"^\s*-?\s*uses:\s*([^\s#]+)", re.MULTILINE)
 SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 
-REQUIRED_DOCUMENT_FIELDS = {
+REQUIRED_REGISTRY_FIELDS = {
+    "document_id",
+    "path",
+    "document_type",
+    "status",
+    "canonical",
+    "canonical_for",
+    "owners",
+    "metadata_mode",
+}
+REQUIRED_FRONT_MATTER_FIELDS = {
     "schema_version",
     "document_id",
     "title",
@@ -25,13 +35,7 @@ REQUIRED_DOCUMENT_FIELDS = {
     "status",
     "canonical",
     "canonical_for",
-    "created_at",
-    "updated_at",
-    "authors",
     "owners",
-    "reviewers",
-    "source_issue",
-    "change_control",
     "supersedes",
     "superseded_by",
     "related_documents",
@@ -44,6 +48,7 @@ REGISTRY_MATCH_FIELDS = {
     "canonical_for",
     "owners",
 }
+ALLOWED_METADATA_MODES = {"front-matter", "registry-only", "non-markdown"}
 ALLOWED_LIFECYCLES = {"observed", "candidate", "draft", "active", "deprecated", "rejected"}
 ALLOWED_SIDE_EFFECTS = {
     "read-only",
@@ -101,7 +106,10 @@ SECRET_PATTERNS = {
     "openai-key": re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
     "aws-key": re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
     "private-key": re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
-    "authorization": re.compile(r"Authorization:\s*(?:Bearer|Basic)\s+[^\s]{12,}", re.IGNORECASE),
+    "authorization": re.compile(
+        r"Authorization:\s*(?:Bearer|Basic)\s+[^\s]{12,}",
+        re.IGNORECASE,
+    ),
     "signed-query": re.compile(
         r"[?&](?:token|access_token|sig|signature|x-amz-signature)=[^&\s]{16,}",
         re.IGNORECASE,
@@ -162,19 +170,23 @@ class RepositoryValidator:
             self.add("YAML_INVALID", relative, str(exc))
             return None
 
-    def _parse_front_matter(self, relative: str) -> dict[str, Any] | None:
-        path = self.root / relative
+    def _read_text(self, relative: str) -> str | None:
         try:
-            text = path.read_text(encoding="utf-8")
+            return (self.root / relative).read_text(encoding="utf-8")
         except OSError as exc:
             self.add("DOCUMENT_READ", relative, str(exc))
+            return None
+
+    def _parse_front_matter(self, relative: str) -> dict[str, Any] | None:
+        text = self._read_text(relative)
+        if text is None:
             return None
         match = FRONT_MATTER_RE.match(text)
         if not match:
             self.add(
                 "FRONT_MATTER_MISSING",
                 relative,
-                "registered Markdown document lacks YAML front matter",
+                "metadata_mode=front-matter requires YAML front matter",
             )
             return None
         try:
@@ -216,19 +228,30 @@ class RepositoryValidator:
         ids: dict[str, str] = {}
         canonical_for: dict[str, str] = {}
         entries: dict[str, dict[str, Any]] = {}
+
         for index, entry in enumerate(docs):
             if not isinstance(entry, dict):
                 self.add(
-                    "REGISTRY_ENTRY_INVALID", registry_path, f"entry {index} must be a mapping"
+                    "REGISTRY_ENTRY_INVALID",
+                    registry_path,
+                    f"entry {index} must be a mapping",
                 )
                 continue
+
+            missing_registry_fields = REQUIRED_REGISTRY_FIELDS - set(entry)
+            for field in sorted(missing_registry_fields):
+                self.add("REGISTRY_FIELD_MISSING", registry_path, f"entry {index}: {field}")
+
             doc_id = entry.get("document_id")
             relative = entry.get("path")
             if not isinstance(doc_id, str) or not isinstance(relative, str):
                 self.add(
-                    "REGISTRY_ENTRY_INVALID", registry_path, f"entry {index} lacks document_id/path"
+                    "REGISTRY_ENTRY_INVALID",
+                    registry_path,
+                    f"entry {index} lacks document_id/path",
                 )
                 continue
+
             if doc_id in ids:
                 self.add(
                     "DOCUMENT_ID_DUPLICATE",
@@ -237,6 +260,7 @@ class RepositoryValidator:
                 )
             ids[doc_id] = relative
             entries[doc_id] = entry
+
             cfor = entry.get("canonical_for")
             if entry.get("canonical") is True:
                 if not isinstance(cfor, str) or not cfor:
@@ -247,36 +271,35 @@ class RepositoryValidator:
                     )
                 elif cfor in canonical_for:
                     self.add(
-                        "CANONICAL_FOR_DUPLICATE", relative, f"{cfor}: also {canonical_for[cfor]}"
+                        "CANONICAL_FOR_DUPLICATE",
+                        relative,
+                        f"{cfor}: also {canonical_for[cfor]}",
                     )
                 else:
                     canonical_for[cfor] = relative
+
             if relative not in self.tracked_files or not (self.root / relative).is_file():
                 self.add("REGISTERED_PATH_MISSING", relative, f"registered by {doc_id}")
                 continue
-            if relative.endswith(".md"):
-                front = self._parse_front_matter(relative)
-                if front is None:
-                    continue
-                missing = REQUIRED_DOCUMENT_FIELDS - set(front)
-                for field in sorted(missing):
-                    self.add("DOCUMENT_FIELD_MISSING", relative, field)
-                for field in REGISTRY_MATCH_FIELDS:
-                    if field in front and front.get(field) != entry.get(field):
-                        self.add(
-                            "REGISTRY_FRONT_MATTER_MISMATCH",
-                            relative,
-                            f"{field}: registry={entry.get(field)!r}, front={front.get(field)!r}",
-                        )
-                created = front.get("created_at")
-                updated = front.get("updated_at")
-                if created is not None and updated is not None and created > updated:
-                    self.add("DOCUMENT_TIME_ORDER", relative, "created_at is after updated_at")
+
+            mode = entry.get("metadata_mode")
+            if mode not in ALLOWED_METADATA_MODES:
+                self.add("METADATA_MODE_INVALID", relative, repr(mode))
+                continue
+
+            if mode == "front-matter":
+                self._validate_front_matter_document(relative, entry)
+            elif mode == "registry-only":
+                self._validate_registry_only_document(relative)
+            else:
+                self._validate_non_markdown_document(relative)
 
         valid_ids = set(entries)
         for doc_id, entry in entries.items():
-            relative = entry["path"]
-            if not relative.endswith(".md") or not (self.root / relative).is_file():
+            if entry.get("metadata_mode") != "front-matter":
+                continue
+            relative = entry.get("path")
+            if not isinstance(relative, str) or not (self.root / relative).is_file():
                 continue
             front = self._parse_front_matter(relative)
             if front is None:
@@ -289,6 +312,87 @@ class RepositoryValidator:
             for ref in refs:
                 if ref not in valid_ids:
                     self.add("DOCUMENT_REFERENCE_UNKNOWN", relative, f"{doc_id} references {ref}")
+
+    def _validate_front_matter_document(
+        self,
+        relative: str,
+        entry: dict[str, Any],
+    ) -> None:
+        if not relative.endswith(".md"):
+            self.add(
+                "METADATA_MODE_PATH_MISMATCH",
+                relative,
+                "front-matter mode requires a Markdown path",
+            )
+            return
+
+        front = self._parse_front_matter(relative)
+        if front is None:
+            return
+
+        missing = REQUIRED_FRONT_MATTER_FIELDS - set(front)
+        for field in sorted(missing):
+            self.add("DOCUMENT_FIELD_MISSING", relative, field)
+
+        for field in REGISTRY_MATCH_FIELDS:
+            if field in front and front.get(field) != entry.get(field):
+                self.add(
+                    "REGISTRY_FRONT_MATTER_MISMATCH",
+                    relative,
+                    f"{field}: registry={entry.get(field)!r}, front={front.get(field)!r}",
+                )
+
+        created = front.get("created_at")
+        updated = front.get("updated_at")
+        if created is not None and updated is not None:
+            try:
+                if created > updated:
+                    self.add("DOCUMENT_TIME_ORDER", relative, "created_at is after updated_at")
+            except TypeError:
+                self.add(
+                    "DOCUMENT_TIME_INVALID",
+                    relative,
+                    "created_at and updated_at are not comparable",
+                )
+
+        if front.get("status") == "historical":
+            if front.get("canonical") is not False:
+                self.add("HISTORICAL_CANONICAL", relative, "historical document must not be canonical")
+            if front.get("canonical_for") is not None:
+                self.add(
+                    "HISTORICAL_CANONICAL_FOR",
+                    relative,
+                    "historical document requires canonical_for: null",
+                )
+            for field in ("historical_at", "historical_reason"):
+                if field not in front:
+                    self.add("HISTORICAL_FIELD_MISSING", relative, field)
+            if "superseded_by" not in front:
+                self.add("HISTORICAL_FIELD_MISSING", relative, "superseded_by")
+
+    def _validate_registry_only_document(self, relative: str) -> None:
+        if not relative.endswith(".md"):
+            self.add(
+                "METADATA_MODE_PATH_MISMATCH",
+                relative,
+                "registry-only mode requires a Markdown path",
+            )
+            return
+        text = self._read_text(relative)
+        if text is not None and FRONT_MATTER_RE.match(text):
+            self.add(
+                "REGISTRY_ONLY_FRONT_MATTER",
+                relative,
+                "registry-only document must begin with its usable content",
+            )
+
+    def _validate_non_markdown_document(self, relative: str) -> None:
+        if relative.endswith(".md"):
+            self.add(
+                "METADATA_MODE_PATH_MISMATCH",
+                relative,
+                "non-markdown mode cannot be used for a Markdown path",
+            )
 
     def _validate_skill_system(self) -> None:
         relative = ".agents/skill-system.toml"

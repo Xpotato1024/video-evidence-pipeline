@@ -1,6 +1,8 @@
 ---
 applyTo: "**/*.md,docs/**/*.yaml"
 ---
-For registered documents, preserve YAML front matter, update `updated_at` for semantic changes, and update
-`docs/registry/documents.yaml` in the same change. Do not duplicate canonical specifications in README or
-agent adapter files. Historical documents are non-authoritative.
+Read `metadata_mode` from `docs/registry/documents.yaml` before editing a registered document.
+Preserve the minimal semantic front matter for `front-matter` documents and do not add generic front
+matter to `registry-only` documents. Git commits and PR reviews are the source of truth for authorship,
+edit time, and review. Keep vendor-required front matter such as `applyTo` in `*.instructions.md`.
+Historical documents are non-authoritative.

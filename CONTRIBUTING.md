@@ -1,22 +1,3 @@
----
-schema_version: "1.0"
-document_id: VEP-CONTRIBUTING
-title: "Contribution guide"
-document_type: governance
-status: active
-canonical: true
-canonical_for: contribution-workflow
-created_at: 2026-08-06T16:28:00+09:00
-updated_at: 2026-08-06T16:28:00+09:00
-authors: ["Xpotato1024", "OpenAI ChatGPT"]
-owners: ["Xpotato1024"]
-reviewers: []
-source_issue: 3
-change_control: pull-request
-supersedes: []
-superseded_by: null
-related_documents: ["VEP-AGENT-POLICY", "VEP-GOV-CHANGE", "VEP-OPS-CI"]
----
 # Contribution guide
 
 ## Workflow
@@ -25,8 +6,9 @@ related_documents: ["VEP-AGENT-POLICY", "VEP-GOV-CHANGE", "VEP-OPS-CI"]
 2. `<actor>/<issue-number>-<scope>`形式のbranchを作成する。
 3. 1 PR 1主要目的でDraft PRを作成する。
 4. canonical文書またはSkillを変更した場合、台帳とevalを同じPRで更新する。
-5. CIと独立確認の結果をPR本文へ記録する。
-6. Ready化・mergeはownerの明示判断後に行う。
+5. 文書台帳の`metadata_mode`に従い、registry-only文書へfront matterを追加しない。
+6. CIと独立確認の結果をPR本文へ記録する。
+7. Ready化・mergeはownerの明示判断後に行う。
 
 ## Local validation
 
