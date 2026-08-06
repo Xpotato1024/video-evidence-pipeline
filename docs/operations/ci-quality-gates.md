@@ -7,7 +7,7 @@ status: active
 canonical: true
 canonical_for: ci-quality-gates
 created_at: 2026-08-06T16:28:00+09:00
-updated_at: 2026-08-06T16:28:00+09:00
+updated_at: 2026-08-06T17:05:00+09:00
 authors: ["Xpotato1024", "OpenAI ChatGPT"]
 owners: ["Xpotato1024"]
 reviewers: []
@@ -19,15 +19,31 @@ related_documents: ["VEP-ARCH-TECH", "VEP-AGENT-GOV", "VEP-CONTRIBUTING", "VEP-S
 ---
 # CI・品質ゲート運用
 
-## 1. Required checks
+## 1. Implemented checks
 
-初回成功後、`main` protectionへ次のcheckを必須登録します。
+GitHub Actionsで次のcheckを実装し、PRと`main`へのpushで実行します。
 
 - `lint`
 - `tests`
 - `repository-validation`
 
-## 2. 検査内容
+全jobは`ubuntu-24.04`、Python 3.12、固定したuv version、commit済み`uv.lock`を使用し、
+`GITHUB_TOKEN`は`contents: read`だけを持ちます。
+
+## 2. Branch enforcement status
+
+上記checkを`main`のrequired status checksへ登録することが目標状態です。しかし、2026-08-06時点で
+個人所有Privateリポジトリのruleset APIは、GitHub ProへのupgradeまたはPublic化が必要として
+拒否されます。Private維持を優先し、現在は次を手動gateとします。
+
+- checkがすべて成功するまでReady化・mergeしない
+- PR本文へ実行結果と未実行項目を記録する
+- ownerの明示判断なしにmergeしない
+
+GitHubプランが要件を満たした時点で、`lint`、`tests`、`repository-validation`をrequired checksへ
+登録し、PR必須、conversation resolution、linear history、force-push／deletion禁止を有効化します。
+
+## 3. 検査内容
 
 `lint`はRuffのlint／format、`tests`はvalidatorのunit/contract test、
 `repository-validation`は実リポジトリ全体の次を検査します。
@@ -42,17 +58,14 @@ related_documents: ["VEP-ARCH-TECH", "VEP-AGENT-GOV", "VEP-CONTRIBUTING", "VEP-S
 - 高確度secret pattern
 - 実メディア、ローカルjob、ユーザー成果物の誤コミット
 
-## 3. 実行環境
+## 4. 実行環境
 
 CIはGitHub-hosted runnerで合成・公開可能なfixtureのみを扱います。Panopto、Box、ブラウザ
 Cookie、OpenAI等のcredentialをActions secretsへ登録しません。
 
-Actionsは完全commit SHAでpinし、Dependabotが更新候補を作成します。`GITHUB_TOKEN`は
-`contents: read`を既定とします。
+ActionsはNode 24対応版を完全commit SHAでpinし、Dependabotが更新候補を作成します。
 
-## 4. Local parity
-
-CIと同じコマンドをローカルで実行します。
+## 5. Local parity
 
 ```bash
 uv sync --locked --all-groups
@@ -62,7 +75,7 @@ uv run pytest -q
 uv run python scripts/validate_repository.py --root .
 ```
 
-## 5. Fail closed
+## 6. Fail closed
 
 台帳競合、Skill契約不整合、secret疑い、禁止artifact、未pin Actionを検出した場合、警告では
 なく失敗とします。例外が必要な場合はvalidatorのallowlistとcanonical文書を同じPRで変更し、
