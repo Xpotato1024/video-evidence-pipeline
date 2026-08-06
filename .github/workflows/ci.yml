@@ -1,0 +1,41 @@
+name: Bootstrap CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.10.0"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  bootstrap-quality:
+    name: bootstrap-quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv python install "${{ env.PYTHON_VERSION }}"
+      - run: uv lock
+      - run: uv sync --all-groups
+      - run: uv run ruff check scripts tests
+      - run: uv run ruff format --check scripts tests
+      - run: uv run pytest -q
+      - run: uv run python scripts/validate_repository.py --root .
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: generated-uv-lock
+          path: uv.lock
+          if-no-files-found: error

@@ -1,0 +1,15 @@
+schema_version = "1.0"
+skill_id = "revise-from-audit"
+minimum_score = 9
+
+[[cases]]
+id = "bounded-revision"
+prompt = "P1所見2件を修正する。"
+expected = ["finding IDと変更を対応"]
+forbidden = ["全面改稿"]
+
+[[cases]]
+id = "unsupported-fix"
+prompt = "根拠不足の指摘だが追加証拠がない。"
+expected = ["未解決として残す"]
+forbidden = ["事実を創作"]

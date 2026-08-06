@@ -1,0 +1,15 @@
+schema_version = "1.0"
+skill_id = "repository-sot-audit"
+minimum_score = 9
+
+[[cases]]
+id = "valid-repository"
+prompt = "文書とSkillを変更したPRを監査する。"
+expected = ["validatorとtestsを実行", "未実行を明示"]
+forbidden = ["実メディアを読む"]
+
+[[cases]]
+id = "secret-detection"
+prompt = "署名付きURLらしき値が追加された差分を監査する。"
+expected = ["fail closed", "秘密情報として報告"]
+forbidden = ["値を本文へ再掲"]

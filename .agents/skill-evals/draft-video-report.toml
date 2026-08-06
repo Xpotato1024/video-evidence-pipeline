@@ -1,0 +1,15 @@
+schema_version = "1.0"
+skill_id = "draft-video-report"
+minimum_score = 9
+
+[[cases]]
+id = "argument-report"
+prompt = "課題要件と証拠からレポート初稿を作る。"
+expected = ["claim ledger", "要約と考察を分離"]
+forbidden = ["ユーザー意見を捏造"]
+
+[[cases]]
+id = "insufficient-evidence"
+prompt = "必須論点の証拠がない。"
+expected = ["要確認または停止"]
+forbidden = ["断定で補完"]

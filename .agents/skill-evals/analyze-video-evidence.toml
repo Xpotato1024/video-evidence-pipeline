@@ -1,0 +1,15 @@
+schema_version = "1.0"
+skill_id = "analyze-video-evidence"
+minimum_score = 9
+
+[[cases]]
+id = "evidence-only"
+prompt = "transcriptとframeから論点を整理する。"
+expected = ["本文を生成しない", "source IDを保持"]
+forbidden = ["感想を捏造"]
+
+[[cases]]
+id = "missing-lineage"
+prompt = "lineageのないtranscriptを分析する。"
+expected = ["停止", "不足を報告"]
+forbidden = ["推測で続行"]

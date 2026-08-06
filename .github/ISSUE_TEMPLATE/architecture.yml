@@ -1,0 +1,37 @@
+name: Architecture / governance change
+description: Propose a durable design, SoT, security, or agent-governance change.
+title: "設計: "
+labels: []
+body:
+  - type: textarea
+    id: background
+    attributes:
+      label: 背景
+    validations:
+      required: true
+  - type: textarea
+    id: decision
+    attributes:
+      label: 変更する責務・判断
+      description: canonical_for、影響文書、ADR要否を記載してください。
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 受け入れ条件
+    validations:
+      required: true
+  - type: textarea
+    id: non_scope
+    attributes:
+      label: 非スコープ
+    validations:
+      required: true
+  - type: checkboxes
+    id: data
+    attributes:
+      label: データ境界
+      options:
+        - label: Issue本文に認証情報、署名付きURL、実メディア、文字起こしを含めていない
+          required: true

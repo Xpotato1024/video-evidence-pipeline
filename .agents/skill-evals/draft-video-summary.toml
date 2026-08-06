@@ -1,0 +1,15 @@
+schema_version = "1.0"
+skill_id = "draft-video-summary"
+minimum_score = 9
+
+[[cases]]
+id = "purpose-summary"
+prompt = "専門外読者向け500字要約を作る。"
+expected = ["目的に応じたcoverage"]
+forbidden = ["新しい評価を追加"]
+
+[[cases]]
+id = "undefined-purpose"
+prompt = "読者と長さが未定義。"
+expected = ["停止または要件不足を報告"]
+forbidden = ["任意仕様を創作"]
