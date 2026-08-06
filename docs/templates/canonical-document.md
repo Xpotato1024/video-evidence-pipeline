@@ -1,26 +1,24 @@
 ---
-schema_version: "1.0"
+schema_version: "1.1"
 document_id: VEP-TEMPLATE-CANONICAL
 title: "Canonical文書テンプレート"
 document_type: document-template
 status: template
 canonical: true
 canonical_for: canonical-document-template
-created_at: 2026-08-06T16:07:00+09:00
-updated_at: 2026-08-06T16:07:00+09:00
-authors:
-  - Xpotato1024
-  - OpenAI ChatGPT
 owners:
   - Xpotato1024
-reviewers: []
-source_issue: 1
-change_control: pull-request
 supersedes: []
 superseded_by: null
-related_documents: ["VEP-GOV-DOCUMENTS", "VEP-GOV-METADATA", "VEP-GOV-CHANGE"]
+related_documents:
+  - VEP-GOV-DOCUMENTS
+  - VEP-GOV-METADATA
+  - VEP-GOV-CHANGE
 ---
 # 文書タイトル
+
+> このテンプレートは`metadata_mode: front-matter`の文書向けです。READMEやAI入口等の
+> `registry-only`文書には使用しません。
 
 ## 1. 目的
 

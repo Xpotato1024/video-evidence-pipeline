@@ -1,22 +1,3 @@
----
-schema_version: "1.0"
-document_id: VEP-SECURITY
-title: "Security policy"
-document_type: security-policy
-status: active
-canonical: true
-canonical_for: repository-security-policy
-created_at: 2026-08-06T16:28:00+09:00
-updated_at: 2026-08-06T16:28:00+09:00
-authors: ["Xpotato1024", "OpenAI ChatGPT"]
-owners: ["Xpotato1024"]
-reviewers: []
-source_issue: 3
-change_control: pull-request
-supersedes: []
-superseded_by: null
-related_documents: ["VEP-ARCH-TRUST", "VEP-AGENT-POLICY", "VEP-OPS-CI"]
----
 # Security policy
 
 ## Report privately
