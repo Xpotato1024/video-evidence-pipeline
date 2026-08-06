@@ -7,207 +7,71 @@ status: draft
 canonical: true
 canonical_for: agent-operating-model
 created_at: 2026-08-06T16:07:00+09:00
-updated_at: 2026-08-06T16:07:00+09:00
-authors:
-  - Xpotato1024
-  - OpenAI ChatGPT
-owners:
-  - Xpotato1024
+updated_at: 2026-08-06T16:28:00+09:00
+authors: ["Xpotato1024", "OpenAI ChatGPT"]
+owners: ["Xpotato1024"]
 reviewers: []
-source_issue: 1
+source_issue: 3
 change_control: pull-request
 supersedes: []
 superseded_by: null
-related_documents: ["VEP-AGENTS", "VEP-ARCH-PIPELINE", "VEP-ARCH-STATE", "VEP-ARCH-ARTIFACTS"]
+related_documents: ["VEP-AGENT-POLICY", "VEP-AGENT-GOV", "VEP-GOV-AI-INSTRUCTIONS", "VEP-ARCH-PIPELINE", "VEP-ARCH-STATE", "VEP-ARCH-ARTIFACTS"]
 ---
 # エージェント運用モデル
 
-## 1. 目的
+## 1. 実行主体
 
-機械的処理、AIによる意味処理、人間判断の責務を明確にし、ハルシネーション、誤読、自己監査の形骸化を抑制します。
+- Deterministic executor: download、hash、FFmpeg、Schema、index、bundle
+- Evidence analyst: transcript／frameからevidenceと曖昧点を構築
+- Deliverable author: requirement map、outline、draft、claim ledger
+- Independent auditor: fresh contextでclaim再抽出、P0／P1／P2
+- Reviser: findingとevidenceに限定した修正
+- Human-review preparer: 再生確認、差分、未確定点、approval target hash
+- Human approver: ユーザー本人。AIへ委譲不可
 
-## 2. 実行主体
+## 2. Instruction topology
 
-### Deterministic executor
+```text
+vendor-neutral SoT
+  .agents/policy.md
+  .agents/governance.md
+  .agents/skill-system.toml
+        ↓
+provider adapters
+  AGENTS.md / CLAUDE.md / GEMINI.md / copilot-instructions.md
+        ↓
+agent execution
+```
 
-- source probe／download
-- hash、ffprobe、FFmpeg
-- subtitle conversion
-- scene/frame extraction
-- Schema validation
-- index
-- length／format check
-- bundle作成
-- approval hash check
+adapterは自動検出の互換層であり、共通規則を弱めません。
 
-同じ入力fingerprintに対して再現可能であることを目標とします。
+## 3. Skills
 
-### Evidence analyst
-
-- transcript修正候補
-- frame observation
-- topic segmentation
-- evidence record
-- ambiguity extraction
-
-レポート本文を生成しません。
-
-### Deliverable author
-
-- assignment requirement map
-- outline
-- draft
-- author claim ledger
-
-証拠不足を自然な文章で補完しません。
-
-### Independent auditor
-
-- fresh contextでdraft claimを再抽出
-- evidenceとの照合
-- requirement compliance
-- P0／P1／P2 findings
-
-本文を修正しません。
-
-### Reviser
-
-- findingsのresolution
-- evidenceに基づく修正
-- revised claim ledger
-- resolution ledger
-
-監査所見にない全面改稿を既定動作にしません。
-
-### Human-review preparer
-
-- 再生確認が必要なtimestamp
-- low-confidence claim
-- user opinion未確定箇所
-- 変更差分
-- approval checklist
-
-### Human approver
-
-ユーザー本人です。AIへ委譲できません。
-
-## 3. Skill boundary
-
-予定Skill:
-
-- `analyze-video-evidence`
-- `draft-video-report`
-- `draft-video-summary`
-- `independent-content-audit`
-- `revise-from-audit`
-- `prepare-human-review`
-
-Skillは指示と参照資料を提供しますが、media processingやSchema validationの決定論的ロジックを重複実装しません。
+active Skillは`repository-sot-audit`のみです。動画処理・evidence・authoring・audit関連Skillは、
+必要Schemaと実装が存在しないためdraft／instruction-onlyです。実装Issueで契約を満たした後に
+個別evalを通してactiveへ昇格します。
 
 ## 4. Authoring contract
 
-入力:
-
-- validated assignment requirements
-- validated evidence bundle
-- user notes
-- output constraints
-
-出力:
-
-- `draft.md`
-- `claims.jsonl`
-- `requirement-map.json`
-- `authoring-manifest.json`
-
-禁止:
-
-- evidence bundle外のvideo fact
-- user opinionの捏造
-- source timestampの創作
-- unresolved ambiguityの無印断定
-- external source禁止時の外部情報追加
+入力はvalidated requirements、validated evidence、user notes、output constraintsです。出力は
+`draft.md`、`claims.jsonl`、`requirement-map.json`、manifestです。evidence外のvideo fact、
+user opinion捏造、timestamp創作を禁止します。
 
 ## 5. Audit contract
 
-入力:
+fixed audit bundleとtarget draftをfresh contextへ渡し、author prompt historyやprivate reasoningを
+渡しません。auditorは本文から主張を再抽出し、author claim ledgerは最後に補助比較します。
 
-- assignment
-- source／media manifest
-- transcript／frame evidence
-- target draft
-- audit Schema
+- P0: 虚偽、逆内容、設問不成立、出典偽装、重大要件欠落
+- P1: 重要根拠不足、過剰推論、誤読、timestamp不一致、形式違反
+- P2: 表現、冗長性、軽微な構成・明確性
 
-author prompt history、private reasoning、revision intentionは渡しません。
+## 6. Revision and escalation
 
-出力:
+自動revisionは既定2回までです。P0／P1が残る、証拠不足、独立性不足、user opinion未確定の
+場合はBLOCKEDとして人間へ戻します。
 
-- `audit-claims.jsonl`
-- `findings.json`
-- `audit-report.md`
-- `audit-manifest.json`
+## 7. Auditability
 
-severity:
-
-- `P0`: 虚偽、逆内容、設問不成立、出典偽装、重大要件欠落
-- `P1`: 重要根拠不足、過剰推論、誤読、timestamp不一致、形式違反
-- `P2`: 表現、冗長性、軽微な構成・明確性
-
-## 6. Independence
-
-最低条件:
-
-- 新しい会話／agent execution
-- audit bundle固定
-- authorのchain of thoughtを不使用
-- author claim ledgerを補助扱い
-- source evidenceへ直接アクセス
-- audit結果を構造化
-
-同じmodelを使うこと自体は禁止しませんが、独立性が弱くなる可能性をmanifestに記録します。将来はmodel diversityをoptionとして評価します。
-
-## 7. Revision loop
-
-```text
-draft v1
-  → audit
-  → P0/P1あり
-  → revision v2
-  → fresh audit
-  → P0/P1あり
-  → revision v3
-  → fresh audit
-  → still P0/P1
-  → BLOCKED / human escalation
-```
-
-既定の自動revision上限は2回です。
-
-## 8. Human review package
-
-最低限:
-
-- draft
-- previous draftとの差分
-- audit summary
-- unresolved P2
-- timestamp付き確認対象
-- user opinion箇所
-- requirement map
-- approval対象SHA-256
-
-## 9. 監査可能性
-
-各AI実行は次を記録します。
-
-- role
-- Skill ID/version
-- model/provider
-- execution context ID
-- input bundle hash
-- output hash
-- started/finished time
-- external API permission
-- warnings
-
-private reasoningの保存を要件にしません。再現・監査に必要なのは入力、明示指示、構造化出力、版本です。
+各AI実行はrole、Skill ID/version、provider/model、context ID、input/output hash、日時、
+external API permission、warningsを記録します。private reasoningの保存は要件にしません。

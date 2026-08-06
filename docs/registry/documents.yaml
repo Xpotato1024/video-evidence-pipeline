@@ -6,13 +6,13 @@ registry:
   canonical: true
   canonical_for: document-registry
   created_at: 2026-08-06T16:07:00+09:00
-  updated_at: 2026-08-06T16:07:00+09:00
+  updated_at: 2026-08-06T17:05:00+09:00
   authors:
   - Xpotato1024
   - OpenAI ChatGPT
   owners:
   - Xpotato1024
-  source_issue: 1
+  source_issue: 3
   change_control: pull-request
 rules:
   unique_document_id: true
@@ -36,8 +36,56 @@ documents:
   canonical_for: adr-template
   owners:
   - Xpotato1024
+- document_id: VEP-ADAPTER-CLAUDE
+  path: CLAUDE.md
+  document_type: agent-adapter
+  status: active
+  canonical: true
+  canonical_for: claude-code-entrypoint
+  owners:
+  - Xpotato1024
+- document_id: VEP-ADAPTER-COPILOT
+  path: .github/copilot-instructions.md
+  document_type: agent-adapter
+  status: active
+  canonical: true
+  canonical_for: github-copilot-entrypoint
+  owners:
+  - Xpotato1024
+- document_id: VEP-ADAPTER-GEMINI
+  path: GEMINI.md
+  document_type: agent-adapter
+  status: active
+  canonical: true
+  canonical_for: gemini-cli-entrypoint
+  owners:
+  - Xpotato1024
 - document_id: VEP-AGENTS
   path: AGENTS.md
+  document_type: agent-adapter
+  status: active
+  canonical: true
+  canonical_for: agents-md-entrypoint
+  owners:
+  - Xpotato1024
+- document_id: VEP-AGENT-GOV
+  path: .agents/governance.md
+  document_type: governance
+  status: active
+  canonical: true
+  canonical_for: agent-skill-governance
+  owners:
+  - Xpotato1024
+- document_id: VEP-AGENT-INDEX
+  path: .agents/README.md
+  document_type: agent-index
+  status: active
+  canonical: true
+  canonical_for: agent-system-index
+  owners:
+  - Xpotato1024
+- document_id: VEP-AGENT-POLICY
+  path: .agents/policy.md
   document_type: agent-policy
   status: active
   canonical: true
@@ -100,6 +148,14 @@ documents:
   canonical_for: trust-boundaries
   owners:
   - Xpotato1024
+- document_id: VEP-CONTRIBUTING
+  path: CONTRIBUTING.md
+  document_type: governance
+  status: active
+  canonical: true
+  canonical_for: contribution-workflow
+  owners:
+  - Xpotato1024
 - document_id: VEP-DOC-REGISTRY
   path: docs/registry/documents.yaml
   document_type: document-registry
@@ -114,6 +170,14 @@ documents:
   status: active
   canonical: true
   canonical_for: documentation-index
+  owners:
+  - Xpotato1024
+- document_id: VEP-GOV-AI-INSTRUCTIONS
+  path: docs/governance/ai-instruction-governance.md
+  document_type: governance
+  status: active
+  canonical: true
+  canonical_for: ai-instruction-governance
   owners:
   - Xpotato1024
 - document_id: VEP-GOV-CHANGE
@@ -148,12 +212,28 @@ documents:
   canonical_for: historical-document-index
   owners:
   - Xpotato1024
+- document_id: VEP-OPS-CI
+  path: docs/operations/ci-quality-gates.md
+  document_type: operations
+  status: active
+  canonical: true
+  canonical_for: ci-quality-gates
+  owners:
+  - Xpotato1024
 - document_id: VEP-README
   path: README.md
   document_type: repository-overview
   status: draft
   canonical: true
   canonical_for: repository-overview
+  owners:
+  - Xpotato1024
+- document_id: VEP-SECURITY
+  path: SECURITY.md
+  document_type: security-policy
+  status: active
+  canonical: true
+  canonical_for: repository-security-policy
   owners:
   - Xpotato1024
 - document_id: VEP-TEMPLATE-CANONICAL

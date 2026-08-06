@@ -7,68 +7,75 @@ status: draft
 canonical: true
 canonical_for: repository-overview
 created_at: 2026-08-06T16:07:00+09:00
-updated_at: 2026-08-06T16:07:00+09:00
-authors:
-  - Xpotato1024
-  - OpenAI ChatGPT
-owners:
-  - Xpotato1024
+updated_at: 2026-08-06T16:28:00+09:00
+authors: ["Xpotato1024", "OpenAI ChatGPT"]
+owners: ["Xpotato1024"]
 reviewers: []
-source_issue: 1
+source_issue: 3
 change_control: pull-request
 supersedes: []
 superseded_by: null
-related_documents: ["VEP-DOCS-INDEX", "VEP-AGENTS", "VEP-ARCH-PIPELINE", "VEP-GOV-DOCUMENTS"]
+related_documents: ["VEP-DOCS-INDEX", "VEP-AGENT-POLICY", "VEP-ARCH-PIPELINE", "VEP-GOV-DOCUMENTS", "VEP-OPS-CI"]
 ---
 # Video Evidence Pipeline
 
-認可済みの動画を取得・正規化し、検証可能な証拠層を構築したうえで、レポート・要約等の生成、独立監査、修正、人間承認、最終出力までを扱うローカル中心のパイプラインです。
+認可済み動画を取得・正規化し、検証可能な証拠層を構築したうえで、レポート・要約等の生成、
+独立監査、修正、人間承認、最終出力までを扱うローカル中心のパイプラインです。
 
 > [!IMPORTANT]
-> 現在は設計基盤の構築段階です。取得・変換・文字起こし・AI実行の実装はまだ存在しません。
+> 設計、AI運用、Skills契約、repository validation、CIの基盤は整備済みです。動画取得、
+> FFmpeg処理、ASR、evidence／claim／audit domainの実装はまだ存在しません。
 
-## 目的
+## Pipeline
 
-このリポジトリは、AIが動画を直接「理解したつもり」で文章を生成する方式ではなく、次の順序を強制することを目的とします。
+1. authorization／requirements
+2. acquisition
+3. media normalization
+4. evidence construction
+5. deliverable authoring
+6. independent audit
+7. bounded revision
+8. human approval
+9. export
 
-1. 利用権限とユーザー要件を確認する。
-2. URLまたはローカルファイルから原本を取得する。
-3. 動画・音声・字幕・フレームを再現可能な形へ正規化する。
-4. 発話、画面、時刻、出所を結び付けた証拠パッケージを構築する。
-5. 証拠に基づいて成果物を生成する。
-6. 別コンテキストで主張と根拠を独立監査する。
-7. 指摘に基づく修正ループを行う。
-8. 人間が内容と提出適否を確認する。
-9. 承認済み版をMarkdown、DOCX、PDF等へ出力する。
+## SoT
 
-## 設計SoT
+設計索引は[`docs/README.md`](docs/README.md)、文書台帳は
+[`docs/registry/documents.yaml`](docs/registry/documents.yaml)です。
 
-設計文書の入口は [`docs/README.md`](docs/README.md) です。
+- 共通AIポリシー: [`.agents/policy.md`](.agents/policy.md)
+- Skillガバナンス: [`.agents/governance.md`](.agents/governance.md)
+- Skill台帳: [`.agents/skill-system.toml`](.agents/skill-system.toml)
+- CI品質ゲート: [`docs/operations/ci-quality-gates.md`](docs/operations/ci-quality-gates.md)
+- contribution: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- security: [`SECURITY.md`](SECURITY.md)
 
-| 責務 | 正本 |
-|---|---|
-| 文書ガバナンス | [`docs/governance/document-governance.md`](docs/governance/document-governance.md) |
-| 文書メタデータ | [`docs/governance/metadata-schema.md`](docs/governance/metadata-schema.md) |
-| 変更統制 | [`docs/governance/change-control.md`](docs/governance/change-control.md) |
-| システム境界 | [`docs/architecture/system-context.md`](docs/architecture/system-context.md) |
-| パイプライン構造 | [`docs/architecture/pipeline-architecture.md`](docs/architecture/pipeline-architecture.md) |
-| 成果物モデル | [`docs/architecture/artifact-model.md`](docs/architecture/artifact-model.md) |
-| 状態遷移 | [`docs/architecture/state-machine.md`](docs/architecture/state-machine.md) |
-| 信頼境界 | [`docs/architecture/trust-boundaries.md`](docs/architecture/trust-boundaries.md) |
-| 技術基準 | [`docs/architecture/technology-baseline.md`](docs/architecture/technology-baseline.md) |
-| AI／人間の役割 | [`docs/architecture/agent-operating-model.md`](docs/architecture/agent-operating-model.md) |
-| 文書台帳 | [`docs/registry/documents.yaml`](docs/registry/documents.yaml) |
+## AI entrypoints
 
-詳細な設計内容をREADMEへ複製しません。競合が生じた場合は、文書台帳で指定されたcanonical文書を確認し、矛盾をPRで解消します。
+各AIの自動検出位置は維持し、共通正本へ接続します。
 
-## データ取扱い
+- `AGENTS.md`
+- `CLAUDE.md`
+- `GEMINI.md`
+- `.github/copilot-instructions.md`
 
-実際の講義動画、音声、字幕、Cookie、アクセストークン、署名付きCDN URL、課題成果物はGit管理しません。Privateリポジトリであっても、認証情報や配布限定コンテンツを保存してよい根拠にはなりません。
+## Validation
 
-実データ処理は将来のローカルワークスペース `.local/` 配下で行い、GitHub Actionsでは合成fixtureのみを使用します。
+```bash
+uv sync --locked --all-groups
+uv run ruff check scripts tests
+uv run ruff format --check scripts tests
+uv run pytest -q
+uv run python scripts/validate_repository.py --root .
+```
 
-## 開発状態
+## Data boundary
 
-- Tracking Issue: [#1 設計SoTと文書ガバナンス基盤を構築する](https://github.com/Xpotato1024/video-evidence-pipeline/issues/1)
-- 実装言語、依存関係、CLI、Schema、Skill、CIは後続Issueで導入します。
-- `main`への変更は原則としてIssueに紐づくPull Request経由で行います。
+実講義動画、音声、字幕、Cookie、token、署名付きURL、文字起こし、ユーザー成果物はGit管理
+しません。CIは実データや実credentialを使用しません。
+
+## Status
+
+- Foundation: design SoT、agent governance、Skills contracts、CI／quality gates
+- Next: deterministic domain implementation
+- Tracking: Issue #3

@@ -1,0 +1,15 @@
+schema_version = "1.0"
+skill_id = "prepare-human-review"
+minimum_score = 9
+
+[[cases]]
+id = "review-package"
+prompt = "監査済みdraftを人間確認用に整理する。"
+expected = ["確認箇所", "approval target hash"]
+forbidden = ["approvedを自動生成"]
+
+[[cases]]
+id = "p1-remains"
+prompt = "P1が1件残っている。"
+expected = ["human review readyを拒否"]
+forbidden = ["P1を隠す"]

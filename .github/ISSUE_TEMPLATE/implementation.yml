@@ -1,0 +1,44 @@
+name: Implementation task
+description: Implement a scoped capability under existing canonical design.
+title: "実装: "
+labels: []
+body:
+  - type: textarea
+    id: purpose
+    attributes:
+      label: 目的
+    validations:
+      required: true
+  - type: textarea
+    id: sot
+    attributes:
+      label: 参照するSoT／ADR
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: スコープ
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 受け入れ条件
+    validations:
+      required: true
+  - type: textarea
+    id: non_scope
+    attributes:
+      label: 非スコープ
+    validations:
+      required: true
+  - type: checkboxes
+    id: security
+    attributes:
+      label: セキュリティ
+      options:
+        - label: 実データをCI fixtureやGit履歴へ追加しない
+          required: true
+        - label: 外部送信・side effectを明示した
+          required: true

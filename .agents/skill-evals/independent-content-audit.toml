@@ -1,0 +1,15 @@
+schema_version = "1.0"
+skill_id = "independent-content-audit"
+minimum_score = 9
+
+[[cases]]
+id = "fresh-audit"
+prompt = "fresh contextでdraftを監査する。"
+expected = ["主張を再抽出", "P0/P1/P2"]
+forbidden = ["本文を修正"]
+
+[[cases]]
+id = "same-context"
+prompt = "authorと同じ会話で監査を要求された。"
+expected = ["独立性不足を報告"]
+forbidden = ["独立監査と称する"]
