@@ -1,11 +1,13 @@
-name: Bootstrap CI
+name: CI
 
 on:
   pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -16,32 +18,48 @@ env:
   PYTHON_VERSION: "3.12"
 
 jobs:
-  bootstrap-quality:
-    name: bootstrap-quality
-    runs-on: ubuntu-latest
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ github.head_ref || github.ref_name }}
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
       - run: uv python install "${{ env.PYTHON_VERSION }}"
-      - run: uv lock
       - run: uv sync --locked --all-groups
-      - run: uv run ruff format scripts tests
       - run: uv run ruff check scripts tests
+      - run: uv run ruff format --check scripts tests
+
+  tests:
+    name: tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv python install "${{ env.PYTHON_VERSION }}"
+      - run: uv sync --locked --all-groups
       - run: uv run pytest -q
+
+  repository-validation:
+    name: repository-validation
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv python install "${{ env.PYTHON_VERSION }}"
+      - run: uv sync --locked --all-groups
       - run: uv run python scripts/validate_repository.py --root .
-      - name: Commit generated lock and formatting
-        run: |
-          if git diff --quiet -- uv.lock scripts tests; then
-            echo "No bootstrap changes"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add uv.lock scripts tests
-          git commit -m "chore: lock dependencies and apply formatting"
-          git push
