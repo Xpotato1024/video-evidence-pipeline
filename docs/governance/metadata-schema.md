@@ -7,7 +7,7 @@ status: active
 canonical: true
 canonical_for: document-metadata-schema
 created_at: 2026-08-06T16:07:00+09:00
-updated_at: 2026-08-06T16:07:00+09:00
+updated_at: 2026-08-06T16:20:44+09:00
 authors:
   - Xpotato1024
   - OpenAI ChatGPT
@@ -132,7 +132,8 @@ review_interval_days: 180
 
 - `canonical: true` なら `canonical_for` は非null
 - `canonical: false` かつ `status: historical` なら `canonical_for` はnull
-- `status: historical` なら `superseded_by` と`historical_reason`が必要
+- `status: historical` なら `historical_at` と`historical_reason`が必要
+- historical文書の`superseded_by` fieldは必須とし、置換先がある場合は台帳上の文書ID、責務廃止の場合はnullとする
 - `created_at <= updated_at`
 - `document_id`、`supersedes`、`superseded_by`、`related_documents` は台帳上のIDを参照する
 - 同一`canonical_for`に複数のcanonical文書を認めない

@@ -7,7 +7,7 @@ status: active
 canonical: true
 canonical_for: document-governance
 created_at: 2026-08-06T16:07:00+09:00
-updated_at: 2026-08-06T16:07:00+09:00
+updated_at: 2026-08-06T16:20:44+09:00
 authors:
   - Xpotato1024
   - OpenAI ChatGPT
@@ -52,7 +52,8 @@ related_documents: ["VEP-GOV-METADATA", "VEP-GOV-CHANGE", "VEP-DOC-REGISTRY", "V
 - `canonical: false`
 - `status: historical`
 - `canonical_for: null`
-- `historical_reason` と `superseded_by` を持つ
+- `historical_at` と `historical_reason` を持つ
+- `superseded_by` fieldを明示し、置換先がある場合は文書ID、責務廃止の場合はnullとする
 - ファイル先頭にhistorical警告を表示する
 - 現在の設計判断へ直接使用しない
 

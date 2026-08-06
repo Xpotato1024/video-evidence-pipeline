@@ -7,7 +7,7 @@ status: active
 canonical: true
 canonical_for: historical-document-index
 created_at: 2026-08-06T16:07:00+09:00
-updated_at: 2026-08-06T16:07:00+09:00
+updated_at: 2026-08-06T16:20:44+09:00
 authors:
   - Xpotato1024
   - OpenAI ChatGPT
@@ -56,7 +56,7 @@ docs/historical/2026-10-01/architecture/pipeline-architecture.md
 - `status: historical`
 - `historical_at`
 - `historical_reason`
-- `superseded_by`
+- `superseded_by`（置換先がある場合は文書ID、責務廃止の場合はnull）
 
 ## 一覧
 
