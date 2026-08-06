@@ -357,7 +357,11 @@ class RepositoryValidator:
 
         if front.get("status") == "historical":
             if front.get("canonical") is not False:
-                self.add("HISTORICAL_CANONICAL", relative, "historical document must not be canonical")
+                self.add(
+                    "HISTORICAL_CANONICAL",
+                    relative,
+                    "historical document must not be canonical",
+                )
             if front.get("canonical_for") is not None:
                 self.add(
                     "HISTORICAL_CANONICAL_FOR",
