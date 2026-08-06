@@ -27,6 +27,7 @@ extend-exclude = [".local", "docs/historical"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501"]
 
 [tool.ruff.format]
 quote-style = "double"
