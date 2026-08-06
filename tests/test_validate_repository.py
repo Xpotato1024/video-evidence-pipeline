@@ -22,7 +22,7 @@ def write(root: Path, relative: str, text: str) -> None:
 
 
 def document(doc_id: str, canonical_for: str) -> str:
-    return f'''---
+    return f"""---
 schema_version: "1.0"
 document_id: {doc_id}
 title: Test
@@ -42,7 +42,7 @@ superseded_by: null
 related_documents: []
 ---
 # Test
-'''
+"""
 
 
 def make_valid_repo(root: Path) -> set[str]:
@@ -80,11 +80,15 @@ def make_valid_repo(root: Path) -> set[str]:
             "owners": ["Test"],
         }
     )
-    write(root, "docs/registry/documents.yaml", yaml.safe_dump({"documents": entries}, sort_keys=False))
+    write(
+        root,
+        "docs/registry/documents.yaml",
+        yaml.safe_dump({"documents": entries}, sort_keys=False),
+    )
     write(
         root,
         ".agents/skill-system.toml",
-        '''schema_version = "1.0"
+        """schema_version = "1.0"
 [policy]
 required_eval_cases = 2
 [[skills]]
@@ -95,13 +99,15 @@ automatic_trigger = false
 side_effect_policy = "read-only"
 eval_path = ".agents/skill-evals/audit.toml"
 owner = "Test"
-''',
+""",
     )
-    write(root, ".agents/skills/audit/SKILL.md", "---\nname: audit\ndescription: test\n---\n# audit\n")
+    write(
+        root, ".agents/skills/audit/SKILL.md", "---\nname: audit\ndescription: test\n---\n# audit\n"
+    )
     write(
         root,
         ".agents/skill-evals/audit.toml",
-        '''schema_version = "1.0"
+        """schema_version = "1.0"
 skill_id = "audit"
 minimum_score = 9
 [[cases]]
@@ -114,7 +120,7 @@ id = "b"
 prompt = "b"
 expected = ["b"]
 forbidden = []
-''',
+""",
     )
     return {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()}
 
@@ -157,7 +163,11 @@ def test_draft_skill_side_effect_fails(tmp_path: Path) -> None:
 
 def test_unpinned_action_fails(tmp_path: Path) -> None:
     tracked = make_valid_repo(tmp_path)
-    write(tmp_path, ".github/workflows/ci.yml", "jobs:\n  x:\n    steps:\n      - uses: actions/checkout@v4\n")
+    write(
+        tmp_path,
+        ".github/workflows/ci.yml",
+        "jobs:\n  x:\n    steps:\n      - uses: actions/checkout@v4\n",
+    )
     tracked.add(".github/workflows/ci.yml")
     codes = {finding.code for finding in RepositoryValidator(tmp_path, tracked).validate()}
     assert "ACTION_UNPINNED" in codes

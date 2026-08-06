@@ -63,12 +63,38 @@ ADAPTER_MARKERS = (
     "SKILL_REGISTRY:",
 )
 FORBIDDEN_SUFFIXES = {
-    ".mp4", ".m4v", ".mkv", ".mov", ".avi", ".webm", ".ts", ".m3u8",
-    ".mp3", ".m4a", ".aac", ".wav", ".flac", ".ogg", ".opus",
-    ".srt", ".vtt", ".ttml", ".ass", ".ssa", ".pdf", ".docx", ".pptx",
+    ".mp4",
+    ".m4v",
+    ".mkv",
+    ".mov",
+    ".avi",
+    ".webm",
+    ".ts",
+    ".m3u8",
+    ".mp3",
+    ".m4a",
+    ".aac",
+    ".wav",
+    ".flac",
+    ".ogg",
+    ".opus",
+    ".srt",
+    ".vtt",
+    ".ttml",
+    ".ass",
+    ".ssa",
+    ".pdf",
+    ".docx",
+    ".pptx",
 }
 FORBIDDEN_PREFIXES = (
-    ".local/", "jobs/", "work/", "artifacts/", "data/raw/", "data/derived/", "output/",
+    ".local/",
+    "jobs/",
+    "work/",
+    "artifacts/",
+    "data/raw/",
+    "data/derived/",
+    "output/",
 )
 SECRET_PATTERNS = {
     "github-token": re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b"),
@@ -145,7 +171,11 @@ class RepositoryValidator:
             return None
         match = FRONT_MATTER_RE.match(text)
         if not match:
-            self.add("FRONT_MATTER_MISSING", relative, "registered Markdown document lacks YAML front matter")
+            self.add(
+                "FRONT_MATTER_MISSING",
+                relative,
+                "registered Markdown document lacks YAML front matter",
+            )
             return None
         try:
             data = yaml.safe_load(match.group(1))
@@ -188,23 +218,37 @@ class RepositoryValidator:
         entries: dict[str, dict[str, Any]] = {}
         for index, entry in enumerate(docs):
             if not isinstance(entry, dict):
-                self.add("REGISTRY_ENTRY_INVALID", registry_path, f"entry {index} must be a mapping")
+                self.add(
+                    "REGISTRY_ENTRY_INVALID", registry_path, f"entry {index} must be a mapping"
+                )
                 continue
             doc_id = entry.get("document_id")
             relative = entry.get("path")
             if not isinstance(doc_id, str) or not isinstance(relative, str):
-                self.add("REGISTRY_ENTRY_INVALID", registry_path, f"entry {index} lacks document_id/path")
+                self.add(
+                    "REGISTRY_ENTRY_INVALID", registry_path, f"entry {index} lacks document_id/path"
+                )
                 continue
             if doc_id in ids:
-                self.add("DOCUMENT_ID_DUPLICATE", registry_path, f"{doc_id}: {ids[doc_id]} and {relative}")
+                self.add(
+                    "DOCUMENT_ID_DUPLICATE",
+                    registry_path,
+                    f"{doc_id}: {ids[doc_id]} and {relative}",
+                )
             ids[doc_id] = relative
             entries[doc_id] = entry
             cfor = entry.get("canonical_for")
             if entry.get("canonical") is True:
                 if not isinstance(cfor, str) or not cfor:
-                    self.add("CANONICAL_FOR_MISSING", relative, "canonical document requires canonical_for")
+                    self.add(
+                        "CANONICAL_FOR_MISSING",
+                        relative,
+                        "canonical document requires canonical_for",
+                    )
                 elif cfor in canonical_for:
-                    self.add("CANONICAL_FOR_DUPLICATE", relative, f"{cfor}: also {canonical_for[cfor]}")
+                    self.add(
+                        "CANONICAL_FOR_DUPLICATE", relative, f"{cfor}: also {canonical_for[cfor]}"
+                    )
                 else:
                     canonical_for[cfor] = relative
             if relative not in self.tracked_files or not (self.root / relative).is_file():
@@ -273,7 +317,9 @@ class RepositoryValidator:
             lifecycle = entry.get("lifecycle")
             side_effect = entry.get("side_effect_policy")
             eval_path = entry.get("eval_path")
-            if not all(isinstance(x, str) for x in (sid, skill_path, lifecycle, side_effect, eval_path)):
+            if not all(
+                isinstance(x, str) for x in (sid, skill_path, lifecycle, side_effect, eval_path)
+            ):
                 self.add("SKILL_ENTRY_INVALID", relative, f"invalid required fields: {entry!r}")
                 continue
             if sid in ids:
@@ -290,7 +336,11 @@ class RepositoryValidator:
                 if entry.get("automatic_trigger") is not False:
                     self.add("DRAFT_SKILL_TRIGGER", skill_path, "draft Skill must not auto-trigger")
                 if side_effect != "instruction-only":
-                    self.add("DRAFT_SKILL_SIDE_EFFECT", skill_path, "draft Skill must be instruction-only")
+                    self.add(
+                        "DRAFT_SKILL_SIDE_EFFECT",
+                        skill_path,
+                        "draft Skill must be instruction-only",
+                    )
             if skill_path not in self.tracked_files or not (self.root / skill_path).is_file():
                 self.add("SKILL_PATH_MISSING", skill_path, sid)
                 continue
@@ -321,7 +371,11 @@ class RepositoryValidator:
         except yaml.YAMLError as exc:
             self.add("SKILL_FRONT_MATTER_INVALID", relative, str(exc))
             return None
-        if not isinstance(data, dict) or not isinstance(data.get("name"), str) or not isinstance(data.get("description"), str):
+        if (
+            not isinstance(data, dict)
+            or not isinstance(data.get("name"), str)
+            or not isinstance(data.get("description"), str)
+        ):
             self.add("SKILL_FRONT_MATTER_INVALID", relative, "name and description are required")
             return None
         return data
@@ -363,7 +417,9 @@ class RepositoryValidator:
 
     def _validate_workflows(self) -> None:
         for relative in sorted(self.tracked_files):
-            if not relative.startswith(".github/workflows/") or not relative.endswith((".yml", ".yaml")):
+            if not relative.startswith(".github/workflows/") or not relative.endswith(
+                (".yml", ".yaml")
+            ):
                 continue
             text = (self.root / relative).read_text(encoding="utf-8")
             for use in ACTION_RE.findall(text):
@@ -400,7 +456,9 @@ class RepositoryValidator:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate repository governance and safety contracts")
+    parser = argparse.ArgumentParser(
+        description="Validate repository governance and safety contracts"
+    )
     parser.add_argument("--root", type=Path, default=Path.cwd())
     args = parser.parse_args()
 
