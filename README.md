@@ -19,6 +19,8 @@ uv run vep job init demo-report \
   --source /path/to/authorized-source.mp4 \
   --task-type report \
   --language ja \
+  --requirement "cite two concrete observations" \
+  --requirement "separate facts from inference" \
   --output-format markdown
 uv run vep job validate .local/jobs/demo-report
 uv run vep job authorize .local/jobs/demo-report \
@@ -31,6 +33,7 @@ uv run vep job status .local/jobs/demo-report
 ```
 
 `job init`だけでは未認可です。`job authorize --confirm`が成功するまでsourceを取得しません。
+`--requirement`は順序を保持するrepeatable optionで、指定順を含めてjob fingerprintへ拘束されます。
 raw sourceは`.local/`配下へcontent-addressedに保存され、上書きされません。
 
 ## Pipeline

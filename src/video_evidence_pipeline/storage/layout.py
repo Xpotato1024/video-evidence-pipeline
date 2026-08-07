@@ -8,6 +8,7 @@ from pathlib import Path, PurePosixPath
 
 from video_evidence_pipeline.domain.identifiers import JobId, validate_relative_storage_path
 from video_evidence_pipeline.errors import configuration_error, integrity_error, io_error
+from video_evidence_pipeline.storage.permissions import ensure_private_directory
 
 
 def _is_link_or_junction(path: Path) -> bool:
@@ -60,9 +61,21 @@ class JobWorkspace:
         _assert_resolved_within(root, jobs_root)
         if root.exists():
             raise configuration_error("JOB_EXISTS", "job workspace already exists")
-        (root / "authorization").mkdir(parents=True, exist_ok=False)
-        for relative in ("source/raw", "manifests/stages", "logs"):
-            (root / relative).mkdir(parents=True, exist_ok=True)
+        local_root = repository_root / ".local"
+        directories = (
+            local_root,
+            jobs_root,
+            root,
+            root / "authorization",
+            root / "source",
+            root / "source/raw",
+            root / "manifests",
+            root / "manifests/stages",
+            root / "logs",
+        )
+        for directory in directories:
+            ensure_private_directory(directory)
+            _assert_no_links(repository_root, directory)
         return cls(root=root, jobs_root=jobs_root)
 
     @classmethod

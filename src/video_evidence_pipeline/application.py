@@ -59,6 +59,7 @@ def initialize_job(
     task_type: str,
     language: str,
     output_format: str,
+    requirements: list[str] | None = None,
 ) -> tuple[JobWorkspace, JobSpec]:
     locator = (
         str(Path(source).expanduser().absolute())
@@ -69,11 +70,19 @@ def initialize_job(
         job_id=job_id,
         created_at=datetime.now(UTC),
         source=SourceSpec(kind=source_kind, locator=locator),
-        assignment=AssignmentSpec(task_type=task_type, language=language),
+        assignment=AssignmentSpec(
+            task_type=task_type,
+            language=language,
+            requirements=list(requirements or []),
+        ),
         output=OutputSpec(format=output_format),
     )
     workspace = JobWorkspace.create(repository_root, job.job_id)
-    atomic_write_new_bytes(workspace.job_yaml, job_to_yaml(job).encode("utf-8"))
+    atomic_write_new_bytes(
+        workspace.job_yaml,
+        job_to_yaml(job).encode("utf-8"),
+        private=True,
+    )
     created = TransitionRecord(
         sequence=1,
         job_id=job.job_id,
@@ -90,7 +99,9 @@ def initialize_job(
 def validate_job(path: Path) -> dict[str, Any]:
     workspace, job, transitions, state = _load_context(path)
     if state is not JobState.CREATED:
-        _validate_authorization_binding(job, transitions, _authorization(workspace))
+        authorization = _authorization(workspace)
+        _validate_authorization_binding(job, transitions, authorization)
+        _require_current_authorization_fingerprint(job, authorization)
     if state is JobState.ACQUIRED:
         verify_acquired_bundle(workspace, job)
     return {
@@ -129,7 +140,7 @@ def authorize_job(
         confirmed_at=datetime.now(UTC),
         confirmer_identity=confirmer_identity or getpass.getuser() or "local-user",
     )
-    atomic_write_json(workspace.authorization_json, record)
+    atomic_write_json(workspace.authorization_json, record, private=True)
     if state is JobState.CREATED:
         _append_transition(
             workspace,
@@ -168,11 +179,22 @@ def _require_current_authorization(
     authorization: AuthorizationRecord,
 ) -> None:
     _validate_authorization_binding(job, transitions, authorization)
+    _require_current_authorization_fingerprint(job, authorization)
+    _require_local_processing(authorization)
+
+
+def _require_current_authorization_fingerprint(
+    job: JobSpec,
+    authorization: AuthorizationRecord,
+) -> None:
     if authorization.job_fingerprint != job_fingerprint(job):
         raise state_error(
             "AUTHORIZATION_STALE",
             "authorization no longer matches the normalized job specification",
         )
+
+
+def _require_local_processing(authorization: AuthorizationRecord) -> None:
     if not authorization.allow_local_processing:
         raise state_error(
             "LOCAL_PROCESSING_NOT_AUTHORIZED",
@@ -252,6 +274,7 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
                 }
             )
             if authorization_status["stale"]:
+                authorization_status["error_code"] = "AUTHORIZATION_STALE"
                 exit_code = 3
         except VepError as exc:
             authorization_status.update({"valid": False, "error_code": exc.code})

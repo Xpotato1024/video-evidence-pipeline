@@ -42,6 +42,21 @@ vep schema check
 `validate`、`status`、`acquire`は`--json`で機械可読出力を返します。通常の契約違反はstableな
 error codeとsafe messageを返し、Python stack traceを表示しません。
 
+`job init`ではassignment requirementをrepeatableな`--requirement`で指定します。未指定時は空配列で、
+指定順は意味を持ち、normalized job fingerprintへそのまま含まれます。空白だけの値と512文字を超える
+値は拒否します。
+
+```bash
+vep job init demo-report \
+  --source-kind local_file \
+  --source /path/to/authorized-source.mp4 \
+  --task-type report \
+  --language ja \
+  --requirement "cite two concrete observations" \
+  --requirement "separate facts from inference" \
+  --output-format markdown
+```
+
 ## Authorization flow
 
 `job init`は`CREATED`を記録するだけで、sourceを読みません。`job authorize`は`--confirm`を必須とし、
@@ -73,6 +88,12 @@ CLIは再認可を推測しません。このMVPではin-place再認可も実装
 
 workspace-relative pathはtraversal、absolute化、link／junction経由のworkspace外書込みを拒否します。
 JSON、YAML、manifestはatomic writeし、transition logはnewline終端のappend-only JSONLです。
+
+新規runtime workspaceはprivate-by-defaultです。POSIXでは`.local/`以下の全directoryを`0700`、
+job YAML、authorization、manifest、transition log、raw artifact、temporary／lock fileを`0600`へ
+作成時に設定・検証し、適用できなければ処理を失敗させます。final targetもtemporary fileと同じ
+private modeを維持します。WindowsではPOSIX modeをsecurity guaranteeとして扱わず、同一ユーザーの
+OS account／NTFS ACL境界に依存します。本MVPはWindows ACLの再構成機能を実装しません。
 
 ## Local sourceとidempotency
 

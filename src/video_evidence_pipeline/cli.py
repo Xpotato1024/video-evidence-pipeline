@@ -110,6 +110,10 @@ def job_init(
     task_type: Annotated[str, typer.Option("--task-type")],
     language: Annotated[str, typer.Option("--language")],
     output_format: Annotated[str, typer.Option("--output-format")],
+    requirement: Annotated[
+        list[str] | None,
+        typer.Option("--requirement", help="Repeat for each ordered assignment requirement."),
+    ] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     result = _run(
@@ -121,6 +125,7 @@ def job_init(
             task_type=task_type,
             language=language,
             output_format=output_format,
+            requirements=requirement,
         ),
         json_output=json_output,
     )

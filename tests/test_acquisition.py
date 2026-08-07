@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 import yaml
 
+from video_evidence_pipeline.acquisition.local_file import LocalFileAdapter
 from video_evidence_pipeline.application import (
     acquire_job,
     authorize_job,
     initialize_job,
     job_status,
+    validate_job,
 )
 from video_evidence_pipeline.domain.hashing import sha256_bytes, sha256_file
 from video_evidence_pipeline.domain.job import SourceKind
@@ -26,6 +31,7 @@ def initialized_job(
     source: Path | str,
     *,
     source_kind: SourceKind = SourceKind.LOCAL_FILE,
+    requirements: list[str] | None = None,
 ) -> Path:
     workspace, _ = initialize_job(
         root,
@@ -35,6 +41,7 @@ def initialized_job(
         task_type="report",
         language="ja",
         output_format="markdown",
+        requirements=requirements,
     )
     return workspace.root
 
@@ -155,7 +162,11 @@ def test_authorization_stale_after_semantic_job_change(tmp_path: Path) -> None:
     assert captured.value.code == "AUTHORIZATION_STALE"
     status, exit_code = job_status(job_path)
     assert status["authorization"]["stale"] is True
+    assert status["authorization"]["error_code"] == "AUTHORIZATION_STALE"
     assert exit_code == 3
+    with pytest.raises(VepError) as validate_error:
+        validate_job(job_path)
+    assert validate_error.value.code == "AUTHORIZATION_STALE"
 
 
 def test_copy_hash_mismatch_never_reaches_acquired(
@@ -165,7 +176,9 @@ def test_copy_hash_mismatch_never_reaches_acquired(
     source.write_bytes(b"content")
     job_path = initialized_job(tmp_path, source)
     authorize(job_path)
-    hashes = iter(["a" * 64, "b" * 64])
+    expected_hash = sha256_file(source)
+    original_hash = sha256_file
+    hashes = iter([expected_hash, "b" * 64])
     monkeypatch.setattr(
         "video_evidence_pipeline.acquisition.local_file.sha256_file",
         lambda _: next(hashes),
@@ -176,6 +189,144 @@ def test_copy_hash_mismatch_never_reaches_acquired(
     transitions = read_jsonl(job_path / "manifests/transitions.jsonl", TransitionRecord)
     assert transitions[-1].to_state.value == "AUTHORIZED"
     assert not (job_path / "manifests/source-manifest.json").exists()
+    assert not (job_path / f"source/raw/{expected_hash}/synthetic.bin").exists()
+
+    monkeypatch.setattr("video_evidence_pipeline.acquisition.local_file.sha256_file", original_hash)
+    retry = acquire_job(job_path)
+    assert retry.source_manifest.artifact_record.artifact.content_sha256 == expected_hash
+
+
+def test_preexisting_raw_target_is_never_deleted_on_integrity_failure(tmp_path: Path) -> None:
+    source = tmp_path / "synthetic.bin"
+    source.write_bytes(b"content")
+    expected_hash = sha256_file(source)
+    job_path = initialized_job(tmp_path, source)
+    authorize(job_path)
+    raw = job_path / f"source/raw/{expected_hash}/synthetic.bin"
+    raw.parent.mkdir(parents=True)
+    raw.write_bytes(b"corrupt")
+
+    with pytest.raises(VepError) as captured:
+        acquire_job(job_path)
+
+    assert captured.value.code == "ARTIFACT_INTEGRITY_FAILED"
+    assert raw.read_bytes() == b"corrupt"
+
+
+def test_cleanup_failure_does_not_hide_original_integrity_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "synthetic.bin"
+    source.write_bytes(b"content")
+    expected_hash = sha256_file(source)
+    job_path = initialized_job(tmp_path, source)
+    authorize(job_path)
+    raw = job_path / f"source/raw/{expected_hash}/synthetic.bin"
+    hashes = iter([expected_hash, "b" * 64])
+    monkeypatch.setattr(
+        "video_evidence_pipeline.acquisition.local_file.sha256_file",
+        lambda _: next(hashes),
+    )
+    path_type = type(raw)
+    original_unlink = path_type.unlink
+
+    def fail_raw_unlink(path: Path, *args: object, **kwargs: object) -> None:
+        if path == raw:
+            raise OSError("synthetic cleanup failure")
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(path_type, "unlink", fail_raw_unlink)
+    with pytest.raises(VepError) as captured:
+        acquire_job(job_path)
+
+    assert captured.value.code == "ARTIFACT_INTEGRITY_FAILED"
+    assert raw.exists()
+
+
+def test_stage_finished_at_is_recorded_after_raw_verification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "synthetic.bin"
+    source.write_bytes(b"content")
+    job_path = initialized_job(tmp_path, source)
+    authorize(job_path)
+    base = datetime(2026, 8, 7, tzinfo=UTC)
+    moments = iter([base, base + timedelta(seconds=1), base + timedelta(seconds=2)])
+    verified = False
+    original_verify = LocalFileAdapter._verify_raw
+
+    def verify_then_mark(path: Path, artifact: object) -> None:
+        nonlocal verified
+        original_verify(path, artifact)  # type: ignore[arg-type]
+        verified = True
+
+    def controlled_now() -> datetime:
+        value = next(moments)
+        if value == base + timedelta(seconds=2):
+            assert verified
+        return value
+
+    monkeypatch.setattr(LocalFileAdapter, "_verify_raw", staticmethod(verify_then_mark))
+    monkeypatch.setattr("video_evidence_pipeline.acquisition.local_file._utc_now", controlled_now)
+
+    result = acquire_job(job_path)
+
+    assert result.stage_manifest.started_at == base
+    assert result.source_manifest.created_at == base + timedelta(seconds=1)
+    assert result.stage_manifest.finished_at == base + timedelta(seconds=2)
+
+
+def test_validate_does_not_treat_denied_local_processing_as_spec_corruption(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "synthetic.bin"
+    source.write_bytes(b"content")
+    job_path = initialized_job(tmp_path, source)
+    authorize_job(
+        job_path,
+        confirm=True,
+        basis="authorized synthetic fixture",
+        allow_local_processing=False,
+        allow_external_api=False,
+        confirmer_identity="test-user",
+    )
+    assert validate_job(job_path)["valid"] is True
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX modes are not a Windows guarantee")
+def test_posix_runtime_workspace_is_private(tmp_path: Path) -> None:
+    source = tmp_path / "synthetic.bin"
+    source.write_bytes(b"content")
+    job_path = initialized_job(
+        tmp_path,
+        source,
+        requirements=["first requirement", "second requirement"],
+    )
+    authorize(job_path)
+    result = acquire_job(job_path)
+    artifact = result.source_manifest.artifact_record.artifact
+    directories = [
+        tmp_path / ".local",
+        tmp_path / ".local/jobs",
+        job_path,
+        job_path / "authorization",
+        job_path / "source",
+        job_path / "source/raw",
+        (job_path / artifact.relative_storage_path).parent,
+        job_path / "manifests",
+        job_path / "manifests/stages",
+        job_path / "logs",
+    ]
+    files = [
+        job_path / "job.yaml",
+        job_path / "authorization/authorization.json",
+        job_path / "manifests/source-manifest.json",
+        job_path / "manifests/stages/acquisition.json",
+        job_path / "manifests/transitions.jsonl",
+        job_path / artifact.relative_storage_path,
+    ]
+    assert all(stat.S_IMODE(path.stat().st_mode) == 0o700 for path in directories)
+    assert all(stat.S_IMODE(path.stat().st_mode) == 0o600 for path in files)
 
 
 def test_manifest_does_not_leak_absolute_source_or_query_secret(tmp_path: Path) -> None:

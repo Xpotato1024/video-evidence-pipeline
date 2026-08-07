@@ -106,6 +106,24 @@ related_documents: ["VEP-ARCH-CONTEXT", "VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS
 - synthetic fixtureのみCIへ投入
 - actual job directoryは`.local/`
 
+### TB-4a: Local workspace → same-host user／process
+
+脅威:
+
+- restricted source、assignment、absolute local path、authorization recordの他ユーザーからの読取り
+- permissive umaskによるruntime fileの意図しないgroup／world公開
+- temporary file、lock file、final target間のpermission不一致
+
+対策:
+
+- 新規POSIX workspaceのdirectoryを作成時に`0700`へ設定・検証
+- 新規POSIX runtime file、raw artifact、temporary／lock fileを`0600`へ設定・検証
+- private mode適用失敗をsilent successにせず、restricted source処理前にfail closed
+- atomic replace／exclusive hard-link後もfinal targetのprivate modeを維持
+- workspace escapeとsymbolic link／junction拒否をpermission設定と独立して維持
+- WindowsではPOSIX modeを保証とせず、同一ユーザーのOS account／NTFS ACL境界へ依存
+- Windows ACLの自動再構成は本MVPの非スコープとして明示
+
 ### TB-5: Author agent → auditor agent
 
 脅威:

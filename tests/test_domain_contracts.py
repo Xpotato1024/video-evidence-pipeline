@@ -11,7 +11,7 @@ from video_evidence_pipeline.domain.artifacts import ArtifactRef
 from video_evidence_pipeline.domain.authorization import AuthorizationRecord
 from video_evidence_pipeline.domain.hashing import sha256_bytes, sha256_file
 from video_evidence_pipeline.domain.identifiers import sanitize_filename
-from video_evidence_pipeline.domain.job import JobSpec, job_fingerprint
+from video_evidence_pipeline.domain.job import AssignmentSpec, JobSpec, job_fingerprint
 from video_evidence_pipeline.domain.state import JobState
 from video_evidence_pipeline.domain.transitions import TransitionRecord, validate_transition_records
 from video_evidence_pipeline.errors import VepError
@@ -95,6 +95,34 @@ def test_semantic_change_changes_fingerprint() -> None:
     first = JobSpec.model_validate(job_data())
     second = JobSpec.model_validate(
         job_data(output={"format": "html"}),
+    )
+    assert job_fingerprint(first) != job_fingerprint(second)
+
+
+@pytest.mark.parametrize("requirement", ["", "   ", "x" * 513])
+def test_assignment_requirement_rejects_blank_or_oversized_text(requirement: str) -> None:
+    with pytest.raises(ValidationError):
+        AssignmentSpec(task_type="report", language="ja", requirements=[requirement])
+
+
+def test_assignment_requirement_order_is_semantic() -> None:
+    first = JobSpec.model_validate(
+        job_data(
+            assignment={
+                "task_type": "report",
+                "language": "ja",
+                "requirements": ["first", "second"],
+            }
+        )
+    )
+    second = JobSpec.model_validate(
+        job_data(
+            assignment={
+                "task_type": "report",
+                "language": "ja",
+                "requirements": ["second", "first"],
+            }
+        )
     )
     assert job_fingerprint(first) != job_fingerprint(second)
 

@@ -11,8 +11,11 @@
         },
         "requirements": {
           "items": {
+            "maxLength": 512,
+            "minLength": 1,
             "type": "string"
           },
+          "maxItems": 100,
           "title": "Requirements",
           "type": "array"
         },

@@ -12,6 +12,11 @@ from pydantic import BaseModel, ValidationError
 
 from video_evidence_pipeline.domain.serialization import canonical_json_bytes
 from video_evidence_pipeline.errors import integrity_error, io_error
+from video_evidence_pipeline.storage.permissions import (
+    PRIVATE_FILE_MODE,
+    enforce_private_descriptor,
+    ensure_private_directory,
+)
 
 
 @contextmanager
@@ -20,6 +25,7 @@ def exclusive_append_lock(path: Path) -> Iterator[None]:
     descriptor: int | None = None
     try:
         descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        enforce_private_descriptor(descriptor, PRIVATE_FILE_MODE)
         yield
     except FileExistsError as exc:
         raise integrity_error("TRANSITION_LOG_BUSY", "transition log is being updated") from exc
@@ -32,11 +38,12 @@ def exclusive_append_lock(path: Path) -> Iterator[None]:
 
 
 def append_jsonl(path: Path, record: BaseModel) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_private_directory(path.parent)
     payload = canonical_json_bytes(record) + b"\n"
     try:
         descriptor = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
         try:
+            enforce_private_descriptor(descriptor, PRIVATE_FILE_MODE)
             written = os.write(descriptor, payload)
             if written != len(payload):
                 raise OSError("short append")

@@ -5,11 +5,11 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
 import yaml
-from pydantic import Field, ValidationError, model_validator
+from pydantic import Field, StringConstraints, ValidationError, model_validator
 
 from video_evidence_pipeline.domain import StrictModel, UtcDateTime
 from video_evidence_pipeline.domain.identifiers import JobId
@@ -41,10 +41,16 @@ class SourceSpec(StrictModel):
         return self
 
 
+RequirementText = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=512),
+]
+
+
 class AssignmentSpec(StrictModel):
     task_type: str = Field(min_length=1, max_length=128)
     language: str = Field(min_length=2, max_length=32)
-    requirements: list[str] = Field(default_factory=list)
+    requirements: list[RequirementText] = Field(default_factory=list, max_length=100)
 
 
 class OutputSpec(StrictModel):

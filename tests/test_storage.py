@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -9,8 +11,12 @@ import pytest
 from video_evidence_pipeline.domain.state import JobState
 from video_evidence_pipeline.domain.transitions import TransitionRecord
 from video_evidence_pipeline.errors import VepError
-from video_evidence_pipeline.storage.atomic import atomic_write_bytes
-from video_evidence_pipeline.storage.jsonl import append_jsonl, read_jsonl
+from video_evidence_pipeline.storage.atomic import atomic_copy_exclusive, atomic_write_bytes
+from video_evidence_pipeline.storage.jsonl import (
+    append_jsonl,
+    exclusive_append_lock,
+    read_jsonl,
+)
 from video_evidence_pipeline.storage.layout import JobWorkspace
 
 
@@ -88,3 +94,60 @@ def test_workspace_junction_detection_is_enforced(
     with pytest.raises(VepError) as captured:
         JobWorkspace.create(tmp_path, "demo")
     assert captured.value.code == "WORKSPACE_SYMLINK"
+
+
+def test_private_permission_failure_is_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "video_evidence_pipeline.storage.permissions.POSIX_MODE_ENFORCED",
+        True,
+    )
+
+    def fail_chmod(*args: object, **kwargs: object) -> None:
+        raise OSError("synthetic permission failure")
+
+    monkeypatch.setattr("video_evidence_pipeline.storage.permissions.os.chmod", fail_chmod)
+    with pytest.raises(VepError) as captured:
+        JobWorkspace.create(tmp_path, "demo")
+    assert captured.value.code == "PRIVATE_PERMISSION_FAILED"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX modes are not a Windows guarantee")
+def test_private_temporary_and_lock_modes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    target = tmp_path / "private.json"
+    observed_temporary_modes: list[int] = []
+    original_replace = os.replace
+
+    def inspect_replace(source: Path, destination: Path) -> None:
+        observed_temporary_modes.append(stat.S_IMODE(source.stat().st_mode))
+        original_replace(source, destination)
+
+    monkeypatch.setattr("video_evidence_pipeline.storage.atomic.os.replace", inspect_replace)
+    atomic_write_bytes(target, b"{}\n", private=True)
+    assert observed_temporary_modes == [0o600]
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+    copy_source = tmp_path / "copy-source.bin"
+    copy_source.write_bytes(b"content")
+    (tmp_path / "raw").mkdir()
+    copy_target = tmp_path / "raw/hash/copy-target.bin"
+    observed_copy_temporary_modes: list[int] = []
+    original_link = os.link
+
+    def inspect_link(source: Path, destination: Path) -> None:
+        observed_copy_temporary_modes.append(stat.S_IMODE(source.stat().st_mode))
+        original_link(source, destination)
+
+    monkeypatch.setattr("video_evidence_pipeline.storage.atomic.os.link", inspect_link)
+    copy_result = atomic_copy_exclusive(copy_source, copy_target)
+    assert copy_result.created is True
+    assert observed_copy_temporary_modes == [0o600]
+    assert stat.S_IMODE(copy_target.stat().st_mode) == 0o600
+
+    transitions = tmp_path / "transitions.jsonl"
+    with exclusive_append_lock(transitions):
+        lock = tmp_path / ".transitions.jsonl.lock"
+        assert stat.S_IMODE(lock.stat().st_mode) == 0o600
+    append_jsonl(transitions, record())
+    assert stat.S_IMODE(transitions.stat().st_mode) == 0o600
