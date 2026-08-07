@@ -18,13 +18,14 @@ from video_evidence_pipeline.application import (
     job_status,
     validate_job,
 )
+from video_evidence_pipeline.domain.authorization import AuthorizationRecord
 from video_evidence_pipeline.domain.hashing import sha256_bytes, sha256_file
 from video_evidence_pipeline.domain.job import JobSpec, SourceKind, load_job_yaml
 from video_evidence_pipeline.domain.manifests import SourceManifest
 from video_evidence_pipeline.domain.transitions import TransitionRecord
 from video_evidence_pipeline.errors import VepError
-from video_evidence_pipeline.storage.atomic import read_json_model
-from video_evidence_pipeline.storage.jsonl import read_jsonl
+from video_evidence_pipeline.storage.atomic import atomic_write_json, read_json_model
+from video_evidence_pipeline.storage.jsonl import append_jsonl, read_jsonl
 from video_evidence_pipeline.storage.layout import JobWorkspace
 
 
@@ -169,6 +170,136 @@ def test_idempotent_rerun_reuses_artifact_and_manifests(tmp_path: Path) -> None:
     assert (job_path / "manifests/transitions.jsonl").read_bytes() == transition_bytes
     assert (job_path / "manifests/source-manifest.json").read_bytes() == source_manifest_bytes
     assert (job_path / "manifests/stages/acquisition.json").read_bytes() == stage_manifest_bytes
+
+
+def test_concurrent_authorization_persists_only_the_successful_callers_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "synthetic.bin"
+    source.write_bytes(b"stable content")
+    job_path = initialized_job(tmp_path, source)
+    entered_write = threading.Event()
+    release_write = threading.Event()
+    original_write = atomic_write_json
+    caller_a_result: list[AuthorizationRecord | Exception] = []
+
+    def blocked_write(target: Path, value: object, *, private: bool = False) -> None:
+        if target.name == "authorization.json":
+            entered_write.set()
+            assert release_write.wait(timeout=5)
+        original_write(target, value, private=private)
+
+    def run_caller_a() -> None:
+        try:
+            caller_a_result.append(
+                authorize_job(
+                    job_path,
+                    confirm=True,
+                    basis="authorization-a",
+                    allow_local_processing=True,
+                    allow_external_api=False,
+                    confirmer_identity="caller-a",
+                )
+            )
+        except Exception as exc:  # pragma: no cover - assertion below reports the exception
+            caller_a_result.append(exc)
+
+    monkeypatch.setattr("video_evidence_pipeline.application.atomic_write_json", blocked_write)
+    caller_a = threading.Thread(target=run_caller_a)
+    caller_a.start()
+    assert entered_write.wait(timeout=5)
+    try:
+        with pytest.raises(VepError) as caller_b_error:
+            authorize_job(
+                job_path,
+                confirm=True,
+                basis="authorization-b",
+                allow_local_processing=True,
+                allow_external_api=True,
+                confirmer_identity="caller-b",
+            )
+        assert caller_b_error.value.code == "TRANSITION_LOG_BUSY"
+    finally:
+        release_write.set()
+        caller_a.join(timeout=5)
+
+    assert len(caller_a_result) == 1
+    assert isinstance(caller_a_result[0], AuthorizationRecord)
+    persisted = read_json_model(
+        job_path / "authorization/authorization.json",
+        AuthorizationRecord,
+        code="AUTHORIZATION_INVALID",
+    )
+    assert persisted == caller_a_result[0]
+    assert persisted.authorization_basis == "authorization-a"
+    assert persisted.allow_local_processing is True
+    assert persisted.allow_external_api is False
+    assert persisted.confirmer_identity == "caller-a"
+    authorization_text = (job_path / "authorization/authorization.json").read_text(encoding="utf-8")
+    assert "authorization-b" not in authorization_text
+    assert "caller-b" not in authorization_text
+    transitions = read_jsonl(job_path / "manifests/transitions.jsonl", TransitionRecord)
+    assert len(transitions) == 2
+    assert transitions[-1].from_state.value == "CREATED"
+    assert transitions[-1].to_state.value == "AUTHORIZED"
+    status, exit_code = job_status(job_path)
+    assert status["stored_state"] == "AUTHORIZED"
+    assert exit_code == 0
+
+
+def test_authorization_retry_recovers_record_without_transition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "synthetic.bin"
+    source.write_bytes(b"stable content")
+    job_path = initialized_job(tmp_path, source)
+
+    def fail_transition_append(path: Path, record: object) -> None:
+        raise RuntimeError("synthetic process interruption")
+
+    monkeypatch.setattr("video_evidence_pipeline.application.append_jsonl", fail_transition_append)
+    with pytest.raises(RuntimeError, match="synthetic process interruption"):
+        authorize_job(
+            job_path,
+            confirm=True,
+            basis="interrupted-authorization",
+            allow_local_processing=True,
+            allow_external_api=True,
+            confirmer_identity="interrupted-caller",
+        )
+
+    interrupted = read_json_model(
+        job_path / "authorization/authorization.json",
+        AuthorizationRecord,
+        code="AUTHORIZATION_INVALID",
+    )
+    assert interrupted.authorization_basis == "interrupted-authorization"
+    transitions = read_jsonl(job_path / "manifests/transitions.jsonl", TransitionRecord)
+    assert len(transitions) == 1
+    assert transitions[-1].to_state.value == "CREATED"
+
+    monkeypatch.setattr("video_evidence_pipeline.application.append_jsonl", append_jsonl)
+    recovered = authorize_job(
+        job_path,
+        confirm=True,
+        basis="recovered-authorization",
+        allow_local_processing=True,
+        allow_external_api=False,
+        confirmer_identity="recovery-caller",
+    )
+
+    persisted = read_json_model(
+        job_path / "authorization/authorization.json",
+        AuthorizationRecord,
+        code="AUTHORIZATION_INVALID",
+    )
+    assert persisted == recovered
+    assert persisted.authorization_basis == "recovered-authorization"
+    assert persisted.allow_external_api is False
+    assert persisted.confirmer_identity == "recovery-caller"
+    transitions = read_jsonl(job_path / "manifests/transitions.jsonl", TransitionRecord)
+    assert len(transitions) == 2
+    assert transitions[-1].to_state.value == "AUTHORIZED"
 
 
 def test_concurrent_acquisition_cannot_mix_manifest_attempts(

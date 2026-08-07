@@ -127,29 +127,30 @@ def authorize_job(
             "AUTHORIZATION_CONFIRMATION_REQUIRED",
             "authorization requires explicit --confirm",
         )
-    workspace, job, _, state = _load_context(path)
-    if state is not JobState.CREATED:
-        raise state_error("STATE_GATE_FAILED", "job cannot be authorized in its current state")
-    record = AuthorizationRecord(
-        job_id=job.job_id,
-        job_fingerprint=job_fingerprint(job),
-        confirmed_by_user=True,
-        authorization_basis=basis,
-        allow_local_processing=allow_local_processing,
-        allow_external_api=allow_external_api,
-        confirmed_at=datetime.now(UTC),
-        confirmer_identity=confirmer_identity or getpass.getuser() or "local-user",
-    )
-    atomic_write_json(workspace.authorization_json, record, private=True)
-    if state is JobState.CREATED:
-        _append_transition(
+    workspace = JobWorkspace.open(path)
+    with exclusive_append_lock(workspace.transitions_jsonl):
+        workspace, job, _, state = _load_context(path)
+        if state is not JobState.CREATED:
+            raise state_error("STATE_GATE_FAILED", "job cannot be authorized in its current state")
+        record = AuthorizationRecord(
+            job_id=job.job_id,
+            job_fingerprint=job_fingerprint(job),
+            confirmed_by_user=True,
+            authorization_basis=basis,
+            allow_local_processing=allow_local_processing,
+            allow_external_api=allow_external_api,
+            confirmed_at=datetime.now(UTC),
+            confirmer_identity=confirmer_identity or getpass.getuser() or "local-user",
+        )
+        atomic_write_json(workspace.authorization_json, record, private=True)
+        _append_transition_locked(
             workspace,
             job,
             from_state=JobState.CREATED,
             to_state=JobState.AUTHORIZED,
             trigger="job.authorize",
         )
-    return record
+        return record
 
 
 def _authorization(workspace: JobWorkspace) -> AuthorizationRecord:
@@ -222,24 +223,6 @@ def acquire_job(path: Path) -> AcquisitionResult:
                 trigger="acquire.local_file",
             )
         return result
-
-
-def _append_transition(
-    workspace: JobWorkspace,
-    job: JobSpec,
-    *,
-    from_state: JobState,
-    to_state: JobState,
-    trigger: str,
-) -> None:
-    with exclusive_append_lock(workspace.transitions_jsonl):
-        _append_transition_locked(
-            workspace,
-            job,
-            from_state=from_state,
-            to_state=to_state,
-            trigger=trigger,
-        )
 
 
 def _append_transition_locked(

@@ -62,6 +62,11 @@ vep job init demo-report \
 `job init`は`CREATED`を記録するだけで、sourceを読みません。`job authorize`は`--confirm`を必須とし、
 authorization basis、local processing可否、external API可否、確認時刻、確認者identity、normalized
 job fingerprintを保存します。external APIは既定denyです。
+同一jobへのauthorizationはacquisitionと同じjob-level OS file lockで直列化します。stateをlock取得後に
+再読込し、authorization recordのatomic writeと`CREATED → AUTHORIZED` transitionを同じ排他境界内で
+実行します。競合callerは`TRANSITION_LOG_BUSY`またはstate gateでfail closedし、loserのrecordを残しません。
+process異常終了でstateが`CREATED`のままauthorization recordだけ残った場合、kernel lock解放後のretryで
+recordを置換してtransitionを完了できます。
 
 authorization後に`job.yaml`の意味内容が変わると`AUTHORIZATION_STALE`になり、`acquire`は失敗します。
 CLIは再認可を推測しません。このMVPではin-place再認可も実装せず、元の認可済みjob内容へ戻すか、
