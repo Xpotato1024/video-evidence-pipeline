@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any
 
 import typer
 from pydantic import ValidationError
+from typer.core import _click as click
 
 from video_evidence_pipeline import __version__
 from video_evidence_pipeline.application import (
@@ -22,7 +24,33 @@ from video_evidence_pipeline.domain.job import SourceKind
 from video_evidence_pipeline.errors import VepError, configuration_error
 from video_evidence_pipeline.schemas.generation import check_schemas, export_schemas
 
-app = typer.Typer(name="vep", no_args_is_help=True, pretty_exceptions_enable=False)
+
+class StructuredTyper(typer.Typer):
+    """Normalize Click/Typer parser failures for machine callers."""
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        try:
+            return super().__call__(*args, standalone_mode=False, **kwargs)
+        except click.exceptions.Exit as exc:
+            raise SystemExit(exc.exit_code) from None
+        except (click.ClickException, click.exceptions.Abort) as exc:
+            if "--json" in sys.argv:
+                payload = {
+                    "ok": False,
+                    "error": {
+                        "code": "CONFIG_INVALID",
+                        "message": "command arguments are invalid",
+                    },
+                }
+                typer.echo(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+            elif isinstance(exc, click.ClickException):
+                exc.show()
+            else:
+                typer.echo("Aborted!", err=True)
+            raise SystemExit(2) from None
+
+
+app = StructuredTyper(name="vep", no_args_is_help=True, pretty_exceptions_enable=False)
 job_app = typer.Typer(no_args_is_help=True)
 schema_app = typer.Typer(no_args_is_help=True)
 app.add_typer(job_app, name="job")

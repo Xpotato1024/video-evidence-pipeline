@@ -4,12 +4,31 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
 
 from video_evidence_pipeline.domain.serialization import canonical_json_bytes
 from video_evidence_pipeline.errors import integrity_error, io_error
+
+
+@contextmanager
+def exclusive_append_lock(path: Path) -> Iterator[None]:
+    lock_path = path.with_name(f".{path.name}.lock")
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        yield
+    except FileExistsError as exc:
+        raise integrity_error("TRANSITION_LOG_BUSY", "transition log is being updated") from exc
+    except OSError as exc:
+        raise io_error("TRANSITION_LOCK_FAILED", "transition log could not be locked") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+            lock_path.unlink(missing_ok=True)
 
 
 def append_jsonl(path: Path, record: BaseModel) -> None:

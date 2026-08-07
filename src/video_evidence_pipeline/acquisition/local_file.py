@@ -127,6 +127,14 @@ class LocalFileAdapter(AcquisitionAdapter):
                 raise integrity_error(
                     "SOURCE_MANIFEST_MISMATCH", "source manifest job does not match"
                 )
+            if existing_manifest.source_kind is not SourceKind.LOCAL_FILE:
+                raise integrity_error(
+                    "SOURCE_MANIFEST_MISMATCH", "source manifest kind does not match"
+                )
+            if existing_manifest.artifact_record.configuration_sha256 != configuration_sha256:
+                raise integrity_error(
+                    "SOURCE_MANIFEST_MISMATCH", "source manifest configuration does not match"
+                )
             if existing_manifest.locator_fingerprint != probe.locator_fingerprint:
                 raise integrity_error("SOURCE_LOCATOR_CHANGED", "source locator identity changed")
             if (
@@ -189,13 +197,52 @@ class LocalFileAdapter(AcquisitionAdapter):
             raise io_error("ARTIFACT_READ_FAILED", "raw artifact could not be verified") from exc
 
 
-def verify_acquired_artifact(workspace: JobWorkspace) -> ArtifactRef:
+def verify_acquired_bundle(workspace: JobWorkspace, job: JobSpec) -> ArtifactRef:
+    if not workspace.source_manifest_json.is_file():
+        raise integrity_error(
+            "SOURCE_MANIFEST_INVALID", "ACQUIRED job is missing its source manifest"
+        )
+    if not workspace.acquisition_manifest_json.is_file():
+        raise integrity_error(
+            "STAGE_MANIFEST_INVALID", "ACQUIRED job is missing its acquisition stage manifest"
+        )
     manifest = read_json_model(
         workspace.source_manifest_json,
         SourceManifest,
         code="SOURCE_MANIFEST_INVALID",
     )
+    stage_manifest = read_json_model(
+        workspace.acquisition_manifest_json,
+        StageManifest,
+        code="STAGE_MANIFEST_INVALID",
+    )
     artifact = manifest.artifact_record.artifact
+    configuration_sha256 = job_fingerprint(job)
+    expected_locator_fingerprint = local_locator_fingerprint(Path(job.source.locator))
+    if (
+        manifest.job_id != job.job_id
+        or manifest.source_kind is not SourceKind.LOCAL_FILE
+        or manifest.locator_fingerprint != expected_locator_fingerprint
+        or manifest.artifact_record.configuration_sha256 != configuration_sha256
+    ):
+        raise integrity_error(
+            "SOURCE_MANIFEST_MISMATCH", "source manifest does not match the current job"
+        )
+    if (
+        stage_manifest.job_id != job.job_id
+        or stage_manifest.stage != "acquisition"
+        or stage_manifest.status is not StageStatus.SUCCEEDED
+        or stage_manifest.state_transition is not JobState.ACQUIRED
+        or stage_manifest.input_artifacts
+        or stage_manifest.output_artifacts != [artifact]
+        or stage_manifest.producer != manifest.artifact_record.producer
+        or stage_manifest.configuration_sha256 != configuration_sha256
+        or stage_manifest.redacted_error is not None
+    ):
+        raise integrity_error(
+            "STAGE_MANIFEST_MISMATCH",
+            "acquisition stage manifest does not match the source artifact",
+        )
     target = workspace.safe_path(artifact.relative_storage_path)
     LocalFileAdapter._verify_raw(target, artifact)
     return artifact

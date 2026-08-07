@@ -49,7 +49,8 @@ authorization basis、local processing可否、external API可否、確認時刻
 job fingerprintを保存します。external APIは既定denyです。
 
 authorization後に`job.yaml`の意味内容が変わると`AUTHORIZATION_STALE`になり、`acquire`は失敗します。
-CLIは再認可を推測しません。
+CLIは再認可を推測しません。このMVPではin-place再認可も実装せず、元の認可済みjob内容へ戻すか、
+新しいjobを作成します。
 
 ## Workspace layout
 
@@ -98,7 +99,7 @@ source manifestと通常出力にはlocal absolute path、URL query、Cookie、t
 ## Troubleshooting
 
 - `AUTHORIZATION_CONFIRMATION_REQUIRED`: `--confirm`を付け、basisとprocessing permissionを確認する。
-- `AUTHORIZATION_STALE`: current `job.yaml`を確認し、明示的に再認可する。
+- `AUTHORIZATION_STALE`: current `job.yaml`を認可時の内容へ戻すか、新しいjobを作成する。
 - `SOURCE_CONTENT_CHANGED`: 既存jobを変更せず、新しいjobを作る。
 - `ARTIFACT_INTEGRITY_FAILED`: raw artifactを成功扱いせず、workspaceを保全して原因を調査する。
 - `SOURCE_KIND_NOT_IMPLEMENTED`: `local_file`以外は後続Issueの実装を待つ。

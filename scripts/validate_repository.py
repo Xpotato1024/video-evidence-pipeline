@@ -111,7 +111,8 @@ SECRET_PATTERNS = {
         re.IGNORECASE,
     ),
     "signed-query": re.compile(
-        r"[?&](?:token|access_token|sig|signature|x-amz-signature)=[^&\s]{16,}",
+        r"[?&](?:token|access_token|sig|signature|x-amz-signature|"
+        r"x-amz-security-token|x-amz-credential|policy|key-pair-id)=[^&\s]{16,}",
         re.IGNORECASE,
     ),
 }
@@ -594,7 +595,8 @@ class RepositoryValidator:
         try:
             from video_evidence_pipeline.schemas.generation import generated_schemas
 
-            for filename, expected in generated_schemas().items():
+            generated = generated_schemas()
+            for filename, expected in generated.items():
                 path = self.root / "schemas" / filename
                 if not path.is_file():
                     self.add(
@@ -603,6 +605,13 @@ class RepositoryValidator:
                 elif path.read_bytes() != expected:
                     self.add(
                         "SCHEMA_DRIFT", path.relative_to(self.root), "generated Schema is stale"
+                    )
+            for path in sorted((self.root / "schemas").glob("*.schema.json")):
+                if path.name not in generated:
+                    self.add(
+                        "SCHEMA_DRIFT",
+                        path.relative_to(self.root),
+                        "unexpected generated Schema is committed",
                     )
         except Exception as exc:
             self.add("SCHEMA_GENERATION_FAILED", "schemas", type(exc).__name__)

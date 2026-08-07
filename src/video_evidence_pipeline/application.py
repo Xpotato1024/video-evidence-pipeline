@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from video_evidence_pipeline.acquisition.base import AcquisitionResult
-from video_evidence_pipeline.acquisition.local_file import verify_acquired_artifact
+from video_evidence_pipeline.acquisition.local_file import verify_acquired_bundle
 from video_evidence_pipeline.acquisition.registry import adapter_for
 from video_evidence_pipeline.domain.authorization import AuthorizationRecord
 from video_evidence_pipeline.domain.job import (
@@ -25,7 +25,8 @@ from video_evidence_pipeline.domain.state import JobState
 from video_evidence_pipeline.domain.transitions import (
     TransitionRecord,
     require_implemented_transition,
-    validate_transition_records,
+    validate_runtime_transition_records,
+    validate_transition_fingerprints,
 )
 from video_evidence_pipeline.errors import VepError, integrity_error, state_error
 from video_evidence_pipeline.storage.atomic import (
@@ -33,7 +34,7 @@ from video_evidence_pipeline.storage.atomic import (
     atomic_write_new_bytes,
     read_json_model,
 )
-from video_evidence_pipeline.storage.jsonl import append_jsonl, read_jsonl
+from video_evidence_pipeline.storage.jsonl import append_jsonl, exclusive_append_lock, read_jsonl
 from video_evidence_pipeline.storage.layout import JobWorkspace
 
 
@@ -43,7 +44,9 @@ def _load_context(path: Path) -> tuple[JobWorkspace, JobSpec, list[TransitionRec
     if job.job_id != workspace.root.name:
         raise integrity_error("JOB_WORKSPACE_MISMATCH", "job ID does not match workspace name")
     transitions = read_jsonl(workspace.transitions_jsonl, TransitionRecord)
-    state = validate_transition_records(transitions)
+    state = validate_runtime_transition_records(transitions, job.job_id)
+    if state is JobState.CREATED:
+        validate_transition_fingerprints(transitions, job_fingerprint(job))
     return workspace, job, transitions, state
 
 
@@ -85,7 +88,11 @@ def initialize_job(
 
 
 def validate_job(path: Path) -> dict[str, Any]:
-    workspace, job, _, state = _load_context(path)
+    workspace, job, transitions, state = _load_context(path)
+    if state is not JobState.CREATED:
+        _validate_authorization_binding(job, transitions, _authorization(workspace))
+    if state is JobState.ACQUIRED:
+        verify_acquired_bundle(workspace, job)
     return {
         "valid": True,
         "job_id": job.job_id,
@@ -109,8 +116,8 @@ def authorize_job(
             "AUTHORIZATION_CONFIRMATION_REQUIRED",
             "authorization requires explicit --confirm",
         )
-    workspace, job, transitions, state = _load_context(path)
-    if state not in {JobState.CREATED, JobState.AUTHORIZED}:
+    workspace, job, _, state = _load_context(path)
+    if state is not JobState.CREATED:
         raise state_error("STATE_GATE_FAILED", "job cannot be authorized in its current state")
     record = AuthorizationRecord(
         job_id=job.job_id,
@@ -127,7 +134,6 @@ def authorize_job(
         _append_transition(
             workspace,
             job,
-            transitions,
             from_state=JobState.CREATED,
             to_state=JobState.AUTHORIZED,
             trigger="job.authorize",
@@ -143,8 +149,26 @@ def _authorization(workspace: JobWorkspace) -> AuthorizationRecord:
     )
 
 
-def _require_current_authorization(job: JobSpec, authorization: AuthorizationRecord) -> None:
-    if authorization.job_id != job.job_id or authorization.job_fingerprint != job_fingerprint(job):
+def _validate_authorization_binding(
+    job: JobSpec,
+    transitions: list[TransitionRecord],
+    authorization: AuthorizationRecord,
+) -> None:
+    if authorization.job_id != job.job_id:
+        raise integrity_error(
+            "AUTHORIZATION_JOB_MISMATCH",
+            "authorization belongs to another job",
+        )
+    validate_transition_fingerprints(transitions, authorization.job_fingerprint)
+
+
+def _require_current_authorization(
+    job: JobSpec,
+    transitions: list[TransitionRecord],
+    authorization: AuthorizationRecord,
+) -> None:
+    _validate_authorization_binding(job, transitions, authorization)
+    if authorization.job_fingerprint != job_fingerprint(job):
         raise state_error(
             "AUTHORIZATION_STALE",
             "authorization no longer matches the normalized job specification",
@@ -161,13 +185,14 @@ def acquire_job(path: Path) -> AcquisitionResult:
     if state not in {JobState.AUTHORIZED, JobState.ACQUIRED}:
         raise state_error("STATE_GATE_FAILED", "job must be AUTHORIZED before acquisition")
     authorization = _authorization(workspace)
-    _require_current_authorization(job, authorization)
+    _require_current_authorization(job, transitions, authorization)
+    if state is JobState.ACQUIRED:
+        verify_acquired_bundle(workspace, job)
     result = adapter_for(job.source).acquire(job, workspace)
     if state is JobState.AUTHORIZED:
         _append_transition(
             workspace,
             job,
-            transitions,
             from_state=JobState.AUTHORIZED,
             to_state=JobState.ACQUIRED,
             trigger="acquire.local_file",
@@ -178,29 +203,33 @@ def acquire_job(path: Path) -> AcquisitionResult:
 def _append_transition(
     workspace: JobWorkspace,
     job: JobSpec,
-    records: list[TransitionRecord],
     *,
     from_state: JobState,
     to_state: JobState,
     trigger: str,
 ) -> None:
     require_implemented_transition(from_state, to_state)
-    if validate_transition_records(records) is not from_state:
-        raise state_error("STATE_GATE_FAILED", "stored state changed before transition")
-    record = TransitionRecord(
-        sequence=records[-1].sequence + 1,
-        job_id=job.job_id,
-        from_state=from_state,
-        to_state=to_state,
-        trigger=trigger,
-        occurred_at=datetime.now(UTC),
-        job_fingerprint=job_fingerprint(job),
-    )
-    append_jsonl(workspace.transitions_jsonl, record)
+    fingerprint = job_fingerprint(job)
+    with exclusive_append_lock(workspace.transitions_jsonl):
+        records = read_jsonl(workspace.transitions_jsonl, TransitionRecord)
+        state = validate_runtime_transition_records(records, job.job_id)
+        validate_transition_fingerprints(records, fingerprint)
+        if state is not from_state:
+            raise state_error("STATE_GATE_FAILED", "stored state changed before transition")
+        record = TransitionRecord(
+            sequence=records[-1].sequence + 1,
+            job_id=job.job_id,
+            from_state=from_state,
+            to_state=to_state,
+            trigger=trigger,
+            occurred_at=datetime.now(UTC),
+            job_fingerprint=fingerprint,
+        )
+        append_jsonl(workspace.transitions_jsonl, record)
 
 
 def job_status(path: Path) -> tuple[dict[str, Any], int]:
-    workspace, job, _, state = _load_context(path)
+    workspace, job, transitions, state = _load_context(path)
     current_fingerprint = job_fingerprint(job)
     authorization_status: dict[str, Any] = {
         "present": workspace.authorization_json.exists(),
@@ -213,6 +242,7 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
     if workspace.authorization_json.exists():
         try:
             authorization = _authorization(workspace)
+            _validate_authorization_binding(job, transitions, authorization)
             authorization_status.update(
                 {
                     "valid": True,
@@ -230,7 +260,7 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
     artifact_status: dict[str, Any] = {"status": "not-applicable"}
     if state is JobState.ACQUIRED:
         try:
-            artifact = verify_acquired_artifact(workspace)
+            artifact = verify_acquired_bundle(workspace, job)
             artifact_status = {
                 "status": "valid",
                 "artifact_id": artifact.artifact_id,

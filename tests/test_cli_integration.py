@@ -168,3 +168,35 @@ def test_cli_rejects_sensitive_query_without_echoing_it(tmp_path: Path) -> None:
     assert json.loads(initialized.stdout)["error"]["code"] == "CONFIG_INVALID"
     assert secret_value not in initialized.stdout
     assert "Traceback" not in initialized.stderr
+
+
+def test_cli_parser_failure_is_structured_json(tmp_path: Path) -> None:
+    result = run_vep(tmp_path, "job", "validate", "--json")
+    assert result.returncode == 2
+    assert json.loads(result.stdout)["error"]["code"] == "CONFIG_INVALID"
+    assert "Traceback" not in result.stderr
+
+
+def test_cli_invalid_enum_is_structured_json_without_locator_echo(tmp_path: Path) -> None:
+    locator = "credential-like-locator-value"
+    result = run_vep(
+        tmp_path,
+        "job",
+        "init",
+        "demo",
+        "--source-kind",
+        "unsupported",
+        "--source",
+        locator,
+        "--task-type",
+        "report",
+        "--language",
+        "ja",
+        "--output-format",
+        "markdown",
+        "--json",
+    )
+    assert result.returncode == 2
+    assert json.loads(result.stdout)["error"]["code"] == "CONFIG_INVALID"
+    assert locator not in result.stdout
+    assert "Traceback" not in result.stderr

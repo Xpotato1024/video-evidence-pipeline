@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import urlsplit
 
 import yaml
 from pydantic import Field, ValidationError, model_validator
@@ -33,16 +33,11 @@ class SourceSpec(StrictModel):
     def locator_does_not_persist_credentials(self) -> SourceSpec:
         if self.kind is SourceKind.LOCAL_FILE:
             return self
-        sensitive_keys = {
-            "token",
-            "access_token",
-            "sig",
-            "signature",
-            "x-amz-signature",
-        }
-        query_keys = {key.casefold() for key, _ in parse_qsl(urlsplit(self.locator).query)}
-        if query_keys & sensitive_keys:
-            raise ValueError("source locator contains a prohibited credential query")
+        parsed = urlsplit(self.locator)
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("source locator must not contain userinfo")
+        if parsed.query or parsed.fragment:
+            raise ValueError("source locator query and fragment are not supported")
         return self
 
 

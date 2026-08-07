@@ -8,6 +8,7 @@ import yaml
 from pydantic import ValidationError
 
 from video_evidence_pipeline.domain.artifacts import ArtifactRef
+from video_evidence_pipeline.domain.authorization import AuthorizationRecord
 from video_evidence_pipeline.domain.hashing import sha256_bytes, sha256_file
 from video_evidence_pipeline.domain.identifiers import sanitize_filename
 from video_evidence_pipeline.domain.job import JobSpec, job_fingerprint
@@ -134,6 +135,54 @@ def test_sensitive_url_query_is_rejected() -> None:
                 }
             )
         )
+
+
+@pytest.mark.parametrize(
+    "locator",
+    [
+        "https://user:password@example.invalid/video",
+        "https://example.invalid/video#credential-fragment",
+        "https://example.invalid/video?" + "X-Amz-Security-Token=" + "credential-value",
+        "https://example.invalid/video?" + "Policy=" + "credential-value&Key-Pair-Id=key-id",
+    ],
+)
+def test_nonlocal_locator_credential_surfaces_are_rejected(locator: str) -> None:
+    with pytest.raises(ValidationError):
+        JobSpec.model_validate(job_data(source={"kind": "direct_http", "locator": locator}))
+
+
+def authorization_data(**overrides: object) -> dict[str, object]:
+    data: dict[str, object] = {
+        "schema_version": "1.0",
+        "job_id": "demo-report",
+        "job_fingerprint": "a" * 64,
+        "confirmed_by_user": True,
+        "authorization_basis": "authorized synthetic fixture",
+        "allow_local_processing": True,
+        "allow_external_api": False,
+        "confirmed_at": "2026-08-07T00:00:00Z",
+        "confirmer_identity": "test-user",
+    }
+    data.update(overrides)
+    return data
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"confirmed_by_user": 1},
+        {"confirmed_by_user": False},
+        {"allow_local_processing": "yes"},
+        {"allow_external_api": 0},
+        {"authorization_basis": "   "},
+        {"confirmer_identity": "\t"},
+    ],
+)
+def test_authorization_contract_rejects_coercion_and_blank_text(
+    override: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        AuthorizationRecord.model_validate(authorization_data(**override))
 
 
 def transition(

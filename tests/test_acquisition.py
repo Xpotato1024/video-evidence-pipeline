@@ -84,6 +84,25 @@ def test_invalid_local_sources_are_rejected(tmp_path: Path, kind: str) -> None:
     assert captured.value.code == expected[kind]
 
 
+def test_local_source_junction_detection_is_enforced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"content")
+    job_path = initialized_job(tmp_path, source)
+    authorize(job_path)
+    path_type = type(source)
+    original = path_type.is_junction
+
+    def fake_is_junction(path: Path) -> bool:
+        return path == source or original(path)
+
+    monkeypatch.setattr(path_type, "is_junction", fake_is_junction)
+    with pytest.raises(VepError) as captured:
+        acquire_job(job_path)
+    assert captured.value.code == "SOURCE_NOT_REGULAR_FILE"
+
+
 def test_idempotent_rerun_reuses_artifact_and_manifests(tmp_path: Path) -> None:
     source = tmp_path / "synthetic.bin"
     source.write_bytes(b"stable content")
@@ -185,6 +204,87 @@ def test_status_reports_tampered_artifact(tmp_path: Path) -> None:
     status, exit_code = job_status(job_path)
     assert status["artifact_integrity"]["status"] == "invalid"
     assert exit_code == 5
+
+
+def test_status_reports_missing_acquisition_stage_manifest(tmp_path: Path) -> None:
+    source = tmp_path / "synthetic.bin"
+    source.write_bytes(b"content")
+    job_path = initialized_job(tmp_path, source)
+    authorize(job_path)
+    acquire_job(job_path)
+    (job_path / "manifests/stages/acquisition.json").unlink()
+
+    status, exit_code = job_status(job_path)
+
+    assert status["artifact_integrity"]["error_code"] == "STAGE_MANIFEST_INVALID"
+    assert exit_code == 5
+
+
+def test_status_reports_source_manifest_job_mismatch(tmp_path: Path) -> None:
+    source = tmp_path / "synthetic.bin"
+    source.write_bytes(b"content")
+    job_path = initialized_job(tmp_path, source)
+    authorize(job_path)
+    acquire_job(job_path)
+    manifest_path = job_path / "manifests/source-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["job_id"] = "another-job"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    status, exit_code = job_status(job_path)
+
+    assert status["artifact_integrity"]["error_code"] == "SOURCE_MANIFEST_MISMATCH"
+    assert exit_code == 5
+
+
+def test_unimplemented_transition_is_rejected_before_integrity_status(tmp_path: Path) -> None:
+    source = tmp_path / "synthetic.bin"
+    source.write_bytes(b"content")
+    job_path = initialized_job(tmp_path, source)
+    authorize(job_path)
+    result = acquire_job(job_path)
+    transitions_path = job_path / "manifests/transitions.jsonl"
+    records = read_jsonl(transitions_path, TransitionRecord)
+    append = TransitionRecord(
+        sequence=4,
+        job_id="demo-report",
+        from_state=records[-1].to_state,
+        to_state="NORMALIZED",
+        trigger="tampered.unimplemented",
+        occurred_at=records[-1].occurred_at,
+        job_fingerprint=records[-1].job_fingerprint,
+    )
+    with transitions_path.open("ab") as handle:
+        handle.write((append.model_dump_json() + "\n").encode())
+    artifact = result.source_manifest.artifact_record.artifact
+    (job_path / artifact.relative_storage_path).write_bytes(b"tampered")
+
+    with pytest.raises(VepError) as captured:
+        job_status(job_path)
+    assert captured.value.code == "TRANSITION_NOT_IMPLEMENTED"
+
+
+@pytest.mark.parametrize("field", ["job_id", "job_fingerprint"])
+def test_initial_transition_binding_is_checked_before_authorization(
+    tmp_path: Path, field: str
+) -> None:
+    source = tmp_path / "synthetic.bin"
+    source.write_bytes(b"content")
+    job_path = initialized_job(tmp_path, source)
+    transitions_path = job_path / "manifests/transitions.jsonl"
+    record = json.loads(transitions_path.read_text(encoding="utf-8"))
+    record[field] = "another-job" if field == "job_id" else "b" * 64
+    transitions_path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+
+    with pytest.raises(VepError) as captured:
+        authorize(job_path)
+
+    expected = {
+        "job_id": "TRANSITION_JOB_MISMATCH",
+        "job_fingerprint": "TRANSITION_FINGERPRINT_MISMATCH",
+    }
+    assert captured.value.code == expected[field]
+    assert not (job_path / "authorization/authorization.json").exists()
 
 
 def test_nonimplemented_source_kind_fails_explicitly(tmp_path: Path) -> None:

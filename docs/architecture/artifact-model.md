@@ -56,23 +56,24 @@ configuration fingerprint、timezone-aware timestamp、warnings、redacted error
 
 ```json
 {
-  "artifact_id": "T001284",
-  "artifact_type": "transcript_segment",
-  "created_at": "2026-08-06T16:07:00+09:00",
-  "input_artifacts": [
-    {
-      "artifact_id": "AUDIO-001",
-      "sha256": "..."
-    }
-  ],
-  "producer": {
-    "kind": "tool",
-    "name": "faster-whisper",
-    "version": "...",
-    "model": "large-v3"
+  "schema_version": "1.0",
+  "artifact": {
+    "artifact_id": "source-0123456789abcdef",
+    "artifact_type": "raw_source",
+    "content_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "size_bytes": 123,
+    "relative_storage_path": "source/raw/0123456789abcdef.../synthetic.bin"
   },
-  "configuration_sha256": "...",
-  "content_sha256": "..."
+  "input_artifacts": [],
+  "producer": {
+    "kind": "adapter",
+    "name": "local_file",
+    "version": "0.1.0"
+  },
+  "configuration_sha256": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+  "created_at": "2026-08-07T00:00:00Z",
+  "warnings": [],
+  "redacted_error": null
 }
 ```
 

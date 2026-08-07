@@ -21,3 +21,11 @@ def test_schema_check_detects_drift(tmp_path: Path) -> None:
     with pytest.raises(VepError) as captured:
         check_schemas(tmp_path)
     assert captured.value.code == "SCHEMA_DRIFT"
+
+
+def test_schema_check_detects_unexpected_generated_schema(tmp_path: Path) -> None:
+    export_schemas(tmp_path)
+    (tmp_path / "obsolete.schema.json").write_text("{}\n", encoding="utf-8")
+    with pytest.raises(VepError) as captured:
+        check_schemas(tmp_path)
+    assert captured.value.code == "SCHEMA_DRIFT"

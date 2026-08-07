@@ -72,3 +72,19 @@ def test_workspace_symlink_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(VepError) as captured:
         JobWorkspace.open(link)
     assert captured.value.code == "WORKSPACE_SYMLINK"
+
+
+def test_workspace_junction_detection_is_enforced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / ".local").mkdir()
+    path_type = type(tmp_path)
+    original = path_type.is_junction
+
+    def fake_is_junction(path: Path) -> bool:
+        return path.name == ".local" or original(path)
+
+    monkeypatch.setattr(path_type, "is_junction", fake_is_junction)
+    with pytest.raises(VepError) as captured:
+        JobWorkspace.create(tmp_path, "demo")
+    assert captured.value.code == "WORKSPACE_SYMLINK"

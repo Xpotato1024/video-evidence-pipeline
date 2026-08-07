@@ -52,6 +52,7 @@ def export_schemas(root: Path) -> list[str]:
 
 def check_schemas(root: Path) -> list[str]:
     drift: list[str] = []
+    expected_names = set(SCHEMA_MODELS)
     for name, expected in generated_schemas().items():
         path = root / name
         try:
@@ -61,6 +62,9 @@ def check_schemas(root: Path) -> list[str]:
             continue
         if actual != expected:
             drift.append(name)
+    drift.extend(
+        path.name for path in root.glob("*.schema.json") if path.name not in expected_names
+    )
     if drift:
         raise configuration_error("SCHEMA_DRIFT", "generated JSON Schema is out of date")
     return sorted(SCHEMA_MODELS)

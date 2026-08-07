@@ -74,6 +74,33 @@ def validate_transition_records(records: list[TransitionRecord]) -> JobState:
     return previous.to_state
 
 
+def validate_runtime_transition_records(records: list[TransitionRecord], job_id: str) -> JobState:
+    state = validate_transition_records(records)
+    if any(record.job_id != job_id for record in records):
+        raise integrity_error("TRANSITION_JOB_MISMATCH", "transition log belongs to another job")
+    if any(
+        record.from_state is not None
+        and (record.from_state, record.to_state) not in IMPLEMENTED_TRANSITIONS
+        for record in records
+    ):
+        raise integrity_error(
+            "TRANSITION_NOT_IMPLEMENTED",
+            "transition log asserts a stage that is not implemented",
+        )
+    return state
+
+
+def validate_transition_fingerprints(
+    records: list[TransitionRecord],
+    expected_fingerprint: str,
+) -> None:
+    if any(record.job_fingerprint != expected_fingerprint for record in records):
+        raise integrity_error(
+            "TRANSITION_FINGERPRINT_MISMATCH",
+            "transition log fingerprint binding is inconsistent",
+        )
+
+
 def require_implemented_transition(from_state: JobState, to_state: JobState) -> None:
     if (from_state, to_state) not in IMPLEMENTED_TRANSITIONS:
         raise state_error("STAGE_NOT_IMPLEMENTED", "requested state transition is not implemented")
