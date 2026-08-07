@@ -203,23 +203,25 @@ def _require_local_processing(authorization: AuthorizationRecord) -> None:
 
 
 def acquire_job(path: Path) -> AcquisitionResult:
-    workspace, job, transitions, state = _load_context(path)
-    if state not in {JobState.AUTHORIZED, JobState.ACQUIRED}:
-        raise state_error("STATE_GATE_FAILED", "job must be AUTHORIZED before acquisition")
-    authorization = _authorization(workspace)
-    _require_current_authorization(job, transitions, authorization)
-    if state is JobState.ACQUIRED:
-        verify_acquired_bundle(workspace, job)
-    result = adapter_for(job.source).acquire(job, workspace)
-    if state is JobState.AUTHORIZED:
-        _append_transition(
-            workspace,
-            job,
-            from_state=JobState.AUTHORIZED,
-            to_state=JobState.ACQUIRED,
-            trigger="acquire.local_file",
-        )
-    return result
+    workspace = JobWorkspace.open(path)
+    with exclusive_append_lock(workspace.transitions_jsonl):
+        workspace, job, transitions, state = _load_context(path)
+        if state not in {JobState.AUTHORIZED, JobState.ACQUIRED}:
+            raise state_error("STATE_GATE_FAILED", "job must be AUTHORIZED before acquisition")
+        authorization = _authorization(workspace)
+        _require_current_authorization(job, transitions, authorization)
+        if state is JobState.ACQUIRED:
+            verify_acquired_bundle(workspace, job)
+        result = adapter_for(job.source).acquire(job, workspace)
+        if state is JobState.AUTHORIZED:
+            _append_transition_locked(
+                workspace,
+                job,
+                from_state=JobState.AUTHORIZED,
+                to_state=JobState.ACQUIRED,
+                trigger="acquire.local_file",
+            )
+        return result
 
 
 def _append_transition(
@@ -230,24 +232,41 @@ def _append_transition(
     to_state: JobState,
     trigger: str,
 ) -> None:
-    require_implemented_transition(from_state, to_state)
-    fingerprint = job_fingerprint(job)
     with exclusive_append_lock(workspace.transitions_jsonl):
-        records = read_jsonl(workspace.transitions_jsonl, TransitionRecord)
-        state = validate_runtime_transition_records(records, job.job_id)
-        validate_transition_fingerprints(records, fingerprint)
-        if state is not from_state:
-            raise state_error("STATE_GATE_FAILED", "stored state changed before transition")
-        record = TransitionRecord(
-            sequence=records[-1].sequence + 1,
-            job_id=job.job_id,
+        _append_transition_locked(
+            workspace,
+            job,
             from_state=from_state,
             to_state=to_state,
             trigger=trigger,
-            occurred_at=datetime.now(UTC),
-            job_fingerprint=fingerprint,
         )
-        append_jsonl(workspace.transitions_jsonl, record)
+
+
+def _append_transition_locked(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    *,
+    from_state: JobState,
+    to_state: JobState,
+    trigger: str,
+) -> None:
+    require_implemented_transition(from_state, to_state)
+    fingerprint = job_fingerprint(job)
+    records = read_jsonl(workspace.transitions_jsonl, TransitionRecord)
+    state = validate_runtime_transition_records(records, job.job_id)
+    validate_transition_fingerprints(records, fingerprint)
+    if state is not from_state:
+        raise state_error("STATE_GATE_FAILED", "stored state changed before transition")
+    record = TransitionRecord(
+        sequence=records[-1].sequence + 1,
+        job_id=job.job_id,
+        from_state=from_state,
+        to_state=to_state,
+        trigger=trigger,
+        occurred_at=datetime.now(UTC),
+        job_fingerprint=fingerprint,
+    )
+    append_jsonl(workspace.transitions_jsonl, record)
 
 
 def job_status(path: Path) -> tuple[dict[str, Any], int]:

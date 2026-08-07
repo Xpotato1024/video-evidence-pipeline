@@ -100,6 +100,8 @@ OS account／NTFS ACL境界に依存します。本MVPはWindows ACLの再構成
 `local_file` adapterはregular、non-zero fileだけを受け付け、streaming SHA-256後にcontent-addressed
 pathへexclusive copyし、copy後のsize／hashを再検証します。同一job、同一normalized job、同一source
 contentの再実行は既存raw artifactとmanifestを検証して再利用し、transitionを重複追加しません。
+同一jobのacquisitionでは、probe／copy／manifest公開／`ACQUIRED` transitionをjob-level排他境界内で
+直列化します。同時実行は待機せず`TRANSITION_LOG_BUSY`でfail closedし、別attemptのmanifestを混在させません。
 
 同じlocatorのcontentが変わった場合は既存raw sourceを上書きせず`SOURCE_CONTENT_CHANGED`で停止します。
 新しいjob、または将来の明示invalidation workflowが必要です。

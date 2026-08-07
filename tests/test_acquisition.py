@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -18,7 +19,7 @@ from video_evidence_pipeline.application import (
     validate_job,
 )
 from video_evidence_pipeline.domain.hashing import sha256_bytes, sha256_file
-from video_evidence_pipeline.domain.job import SourceKind, load_job_yaml
+from video_evidence_pipeline.domain.job import JobSpec, SourceKind, load_job_yaml
 from video_evidence_pipeline.domain.manifests import SourceManifest
 from video_evidence_pipeline.domain.transitions import TransitionRecord
 from video_evidence_pipeline.errors import VepError
@@ -168,6 +169,49 @@ def test_idempotent_rerun_reuses_artifact_and_manifests(tmp_path: Path) -> None:
     assert (job_path / "manifests/transitions.jsonl").read_bytes() == transition_bytes
     assert (job_path / "manifests/source-manifest.json").read_bytes() == source_manifest_bytes
     assert (job_path / "manifests/stages/acquisition.json").read_bytes() == stage_manifest_bytes
+
+
+def test_concurrent_acquisition_cannot_mix_manifest_attempts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "synthetic.bin"
+    source.write_bytes(b"stable content")
+    job_path = initialized_job(tmp_path, source)
+    authorize(job_path)
+    entered_adapter = threading.Event()
+    release_adapter = threading.Event()
+    original_acquire = LocalFileAdapter.acquire
+    first_result: list[object] = []
+
+    def blocked_acquire(adapter: LocalFileAdapter, job: JobSpec, workspace: JobWorkspace) -> object:
+        entered_adapter.set()
+        assert release_adapter.wait(timeout=5)
+        return original_acquire(adapter, job, workspace)
+
+    def run_first() -> None:
+        try:
+            first_result.append(acquire_job(job_path))
+        except Exception as exc:  # pragma: no cover - assertion below reports the exception
+            first_result.append(exc)
+
+    monkeypatch.setattr(LocalFileAdapter, "acquire", blocked_acquire)
+    first = threading.Thread(target=run_first)
+    first.start()
+    assert entered_adapter.wait(timeout=5)
+    try:
+        with pytest.raises(VepError) as captured:
+            acquire_job(job_path)
+        assert captured.value.code == "TRANSITION_LOG_BUSY"
+    finally:
+        release_adapter.set()
+        first.join(timeout=5)
+
+    assert len(first_result) == 1
+    assert not isinstance(first_result[0], Exception)
+    status, exit_code = job_status(job_path)
+    assert status["stored_state"] == "ACQUIRED"
+    assert status["artifact_integrity"]["status"] == "valid"
+    assert exit_code == 0
 
 
 def test_same_locator_content_change_is_rejected_without_overwrite(tmp_path: Path) -> None:
