@@ -22,11 +22,10 @@ from video_evidence_pipeline.domain.identifiers import sanitize_filename
 from video_evidence_pipeline.domain.job import JobSpec, SourceKind, job_fingerprint
 from video_evidence_pipeline.domain.manifests import SourceManifest, StageManifest, StageStatus
 from video_evidence_pipeline.domain.state import JobState
-from video_evidence_pipeline.errors import VepError, integrity_error, io_error
+from video_evidence_pipeline.errors import integrity_error, io_error
 from video_evidence_pipeline.storage.atomic import (
     atomic_copy_exclusive,
     atomic_write_json,
-    cleanup_exclusive_copy,
     read_json_model,
 )
 from video_evidence_pipeline.storage.layout import JobWorkspace
@@ -39,6 +38,21 @@ def _safe_display_name(path: Path) -> str:
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def _assert_source_path_has_no_links(path: Path) -> None:
+    absolute = path.absolute()
+    current = Path(absolute.anchor)
+    try:
+        for part in absolute.parts[1:]:
+            current /= part
+            if current.is_symlink() or getattr(current, "is_junction", lambda: False)():
+                raise io_error(
+                    "SOURCE_NOT_REGULAR_FILE",
+                    "local source path must not contain a link or junction",
+                )
+    except OSError as exc:
+        raise io_error("SOURCE_PROBE_FAILED", "local source could not be inspected") from exc
 
 
 def _validate_source_manifest_contract(manifest: SourceManifest, job: JobSpec) -> ArtifactRef:
@@ -102,8 +116,7 @@ class LocalFileAdapter(AcquisitionAdapter):
         if job.source.kind is not SourceKind.LOCAL_FILE:
             raise integrity_error("ADAPTER_KIND_MISMATCH", "local adapter received another kind")
         source = self._source_path(job)
-        if source.is_symlink() or getattr(source, "is_junction", lambda: False)():
-            raise io_error("SOURCE_NOT_REGULAR_FILE", "local source must be a regular file")
+        _assert_source_path_has_no_links(source)
         try:
             if not source.exists():
                 raise io_error("SOURCE_NOT_FOUND", "local source does not exist")
@@ -151,6 +164,11 @@ class LocalFileAdapter(AcquisitionAdapter):
                 code="SOURCE_MANIFEST_INVALID",
             )
             existing = _validate_source_manifest_contract(existing_manifest, job)
+            if existing_manifest.created_at > started_at:
+                raise integrity_error(
+                    "SOURCE_MANIFEST_MISMATCH",
+                    "source manifest timestamp is later than this acquisition attempt",
+                )
             if existing_manifest.locator_fingerprint != probe.locator_fingerprint:
                 raise integrity_error("SOURCE_LOCATOR_CHANGED", "source locator identity changed")
             if (
@@ -176,14 +194,13 @@ class LocalFileAdapter(AcquisitionAdapter):
         reused = raw_target.exists()
         copy_result = None
         if not reused:
-            copy_result = atomic_copy_exclusive(self._source_path(job), raw_target)
+            copy_result = atomic_copy_exclusive(
+                self._source_path(job),
+                raw_target,
+                verifier=lambda candidate: self._verify_raw(candidate, effective_artifact),
+            )
             reused = not copy_result.created
-        try:
-            self._verify_raw(raw_target, effective_artifact)
-        except VepError:
-            if copy_result is not None:
-                cleanup_exclusive_copy(raw_target, copy_result)
-            raise
+        self._verify_raw(raw_target, effective_artifact)
 
         if existing_manifest is None:
             created_at = _utc_now()
@@ -206,7 +223,7 @@ class LocalFileAdapter(AcquisitionAdapter):
             source_manifest = existing_manifest
 
         if existing_stage_manifest is None:
-            finished_at = _utc_now()
+            finished_at = max(_utc_now(), source_manifest.created_at)
             stage_manifest = StageManifest(
                 job_id=job.job_id,
                 stage="acquisition",
@@ -222,6 +239,7 @@ class LocalFileAdapter(AcquisitionAdapter):
         else:
             stage_manifest = existing_stage_manifest
 
+        _validate_stage_manifest_contract(stage_manifest, source_manifest, job)
         if existing_manifest is None:
             atomic_write_json(workspace.source_manifest_json, source_manifest, private=True)
         if existing_stage_manifest is None:

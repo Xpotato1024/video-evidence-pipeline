@@ -86,7 +86,9 @@ stateDiagram-v2
 - `confirmed_by_user: true`
 - local processing可否
 - external API可否
-- assignment requirementsが最低限存在
+- assignment requirements fieldが構造上有効で、`job init`時に確定している
+  - 追加要件がないassignmentでは空配列を許可する
+  - 指定された要件は空白以外かつ512文字以内で、順序をfingerprintへ含める
 - normalized job fingerprintとauthorization recordが対応する
 - CLIでは`--confirm`を必須とし、external APIは明示allowしない限りdenyとする
 

@@ -5,9 +5,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import stat
 import uuid
-from contextlib import suppress
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,22 +29,6 @@ def _temporary_path(target: Path) -> Path:
 @dataclass(frozen=True, slots=True)
 class ExclusiveCopyResult:
     created: bool
-    device: int | None = None
-    inode: int | None = None
-
-
-def cleanup_exclusive_copy(target: Path, result: ExclusiveCopyResult) -> None:
-    """Best-effort removal only while the target still identifies our new inode."""
-    if not result.created:
-        return
-    with suppress(OSError):
-        current = target.stat(follow_symlinks=False)
-        if (
-            stat.S_ISREG(current.st_mode)
-            and current.st_dev == result.device
-            and current.st_ino == result.inode
-        ):
-            target.unlink()
 
 
 def _open_exclusive(path: Path, *, private: bool):
@@ -125,14 +108,18 @@ def read_json_model[ModelT: BaseModel](target: Path, model: type[ModelT], *, cod
         raise integrity_error(code, "required machine artifact is malformed") from exc
 
 
-def atomic_copy_exclusive(source: Path, target: Path) -> ExclusiveCopyResult:
-    """Copy to target without ever replacing an existing artifact."""
+def atomic_copy_exclusive(
+    source: Path,
+    target: Path,
+    *,
+    verifier: Callable[[Path], None] | None = None,
+) -> ExclusiveCopyResult:
+    """Verify a private temporary copy before exclusively publishing its hard link."""
     ensure_private_directory(target.parent)
     if target.exists():
         return ExclusiveCopyResult(created=False)
     temporary = _temporary_path(target)
-    created_target = False
-    copied_identity: os.stat_result | None = None
+    operation_failed = False
     try:
         with (
             source.open("rb") as input_stream,
@@ -141,32 +128,26 @@ def atomic_copy_exclusive(source: Path, target: Path) -> ExclusiveCopyResult:
             shutil.copyfileobj(input_stream, output_stream, length=1024 * 1024)
             output_stream.flush()
             os.fsync(output_stream.fileno())
-            copied_identity = os.fstat(output_stream.fileno())
+        if verifier is not None:
+            verifier(temporary)
         try:
             os.link(temporary, target)
         except FileExistsError:
             return ExclusiveCopyResult(created=False)
-        created_target = True
         enforce_private_file(target)
-        if copied_identity is None:  # pragma: no cover - copy must complete before linking
-            raise OSError("copied file identity is unavailable")
-        return ExclusiveCopyResult(
-            created=True,
-            device=copied_identity.st_dev,
-            inode=copied_identity.st_ino,
-        )
+        return ExclusiveCopyResult(created=True)
     except OSError as exc:
+        operation_failed = True
         raise io_error("SOURCE_COPY_FAILED", "source copy failed") from exc
     except Exception:
-        if created_target and copied_identity is not None:
-            cleanup_exclusive_copy(
-                target,
-                ExclusiveCopyResult(
-                    created=True,
-                    device=copied_identity.st_dev,
-                    inode=copied_identity.st_ino,
-                ),
-            )
+        operation_failed = True
         raise
     finally:
-        temporary.unlink(missing_ok=True)
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError as exc:
+            if not operation_failed:
+                raise io_error(
+                    "SOURCE_COPY_CLEANUP_FAILED",
+                    "temporary source copy could not be removed",
+                ) from exc

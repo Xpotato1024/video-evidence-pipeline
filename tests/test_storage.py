@@ -113,6 +113,25 @@ def test_private_permission_failure_is_fail_closed(
     assert captured.value.code == "PRIVATE_PERMISSION_FAILED"
 
 
+def test_exclusive_copy_preserves_a_concurrent_writers_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"expected")
+    target = tmp_path / "raw/hash/target.bin"
+    target.parent.mkdir(parents=True)
+
+    def publish_competing_target(_source: Path, destination: Path) -> None:
+        destination.write_bytes(b"competitor")
+        raise FileExistsError
+
+    monkeypatch.setattr("video_evidence_pipeline.storage.atomic.os.link", publish_competing_target)
+    result = atomic_copy_exclusive(source, target, verifier=lambda path: None)
+
+    assert result.created is False
+    assert target.read_bytes() == b"competitor"
+
+
 @pytest.mark.skipif(os.name != "posix", reason="POSIX modes are not a Windows guarantee")
 def test_private_temporary_and_lock_modes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     target = tmp_path / "private.json"
@@ -140,7 +159,11 @@ def test_private_temporary_and_lock_modes(tmp_path: Path, monkeypatch: pytest.Mo
         original_link(source, destination)
 
     monkeypatch.setattr("video_evidence_pipeline.storage.atomic.os.link", inspect_link)
-    copy_result = atomic_copy_exclusive(copy_source, copy_target)
+    copy_result = atomic_copy_exclusive(
+        copy_source,
+        copy_target,
+        verifier=lambda path: None,
+    )
     assert copy_result.created is True
     assert observed_copy_temporary_modes == [0o600]
     assert stat.S_IMODE(copy_target.stat().st_mode) == 0o600

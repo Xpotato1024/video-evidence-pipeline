@@ -18,12 +18,13 @@ from video_evidence_pipeline.application import (
     validate_job,
 )
 from video_evidence_pipeline.domain.hashing import sha256_bytes, sha256_file
-from video_evidence_pipeline.domain.job import SourceKind
+from video_evidence_pipeline.domain.job import SourceKind, load_job_yaml
 from video_evidence_pipeline.domain.manifests import SourceManifest
 from video_evidence_pipeline.domain.transitions import TransitionRecord
 from video_evidence_pipeline.errors import VepError
 from video_evidence_pipeline.storage.atomic import read_json_model
 from video_evidence_pipeline.storage.jsonl import read_jsonl
+from video_evidence_pipeline.storage.layout import JobWorkspace
 
 
 def initialized_job(
@@ -107,6 +108,46 @@ def test_local_source_junction_detection_is_enforced(
     monkeypatch.setattr(path_type, "is_junction", fake_is_junction)
     with pytest.raises(VepError) as captured:
         acquire_job(job_path)
+    assert captured.value.code == "SOURCE_NOT_REGULAR_FILE"
+
+
+def test_local_source_parent_junction_detection_is_enforced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_parent = tmp_path / "source-parent"
+    source_parent.mkdir()
+    source = source_parent / "source.bin"
+    source.write_bytes(b"content")
+    job_path = initialized_job(tmp_path, source)
+    authorize(job_path)
+    path_type = type(source)
+    original = path_type.is_junction
+
+    def fake_is_junction(path: Path) -> bool:
+        return path == source_parent or original(path)
+
+    monkeypatch.setattr(path_type, "is_junction", fake_is_junction)
+    with pytest.raises(VepError) as captured:
+        acquire_job(job_path)
+    assert captured.value.code == "SOURCE_NOT_REGULAR_FILE"
+
+
+def test_local_source_parent_symlink_is_rejected(tmp_path: Path) -> None:
+    source_parent = tmp_path / "source-parent"
+    source_parent.mkdir()
+    source = source_parent / "source.bin"
+    source.write_bytes(b"content")
+    linked_parent = tmp_path / "linked-parent"
+    try:
+        linked_parent.symlink_to(source_parent, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are unavailable")
+    job_path = initialized_job(tmp_path, linked_parent / source.name)
+    authorize(job_path)
+
+    with pytest.raises(VepError) as captured:
+        acquire_job(job_path)
+
     assert captured.value.code == "SOURCE_NOT_REGULAR_FILE"
 
 
@@ -213,7 +254,7 @@ def test_preexisting_raw_target_is_never_deleted_on_integrity_failure(tmp_path: 
     assert raw.read_bytes() == b"corrupt"
 
 
-def test_cleanup_failure_does_not_hide_original_integrity_error(
+def test_temporary_cleanup_failure_does_not_hide_original_integrity_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = tmp_path / "synthetic.bin"
@@ -230,17 +271,17 @@ def test_cleanup_failure_does_not_hide_original_integrity_error(
     path_type = type(raw)
     original_unlink = path_type.unlink
 
-    def fail_raw_unlink(path: Path, *args: object, **kwargs: object) -> None:
-        if path == raw:
+    def fail_temporary_unlink(path: Path, *args: object, **kwargs: object) -> None:
+        if path.name.endswith(".tmp"):
             raise OSError("synthetic cleanup failure")
         original_unlink(path, *args, **kwargs)
 
-    monkeypatch.setattr(path_type, "unlink", fail_raw_unlink)
+    monkeypatch.setattr(path_type, "unlink", fail_temporary_unlink)
     with pytest.raises(VepError) as captured:
         acquire_job(job_path)
 
     assert captured.value.code == "ARTIFACT_INTEGRITY_FAILED"
-    assert raw.exists()
+    assert not raw.exists()
 
 
 def test_stage_finished_at_is_recorded_after_raw_verification(
@@ -274,6 +315,54 @@ def test_stage_finished_at_is_recorded_after_raw_verification(
     assert result.stage_manifest.started_at == base
     assert result.source_manifest.created_at == base + timedelta(seconds=1)
     assert result.stage_manifest.finished_at == base + timedelta(seconds=2)
+
+
+def test_backward_clock_does_not_create_an_invalid_stage_timeline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "synthetic.bin"
+    source.write_bytes(b"content")
+    job_path = initialized_job(tmp_path, source)
+    authorize(job_path)
+    base = datetime(2026, 8, 7, tzinfo=UTC)
+    moments = iter([base, base + timedelta(seconds=10), base + timedelta(seconds=2)])
+    monkeypatch.setattr(
+        "video_evidence_pipeline.acquisition.local_file._utc_now",
+        lambda: next(moments),
+    )
+
+    result = acquire_job(job_path)
+
+    assert result.source_manifest.created_at == base + timedelta(seconds=10)
+    assert result.stage_manifest.finished_at == result.source_manifest.created_at
+    status, exit_code = job_status(job_path)
+    assert status["stored_state"] == "ACQUIRED"
+    assert exit_code == 0
+
+
+def test_future_partial_source_manifest_is_rejected_before_stage_persistence(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "synthetic.bin"
+    source.write_bytes(b"content")
+    job_path = initialized_job(tmp_path, source)
+    workspace = JobWorkspace.open(job_path)
+    job = load_job_yaml(workspace.job_yaml)
+    LocalFileAdapter().acquire(job, workspace)
+    workspace.acquisition_manifest_json.unlink()
+    payload = json.loads(workspace.source_manifest_json.read_text(encoding="utf-8"))
+    payload["created_at"] = "2099-01-01T00:00:00Z"
+    payload["artifact_record"]["created_at"] = "2099-01-01T00:00:00Z"
+    workspace.source_manifest_json.write_text(
+        json.dumps(payload),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(VepError) as captured:
+        LocalFileAdapter().acquire(job, workspace)
+
+    assert captured.value.code == "SOURCE_MANIFEST_MISMATCH"
+    assert not workspace.acquisition_manifest_json.exists()
 
 
 def test_validate_does_not_treat_denied_local_processing_as_spec_corruption(

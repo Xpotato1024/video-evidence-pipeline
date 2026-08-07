@@ -43,7 +43,12 @@ class SourceSpec(StrictModel):
 
 RequirementText = Annotated[
     str,
-    StringConstraints(strip_whitespace=True, min_length=1, max_length=512),
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        max_length=512,
+        pattern=r".*\S.*",
+    ),
 ]
 
 

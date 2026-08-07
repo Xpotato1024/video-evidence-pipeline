@@ -13,6 +13,7 @@
           "items": {
             "maxLength": 512,
             "minLength": 1,
+            "pattern": ".*\\S.*",
             "type": "string"
           },
           "maxItems": 100,
