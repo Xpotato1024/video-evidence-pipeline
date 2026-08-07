@@ -237,6 +237,38 @@ def test_status_reports_source_manifest_job_mismatch(tmp_path: Path) -> None:
     assert exit_code == 5
 
 
+def test_status_rejects_self_consistent_manifest_rebinding_to_job_yaml(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "synthetic.bin"
+    source.write_bytes(b"content")
+    job_path = initialized_job(tmp_path, source)
+    authorize(job_path)
+    acquire_job(job_path)
+    job_yaml = job_path / "job.yaml"
+    rebound_hash = sha256_file(job_yaml)
+    rebound = {
+        "artifact_id": f"source-{rebound_hash[:16]}",
+        "artifact_type": "raw_source",
+        "content_sha256": rebound_hash,
+        "size_bytes": job_yaml.stat().st_size,
+        "relative_storage_path": "job.yaml",
+    }
+    source_manifest_path = job_path / "manifests/source-manifest.json"
+    source_manifest = json.loads(source_manifest_path.read_text(encoding="utf-8"))
+    source_manifest["artifact_record"]["artifact"] = rebound
+    source_manifest_path.write_text(json.dumps(source_manifest), encoding="utf-8")
+    stage_manifest_path = job_path / "manifests/stages/acquisition.json"
+    stage_manifest = json.loads(stage_manifest_path.read_text(encoding="utf-8"))
+    stage_manifest["output_artifacts"] = [rebound]
+    stage_manifest_path.write_text(json.dumps(stage_manifest), encoding="utf-8")
+
+    status, exit_code = job_status(job_path)
+
+    assert status["artifact_integrity"]["error_code"] == "SOURCE_MANIFEST_MISMATCH"
+    assert exit_code == 5
+
+
 def test_unimplemented_transition_is_rejected_before_integrity_status(tmp_path: Path) -> None:
     source = tmp_path / "synthetic.bin"
     source.write_bytes(b"content")

@@ -36,6 +36,34 @@ def _safe_display_name(path: Path) -> str:
     return sanitize_filename(visible)
 
 
+def _validate_source_manifest_contract(manifest: SourceManifest, job: JobSpec) -> ArtifactRef:
+    artifact_record = manifest.artifact_record
+    artifact = artifact_record.artifact
+    configuration_sha256 = job_fingerprint(job)
+    expected_display_name = _safe_display_name(Path(job.source.locator))
+    expected_relative_path = f"source/raw/{artifact.content_sha256}/{expected_display_name}"
+    producer = artifact_record.producer
+    if (
+        manifest.job_id != job.job_id
+        or manifest.source_kind is not SourceKind.LOCAL_FILE
+        or manifest.display_name != expected_display_name
+        or manifest.locator_fingerprint != local_locator_fingerprint(Path(job.source.locator))
+        or artifact.artifact_id != f"source-{artifact.content_sha256[:16]}"
+        or artifact.artifact_type != "raw_source"
+        or artifact.relative_storage_path != expected_relative_path
+        or artifact_record.input_artifacts
+        or producer.kind is not ProducerKind.ADAPTER
+        or producer.name != "local_file"
+        or artifact_record.configuration_sha256 != configuration_sha256
+        or artifact_record.redacted_error is not None
+        or manifest.created_at != artifact_record.created_at
+    ):
+        raise integrity_error(
+            "SOURCE_MANIFEST_MISMATCH", "source manifest does not match the acquisition contract"
+        )
+    return artifact
+
+
 class LocalFileAdapter(AcquisitionAdapter):
     def _source_path(self, job: JobSpec) -> Path:
         return Path(job.source.locator)
@@ -122,19 +150,7 @@ class LocalFileAdapter(AcquisitionAdapter):
                 SourceManifest,
                 code="SOURCE_MANIFEST_INVALID",
             )
-            existing = existing_manifest.artifact_record.artifact
-            if existing_manifest.job_id != job.job_id:
-                raise integrity_error(
-                    "SOURCE_MANIFEST_MISMATCH", "source manifest job does not match"
-                )
-            if existing_manifest.source_kind is not SourceKind.LOCAL_FILE:
-                raise integrity_error(
-                    "SOURCE_MANIFEST_MISMATCH", "source manifest kind does not match"
-                )
-            if existing_manifest.artifact_record.configuration_sha256 != configuration_sha256:
-                raise integrity_error(
-                    "SOURCE_MANIFEST_MISMATCH", "source manifest configuration does not match"
-                )
+            existing = _validate_source_manifest_contract(existing_manifest, job)
             if existing_manifest.locator_fingerprint != probe.locator_fingerprint:
                 raise integrity_error("SOURCE_LOCATOR_CHANGED", "source locator identity changed")
             if (
@@ -216,18 +232,8 @@ def verify_acquired_bundle(workspace: JobWorkspace, job: JobSpec) -> ArtifactRef
         StageManifest,
         code="STAGE_MANIFEST_INVALID",
     )
-    artifact = manifest.artifact_record.artifact
+    artifact = _validate_source_manifest_contract(manifest, job)
     configuration_sha256 = job_fingerprint(job)
-    expected_locator_fingerprint = local_locator_fingerprint(Path(job.source.locator))
-    if (
-        manifest.job_id != job.job_id
-        or manifest.source_kind is not SourceKind.LOCAL_FILE
-        or manifest.locator_fingerprint != expected_locator_fingerprint
-        or manifest.artifact_record.configuration_sha256 != configuration_sha256
-    ):
-        raise integrity_error(
-            "SOURCE_MANIFEST_MISMATCH", "source manifest does not match the current job"
-        )
     if (
         stage_manifest.job_id != job.job_id
         or stage_manifest.stage != "acquisition"
@@ -238,6 +244,8 @@ def verify_acquired_bundle(workspace: JobWorkspace, job: JobSpec) -> ArtifactRef
         or stage_manifest.producer != manifest.artifact_record.producer
         or stage_manifest.configuration_sha256 != configuration_sha256
         or stage_manifest.redacted_error is not None
+        or stage_manifest.started_at > manifest.created_at
+        or stage_manifest.finished_at < manifest.created_at
     ):
         raise integrity_error(
             "STAGE_MANIFEST_MISMATCH",
