@@ -1,5 +1,5 @@
 ---
-schema_version: "1.0"
+schema_version: "1.1"
 document_id: VEP-OPS-CI
 title: "CI・品質ゲート運用"
 document_type: operations
@@ -57,6 +57,9 @@ GitHubプランが要件を満たした時点で、`lint`、`tests`、`repositor
 - workflow Actionの完全commit SHA pin
 - 高確度secret pattern
 - 実メディア、ローカルjob、ユーザー成果物の誤コミット
+- installable packageと`vep` entry point
+- Pydantic modelから生成したcommit済みJSON Schemaのdrift
+- `src/`を含むRuff対象とCI command
 
 ## 4. 実行環境
 
@@ -69,9 +72,10 @@ ActionsはNode 24対応版を完全commit SHAでpinし、Dependabotが更新候�
 
 ```bash
 uv sync --locked --all-groups
-uv run ruff check scripts tests
-uv run ruff format --check scripts tests
+uv run ruff check src scripts tests
+uv run ruff format --check src scripts tests
 uv run pytest -q
+uv run vep schema check
 uv run python scripts/validate_repository.py --root .
 ```
 

@@ -32,8 +32,8 @@ jobs:
           enable-cache: true
       - run: uv python install "${{ env.PYTHON_VERSION }}"
       - run: uv sync --locked --all-groups
-      - run: uv run ruff check scripts tests
-      - run: uv run ruff format --check scripts tests
+      - run: uv run ruff check src scripts tests
+      - run: uv run ruff format --check src scripts tests
 
   tests:
     name: tests
@@ -50,6 +50,7 @@ jobs:
       - run: uv python install "${{ env.PYTHON_VERSION }}"
       - run: uv sync --locked --all-groups
       - run: uv run pytest -q
+      - run: uv run vep schema check
 
   repository-validation:
     name: repository-validation

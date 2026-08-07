@@ -23,9 +23,10 @@ SKILL_REGISTRY: `.agents/skill-system.toml`
 
 ```bash
 uv sync --locked --all-groups
-uv run ruff check scripts tests
-uv run ruff format --check scripts tests
+uv run ruff check src scripts tests
+uv run ruff format --check src scripts tests
 uv run pytest -q
+uv run vep schema check
 uv run python scripts/validate_repository.py --root .
 ```
 

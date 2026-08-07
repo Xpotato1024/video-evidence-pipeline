@@ -1,5 +1,5 @@
 ---
-schema_version: "1.0"
+schema_version: "1.1"
 document_id: VEP-ARCH-ARTIFACTS
 title: "成果物モデル"
 document_type: architecture
@@ -48,6 +48,11 @@ related_documents: ["VEP-ARCH-PIPELINE", "VEP-ARCH-STATE", "VEP-ARCH-TRUST"]
 ## 3. Lineage envelope
 
 すべての派生成果物は、少なくとも次を追跡できる必要があります。
+
+実装済みの`ArtifactRef`、`ArtifactRecord`、`ProducerIdentity`は、artifact ID／type、content
+SHA-256、size、workspace-relative path、input artifact、producer kind／name／version、normalized
+configuration fingerprint、timezone-aware timestamp、warnings、redacted errorをstrict modelとして
+保持します。JSON SchemaはPydantic modelから生成します。
 
 ```json
 {
@@ -143,24 +148,27 @@ claim type:
 
 ## 7. Storage layout
 
-予定されるローカル配置:
+`ACQUIRED`までの実装済みローカル配置:
 
 ```text
 .local/jobs/<job-id>/
 ├─ job.yaml
+├─ authorization/
+│  └─ authorization.json
 ├─ source/
-├─ normalized/
-├─ observations/
-├─ evidence/
-├─ drafts/
-├─ audits/
-├─ approvals/
-├─ exports/
+│  └─ raw/
+│     └─ <sha256>/
+│        └─ <sanitized-original-name>
 ├─ manifests/
-└─ index/
+│  ├─ source-manifest.json
+│  ├─ transitions.jsonl
+│  └─ stages/
+│     └─ acquisition.json
+└─ logs/
 ```
 
 pathは識別子ではありません。artifact IDとhashを正本とします。
+`normalized/`以降の配置は、それぞれのstage実装時に追加します。
 
 ## 8. Approval binding
 

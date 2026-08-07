@@ -1,5 +1,5 @@
 ---
-schema_version: "1.0"
+schema_version: "1.1"
 document_id: VEP-ARCH-STATE
 title: "ジョブ状態機械"
 document_type: architecture
@@ -42,6 +42,10 @@ related_documents: ["VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-AGENTS"
 | `FAILED` | stageが失敗し、有効な出力がない |
 | `CANCELLED` | ユーザーが処理を中止した |
 
+全stateは`JobState` enumとして実装されています。実行可能な遷移は現在
+`CREATED → AUTHORIZED → ACQUIRED`だけです。後続遷移はmodel／policy上の設計契約として存在しても、
+CLIから実行できません。
+
 ## 2. 遷移
 
 ```mermaid
@@ -83,6 +87,8 @@ stateDiagram-v2
 - local processing可否
 - external API可否
 - assignment requirementsが最低限存在
+- normalized job fingerprintとauthorization recordが対応する
+- CLIでは`--confirm`を必須とし、external APIは明示allowしない限りdenyとする
 
 ### `AUTHORIZED → ACQUIRED`
 
@@ -91,6 +97,10 @@ stateDiagram-v2
 - content hash
 - source manifest
 - token／cookieがmanifestから除去済み
+- copy後のsize／SHA-256再検証
+- authorizationのjob fingerprintがcurrent jobと一致
+
+ここまでが実装済みgateです。以下は未実装stageの設計gateであり、現在のCLIでは実行できません。
 
 ### `ACQUIRED → NORMALIZED`
 

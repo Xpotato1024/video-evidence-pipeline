@@ -4,8 +4,34 @@
 独立監査、修正、人間承認、最終出力までを扱うローカル中心のパイプラインです。
 
 > [!IMPORTANT]
-> 設計、AI運用、Skills契約、repository validation、CIの基盤は整備済みです。動画取得、
-> FFmpeg処理、ASR、evidence／claim／audit domainの実装はまだ存在しません。
+> 現在実装済みなのは、core domain contracts、local workspace、`vep` CLI、明示authorization、
+> `local_file`による`CREATED → AUTHORIZED → ACQUIRED`です。network取得、FFmpeg処理、ASR、
+> evidence／authoring／audit／approval／exportは未実装です。
+
+## Quickstart
+
+Python 3.12と`uv`を用意し、認可済みのlocal sourceに対して次を実行します。
+
+```bash
+uv sync --locked --all-groups
+uv run vep job init demo-report \
+  --source-kind local_file \
+  --source /path/to/authorized-source.mp4 \
+  --task-type report \
+  --language ja \
+  --output-format markdown
+uv run vep job validate .local/jobs/demo-report
+uv run vep job authorize .local/jobs/demo-report \
+  --confirm \
+  --basis "authorized course material" \
+  --allow-local-processing \
+  --deny-external-api
+uv run vep acquire .local/jobs/demo-report
+uv run vep job status .local/jobs/demo-report
+```
+
+`job init`だけでは未認可です。`job authorize --confirm`が成功するまでsourceを取得しません。
+raw sourceは`.local/`配下へcontent-addressedに保存され、上書きされません。
 
 ## Pipeline
 
@@ -29,6 +55,7 @@
 - Skill台帳: [`.agents/skill-system.toml`](.agents/skill-system.toml)
 - 文書メタデータ: [`docs/governance/metadata-schema.md`](docs/governance/metadata-schema.md)
 - CI品質ゲート: [`docs/operations/ci-quality-gates.md`](docs/operations/ci-quality-gates.md)
+- CLI／workspace運用: [`docs/operations/cli-and-local-workspace.md`](docs/operations/cli-and-local-workspace.md)
 - contribution: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - security: [`SECURITY.md`](SECURITY.md)
 
@@ -48,9 +75,10 @@ READMEやAI入口文書の識別情報は文書台帳だけで管理し、本文
 
 ```bash
 uv sync --locked --all-groups
-uv run ruff check scripts tests
-uv run ruff format --check scripts tests
+uv run ruff check src scripts tests
+uv run ruff format --check src scripts tests
 uv run pytest -q
+uv run vep schema check
 uv run python scripts/validate_repository.py --root .
 ```
 
@@ -61,5 +89,6 @@ uv run python scripts/validate_repository.py --root .
 
 ## Status
 
-- Foundation: design SoT、agent governance、Skills contracts、CI／quality gates
-- Next: deterministic domain implementation
+- Implemented: core contracts、generated Schema、CLI、local workspace、`local_file` acquisition
+- Current state path: `CREATED → AUTHORIZED → ACQUIRED`
+- Next: network acquisition adapters（親ロードマップの後続Issue）

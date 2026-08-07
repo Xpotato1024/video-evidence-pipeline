@@ -1,0 +1,123 @@
+{
+  "$defs": {
+    "AssignmentSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "language": {
+          "maxLength": 32,
+          "minLength": 2,
+          "title": "Language",
+          "type": "string"
+        },
+        "requirements": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Requirements",
+          "type": "array"
+        },
+        "task_type": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Task Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_type",
+        "language"
+      ],
+      "title": "AssignmentSpec",
+      "type": "object"
+    },
+    "OutputSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Format",
+          "type": "string"
+        }
+      },
+      "required": [
+        "format"
+      ],
+      "title": "OutputSpec",
+      "type": "object"
+    },
+    "SourceKind": {
+      "enum": [
+        "local_file",
+        "direct_http",
+        "panopto",
+        "box",
+        "generic_ytdlp"
+      ],
+      "title": "SourceKind",
+      "type": "string"
+    },
+    "SourceSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/SourceKind"
+        },
+        "locator": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Locator",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "locator"
+      ],
+      "title": "SourceSpec",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/job-spec.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "assignment": {
+      "$ref": "#/$defs/AssignmentSpec"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "job_id": {
+      "maxLength": 63,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+      "title": "Job Id",
+      "type": "string"
+    },
+    "output": {
+      "$ref": "#/$defs/OutputSpec"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "source": {
+      "$ref": "#/$defs/SourceSpec"
+    }
+  },
+  "required": [
+    "job_id",
+    "created_at",
+    "source",
+    "assignment",
+    "output"
+  ],
+  "title": "JobSpec",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

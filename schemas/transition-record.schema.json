@@ -1,0 +1,98 @@
+{
+  "$defs": {
+    "JobState": {
+      "enum": [
+        "CREATED",
+        "AUTHORIZED",
+        "ACQUIRED",
+        "NORMALIZED",
+        "TRANSCRIBED",
+        "EVIDENCE_READY",
+        "DRAFTED",
+        "AUDITED",
+        "REVISION_REQUIRED",
+        "HUMAN_REVIEW_READY",
+        "HUMAN_APPROVED",
+        "EXPORTED",
+        "BLOCKED",
+        "FAILED",
+        "CANCELLED"
+      ],
+      "title": "JobState",
+      "type": "string"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/transition-record.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "from_state": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JobState"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "job_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Job Fingerprint",
+      "type": "string"
+    },
+    "job_id": {
+      "maxLength": 63,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+      "title": "Job Id",
+      "type": "string"
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "sequence": {
+      "minimum": 1,
+      "title": "Sequence",
+      "type": "integer"
+    },
+    "to_state": {
+      "$ref": "#/$defs/JobState"
+    },
+    "trigger": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Trigger",
+      "type": "string"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "sequence",
+    "job_id",
+    "from_state",
+    "to_state",
+    "trigger",
+    "occurred_at",
+    "job_fingerprint"
+  ],
+  "title": "TransitionRecord",
+  "type": "object",
+  "x-schema-version": "1.0"
+}
