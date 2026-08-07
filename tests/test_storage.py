@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import os
 import stat
+import subprocess
+import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -130,6 +133,53 @@ def test_exclusive_copy_preserves_a_concurrent_writers_target(
 
     assert result.created is False
     assert target.read_bytes() == b"competitor"
+
+
+def test_process_lock_is_released_when_holder_is_killed(tmp_path: Path) -> None:
+    transitions = tmp_path / "transitions.jsonl"
+    marker = tmp_path / "lock-acquired"
+    child_code = """
+import sys
+import time
+from pathlib import Path
+from video_evidence_pipeline.storage.jsonl import exclusive_append_lock
+
+with exclusive_append_lock(Path(sys.argv[1])):
+    Path(sys.argv[2]).touch()
+    time.sleep(60)
+"""
+    process = subprocess.Popen([sys.executable, "-c", child_code, str(transitions), str(marker)])
+    try:
+        deadline = time.monotonic() + 10
+        while not marker.exists() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert marker.exists(), "child did not acquire the process lock"
+        process.kill()
+        process.wait(timeout=10)
+
+        with exclusive_append_lock(transitions):
+            pass
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=10)
+
+
+def test_process_lock_rejects_a_symlink_target(tmp_path: Path) -> None:
+    transitions = tmp_path / "transitions.jsonl"
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"do not modify")
+    lock = tmp_path / ".transitions.jsonl.lock"
+    try:
+        lock.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+
+    with pytest.raises(VepError) as captured, exclusive_append_lock(transitions):
+        pass
+
+    assert captured.value.code == "TRANSITION_LOCK_FAILED"
+    assert outside.read_bytes() == b"do not modify"
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX modes are not a Windows guarantee")

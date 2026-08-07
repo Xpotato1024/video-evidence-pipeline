@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import stat
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -24,17 +26,50 @@ def exclusive_append_lock(path: Path) -> Iterator[None]:
     lock_path = path.with_name(f".{path.name}.lock")
     descriptor: int | None = None
     try:
-        descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        is_junction = getattr(lock_path, "is_junction", lambda: False)
+        if lock_path.is_symlink() or is_junction():
+            raise OSError("lock path must not be a link or junction")
+        flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(lock_path, flags, 0o600)
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise OSError("lock path must be a regular file")
         enforce_private_descriptor(descriptor, PRIVATE_FILE_MODE)
+        os.ftruncate(descriptor, 1)
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        _acquire_process_lock(descriptor)
         yield
-    except FileExistsError as exc:
+    except BlockingIOError as exc:
         raise integrity_error("TRANSITION_LOG_BUSY", "transition log is being updated") from exc
     except OSError as exc:
         raise io_error("TRANSITION_LOCK_FAILED", "transition log could not be locked") from exc
     finally:
         if descriptor is not None:
             os.close(descriptor)
-            lock_path.unlink(missing_ok=True)
+
+
+def _acquire_process_lock(descriptor: int) -> None:
+    deadline = time.monotonic() + 0.25
+    while True:
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        try:
+            _try_process_lock(descriptor)
+            return
+        except OSError as exc:
+            if time.monotonic() >= deadline:
+                raise BlockingIOError from exc
+            time.sleep(0.01)
+
+
+def _try_process_lock(descriptor: int) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
 
 def append_jsonl(path: Path, record: BaseModel) -> None:
