@@ -98,14 +98,18 @@ def atomic_write_json(
 
 
 def read_json_model[ModelT: BaseModel](target: Path, model: type[ModelT], *, code: str) -> ModelT:
+    error = None
     try:
         raw = target.read_bytes()
         data = json.loads(raw.decode("utf-8"))
-        return model.model_validate(data)
+        result = model.model_validate(data)
     except FileNotFoundError:
-        raise io_error(code, "required machine artifact does not exist") from None
+        error = io_error(code, "required machine artifact does not exist")
     except (OSError, UnicodeError, json.JSONDecodeError, ValidationError):
-        raise integrity_error(code, "required machine artifact is malformed") from None
+        error = integrity_error(code, "required machine artifact is malformed")
+    if error is not None:
+        raise error
+    return result
 
 
 def atomic_copy_exclusive(

@@ -314,3 +314,20 @@ def test_cli_invalid_enum_is_structured_json_without_locator_echo(tmp_path: Path
     assert json.loads(result.stdout)["error"]["code"] == "CONFIG_INVALID"
     assert locator not in result.stdout
     assert "Traceback" not in result.stderr
+
+
+def test_cli_invalid_cookie_source_does_not_echo_supplied_value(tmp_path: Path) -> None:
+    mistaken_secret = "synthetic-cookie-secret"
+    result = run_vep(
+        tmp_path,
+        "acquire",
+        "does-not-exist",
+        "--cookies-from-browser",
+        mistaken_secret,
+        "--json",
+    )
+    assert result.returncode == 2
+    assert json.loads(result.stdout)["error"]["code"] == "CONFIG_INVALID"
+    assert mistaken_secret not in result.stdout
+    assert mistaken_secret not in result.stderr
+    assert "Traceback" not in result.stderr

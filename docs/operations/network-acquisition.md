@@ -89,6 +89,8 @@ plain HTTP、private／link-local destination、DNS rebindingをproxyで拒否�
 
 production runnerはstaging内の生成bytesをprocess実行中も監視し、`--max-filesize`で長さ不明responseを判定できない場合も上限超過時にprocessを停止します。終了後のregular file／non-zero／maximum bytes検証も独立して行います。
 
+provider metadata responseは完全なHTTP 200、identity encoding、JSON media type、1 MiB以内かつ一致する`Content-Length`を要求し、`Content-Range`を拒否します。
+
 ## Panopto
 
 official REST APIを優先し、tenant API originにだけenvironment bearer tokenを送ります。session metadataの

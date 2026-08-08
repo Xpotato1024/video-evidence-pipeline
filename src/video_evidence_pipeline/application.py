@@ -79,7 +79,9 @@ def initialize_job(
     try:
         locator = canonicalize_source_locator(source_kind, raw_locator)
     except ValueError:
-        raise configuration_error("SOURCE_LOCATOR_INVALID", "source locator is invalid") from None
+        locator = None
+    if locator is None:
+        raise configuration_error("SOURCE_LOCATOR_INVALID", "source locator is invalid")
     job = JobSpec(
         job_id=job_id,
         created_at=datetime.now(UTC),

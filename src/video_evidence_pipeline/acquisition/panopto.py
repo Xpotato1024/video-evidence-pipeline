@@ -119,7 +119,11 @@ class PanoptoAdapter(AcquisitionAdapter):
                 provider="panopto",
             )
         except VepError as exc:
-            if exc.code == "PANOPTO_CREDENTIAL_REQUIRED" and self.runtime.panopto_ytdlp_fallback:
+            if (
+                exc.code == "PANOPTO_CREDENTIAL_REQUIRED"
+                and self.runtime.panopto_token_env is None
+                and self.runtime.panopto_ytdlp_fallback
+            ):
                 return self._fallback(
                     job,
                     workspace,

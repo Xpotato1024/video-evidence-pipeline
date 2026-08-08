@@ -76,6 +76,7 @@ def _run_monitored_ytdlp(
     environment: Mapping[str, str],
     process_factory: ProcessFactory,
 ) -> subprocess.CompletedProcess[bytes]:
+    launch_error = None
     try:
         process = process_factory(
             argv,
@@ -87,7 +88,9 @@ def _run_monitored_ytdlp(
             env=environment,
         )
     except FileNotFoundError:
-        raise io_error("YTDLP_NOT_AVAILABLE", "yt-dlp runtime is not available") from None
+        launch_error = io_error("YTDLP_NOT_AVAILABLE", "yt-dlp runtime is not available")
+    if launch_error is not None:
+        raise launch_error
     try:
         while True:
             if _staged_output_size(output_directory) > maximum_output_bytes:
@@ -238,6 +241,7 @@ def run_ytdlp(
                     process_factory=process_factory,
                 )
             else:
+                runner_error = None
                 try:
                     completed = runner(
                         argv,
@@ -251,13 +255,15 @@ def run_ytdlp(
                         timeout=acquisition_deadline.remaining(),
                     )
                 except FileNotFoundError:
-                    raise io_error(
+                    runner_error = io_error(
                         "YTDLP_NOT_AVAILABLE", "yt-dlp runtime is not available"
-                    ) from None
+                    )
                 except subprocess.TimeoutExpired:
-                    raise io_error(
+                    runner_error = io_error(
                         "YTDLP_ACQUISITION_FAILED", "yt-dlp acquisition timed out"
-                    ) from None
+                    )
+                if runner_error is not None:
+                    raise runner_error
         if completed.returncode != 0:
             raise io_error("YTDLP_ACQUISITION_FAILED", "yt-dlp acquisition failed")
         entries = list(run_directory.rglob("*"))

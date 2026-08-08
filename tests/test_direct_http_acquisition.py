@@ -213,6 +213,7 @@ def test_direct_http_timeout_is_safely_mapped(tmp_path: Path) -> None:
     assert captured.value.code == "NETWORK_TIMEOUT"
     assert "token" not in captured.value.safe_message
     assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
 
 
 def test_direct_http_rejects_unsolicited_partial_content(tmp_path: Path) -> None:
@@ -232,6 +233,25 @@ def test_direct_http_rejects_unsolicited_partial_content(tmp_path: Path) -> None
     with pytest.raises(VepError) as captured:
         acquire_job(job_path, adapter.runtime, adapter)
     assert captured.value.code == "HTTP_ACQUISITION_FAILED"
+
+
+def test_direct_http_rejects_content_range_even_with_status_200(tmp_path: Path) -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={
+                "content-length": "5",
+                "content-range": "bytes 0-4/10",
+                "content-type": "video/mp4",
+            },
+            content=b"media",
+        )
+
+    job_path = network_job(tmp_path)
+    adapter = adapter_for(handler)
+    with pytest.raises(VepError) as captured:
+        acquire_job(job_path, adapter.runtime, adapter)
+    assert captured.value.code == "HTTP_CONTENT_REJECTED"
 
 
 def test_direct_http_total_download_deadline_is_bounded(tmp_path: Path) -> None:

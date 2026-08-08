@@ -252,6 +252,8 @@ def test_runner_failures_are_structured_and_safe(tmp_path: Path, failure: str) -
     )
     assert captured.value.code == expected
     assert synthetic_secret not in captured.value.safe_message
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
 
 
 def test_generic_ytdlp_acquisition_publishes_only_verified_output(tmp_path: Path) -> None:

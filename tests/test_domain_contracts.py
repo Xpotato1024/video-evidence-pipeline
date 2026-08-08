@@ -183,6 +183,7 @@ def test_invalid_job_error_does_not_retain_sensitive_locator() -> None:
         )
     assert captured.value.code == "JOB_INVALID"
     assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
     assert secret not in repr(captured.value)
 
 

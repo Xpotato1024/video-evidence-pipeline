@@ -9,6 +9,8 @@ import httpx
 import pytest
 
 from video_evidence_pipeline.acquisition.box import BoxAdapter
+from video_evidence_pipeline.acquisition.http_transport import get_json
+from video_evidence_pipeline.acquisition.network_policy import origin
 from video_evidence_pipeline.acquisition.panopto import PanoptoAdapter
 from video_evidence_pipeline.acquisition.runtime import (
     AcquisitionRuntimeConfig,
@@ -276,6 +278,42 @@ def test_provider_api_rejects_compressed_response_before_decoding(
     assert captured.value.code == "API_RESPONSE_INVALID"
 
 
+@pytest.mark.parametrize(
+    ("headers", "body"),
+    [
+        ({"content-type": "application/json", "content-length": "999"}, b"{}"),
+        (
+            {
+                "content-type": "application/json",
+                "content-length": "2",
+                "content-range": "bytes 0-1/999",
+            },
+            b"{}",
+        ),
+        ({"content-type": "text/html", "content-length": "2"}, b"{}"),
+    ],
+)
+def test_provider_api_rejects_partial_mismatched_or_non_json_response(
+    headers: dict[str, str], body: bytes
+) -> None:
+    api_url = "https://api.example.invalid/v1/resource"
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers=headers, content=body)
+
+    with pytest.raises(VepError) as captured:
+        get_json(
+            api_url,
+            AcquisitionRuntimeConfig(),
+            client=httpx.Client(transport=httpx.MockTransport(handler)),
+            resolver=public_resolver,
+            bearer_token=TOKEN_SECRET,
+            credential_origin=origin(api_url),
+            error_code="SYNTHETIC_API_FAILED",
+        )
+    assert captured.value.code == "API_RESPONSE_INVALID"
+
+
 def test_provider_http_exception_does_not_retain_token_request(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -298,6 +336,7 @@ def test_provider_http_exception_does_not_retain_token_request(
         acquire_job(workspace.root, runtime, adapter)
     assert captured.value.code == "NETWORK_TIMEOUT"
     assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
     assert TOKEN_SECRET not in captured.value.safe_message
     assert SIGNED_SECRET not in captured.value.safe_message
 
@@ -337,6 +376,30 @@ def test_panopto_explicit_browser_cookie_fallback_uses_hardened_runner(tmp_path:
     assert evidence is not None
     assert evidence.backend == "yt-dlp"
     assert evidence.credential_mode == "browser-cookie"
+
+
+def test_panopto_configured_missing_token_does_not_fallback_to_browser_cookie(
+    tmp_path: Path,
+) -> None:
+    called = False
+
+    def runner(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        nonlocal called
+        called = True
+        return subprocess.CompletedProcess([], 0)
+
+    workspace = initialized_authorized_job(tmp_path, SourceKind.PANOPTO, PANOPTO_VIEWER)
+    runtime = AcquisitionRuntimeConfig(
+        panopto_token_env="VEP_PANOPTO_MISSING_TOKEN",
+        panopto_tenant_host="tenant.hosted.panopto.com",
+        cookies_from_browser=BrowserCookieSource.FIREFOX,
+        panopto_ytdlp_fallback=True,
+    )
+    adapter = PanoptoAdapter(runtime, resolver=public_resolver, runner=runner)
+    with pytest.raises(VepError) as captured:
+        acquire_job(workspace.root, runtime, adapter)
+    assert captured.value.code == "PANOPTO_CREDENTIAL_REQUIRED"
+    assert called is False
 
 
 def test_panopto_no_credential_and_access_denial_remain_failures(

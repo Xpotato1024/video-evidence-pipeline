@@ -36,7 +36,7 @@ from video_evidence_pipeline.acquisition.staged import (
 )
 from video_evidence_pipeline.domain.identifiers import sanitize_filename
 from video_evidence_pipeline.domain.manifests import HttpStatusCategory
-from video_evidence_pipeline.errors import configuration_error, integrity_error, io_error
+from video_evidence_pipeline.errors import VepError, configuration_error, integrity_error, io_error
 from video_evidence_pipeline.storage.layout import JobWorkspace
 
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
@@ -168,9 +168,9 @@ def _declared_length(response: httpx.Response) -> int | None:
     try:
         parsed = int(value)
     except ValueError:
-        raise integrity_error(
-            "HTTP_CONTENT_INVALID", "declared content length is invalid"
-        ) from None
+        parsed = None
+    if parsed is None:
+        raise integrity_error("HTTP_CONTENT_INVALID", "declared content length is invalid")
     if parsed < 0:
         raise integrity_error("HTTP_CONTENT_INVALID", "declared content length is invalid")
     return parsed
@@ -241,6 +241,7 @@ def stream_download(
                     "HTTP_REDIRECT_LOOP", "network redirect loop was rejected"
                 )
             visited.add(current)
+            request_failure = None
             try:
                 response_context: AbstractContextManager[httpx.Response] = active_client.stream(
                     "GET",
@@ -290,9 +291,9 @@ def stream_download(
                         try:
                             delay = int(response.headers["retry-after"])
                         except ValueError:
-                            raise io_error(
-                                error_code, "network retry instruction was invalid"
-                            ) from None
+                            delay = None
+                        if delay is None:
+                            raise io_error(error_code, "network retry instruction was invalid")
                         if delay < 0 or delay > maximum_retry_after_seconds:
                             raise io_error(
                                 error_code, "network retry instruction exceeded its bound"
@@ -308,6 +309,11 @@ def stream_download(
                         continue
                     if response.status_code != 200:
                         raise io_error(error_code, "network source request failed")
+                    if response.headers.get("content-range") is not None:
+                        raise integrity_error(
+                            "HTTP_CONTENT_REJECTED",
+                            "partial response is not accepted as a complete raw source",
+                        )
                     content_type = _content_type(response)
                     content_encoding = response.headers.get("content-encoding", "identity").lower()
                     if content_encoding not in {"", "identity"}:
@@ -386,9 +392,11 @@ def stream_download(
                         ),
                     )
             except httpx.TimeoutException:
-                raise io_error("NETWORK_TIMEOUT", "network source request timed out") from None
+                request_failure = io_error("NETWORK_TIMEOUT", "network source request timed out")
             except httpx.RequestError:
-                raise io_error(error_code, "network source request failed") from None
+                request_failure = io_error(error_code, "network source request failed")
+            if request_failure is not None:
+                raise request_failure
     except Exception:
         with suppress(OSError):
             staged_path.unlink(missing_ok=True)
@@ -428,6 +436,7 @@ def get_json(
         deadline=acquisition_deadline,
     )
     try:
+        request_failure = None
         try:
             with active_client.stream(
                 "GET",
@@ -453,11 +462,37 @@ def get_json(
                     )
                 if response.status_code in _REDIRECT_STATUSES or response.status_code != 200:
                     raise io_error(error_code, "network API request failed")
+                if response.headers.get("content-range") is not None:
+                    raise integrity_error(
+                        "API_RESPONSE_INVALID", "partial network API response was rejected"
+                    )
+                content_type = _content_type(response)
+                if content_type != "application/json" and not (
+                    content_type is not None and content_type.endswith("+json")
+                ):
+                    raise integrity_error(
+                        "API_RESPONSE_INVALID", "network API response was not JSON"
+                    )
                 content_encoding = response.headers.get("content-encoding", "identity").lower()
                 if content_encoding not in {"", "identity"}:
                     raise integrity_error(
                         "API_RESPONSE_INVALID",
                         "encoded network API response was rejected",
+                    )
+                try:
+                    declared_length = _declared_length(response)
+                except VepError:
+                    declared_length = None
+                    declared_length_invalid = True
+                else:
+                    declared_length_invalid = False
+                if declared_length_invalid:
+                    raise integrity_error(
+                        "API_RESPONSE_INVALID", "network API content length was invalid"
+                    )
+                if declared_length is not None and declared_length > 1024 * 1024:
+                    raise integrity_error(
+                        "API_RESPONSE_INVALID", "network API response exceeded its limit"
                     )
                 content = bytearray()
                 chunks = [response.content] if response.is_stream_consumed else response.iter_raw()
@@ -468,16 +503,24 @@ def get_json(
                             "API_RESPONSE_INVALID", "network API response exceeded its limit"
                         )
                     content.extend(chunk)
+                if declared_length is not None and declared_length != len(content):
+                    raise integrity_error(
+                        "API_RESPONSE_INVALID",
+                        "network API content length did not match acquired bytes",
+                    )
         except httpx.TimeoutException:
-            raise io_error("NETWORK_TIMEOUT", "network API request timed out") from None
+            request_failure = io_error("NETWORK_TIMEOUT", "network API request timed out")
         except httpx.RequestError:
-            raise io_error(error_code, "network API request failed") from None
+            request_failure = io_error(error_code, "network API request failed")
+        if request_failure is not None:
+            raise request_failure
+        parse_failed = False
         try:
             data = json.loads(bytes(content).decode("utf-8"))
         except (ValueError, UnicodeError):
-            raise integrity_error(
-                "API_RESPONSE_INVALID", "network API response was invalid"
-            ) from None
+            parse_failed = True
+        if parse_failed:
+            raise integrity_error("API_RESPONSE_INVALID", "network API response was invalid")
         if not isinstance(data, dict):
             raise integrity_error("API_RESPONSE_INVALID", "network API response was invalid")
         return JsonResponse(data=data, status_code=response.status_code, host=host)

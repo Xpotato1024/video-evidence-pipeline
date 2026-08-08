@@ -95,19 +95,26 @@ def job_fingerprint(job: JobSpec) -> str:
 
 
 def parse_job_data(data: Any) -> JobSpec:
+    validation_failed = False
     try:
-        return JobSpec.model_validate(data)
+        job = JobSpec.model_validate(data)
     except ValidationError:
-        raise configuration_error("JOB_INVALID", "job specification is invalid") from None
+        validation_failed = True
+    if validation_failed:
+        raise configuration_error("JOB_INVALID", "job specification is invalid")
+    return job
 
 
 def load_job_yaml(path: Path) -> JobSpec:
+    error = None
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        raise io_error("JOB_NOT_FOUND", "job specification does not exist") from None
+        error = io_error("JOB_NOT_FOUND", "job specification does not exist")
     except (OSError, UnicodeError, yaml.YAMLError):
-        raise configuration_error("JOB_YAML_INVALID", "job YAML could not be parsed") from None
+        error = configuration_error("JOB_YAML_INVALID", "job YAML could not be parsed")
+    if error is not None:
+        raise error
     return parse_job_data(data)
 
 
