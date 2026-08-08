@@ -47,6 +47,15 @@ documents:
   owners:
   - Xpotato1024
   metadata_mode: front-matter
+- document_id: VEP-ADR-0001
+  path: docs/decisions/0001-network-acquisition-credential-and-ephemeral-locator-boundary.md
+  document_type: architecture-decision-record
+  status: accepted
+  canonical: true
+  canonical_for: network-acquisition-credential-ephemeral-locator-boundary
+  owners:
+  - Xpotato1024
+  metadata_mode: front-matter
 - document_id: VEP-ADAPTER-CLAUDE
   path: CLAUDE.md
   document_type: agent-adapter
@@ -260,6 +269,15 @@ documents:
   status: draft
   canonical: true
   canonical_for: cli-local-workspace-operations
+  owners:
+  - Xpotato1024
+  metadata_mode: front-matter
+- document_id: VEP-OPS-NETWORK
+  path: docs/operations/network-acquisition.md
+  document_type: operations
+  status: draft
+  canonical: true
+  canonical_for: network-acquisition-operations
   owners:
   - Xpotato1024
   metadata_mode: front-matter

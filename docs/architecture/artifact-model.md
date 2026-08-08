@@ -18,7 +18,7 @@ source_issue: 1
 change_control: pull-request
 supersedes: []
 superseded_by: null
-related_documents: ["VEP-ARCH-PIPELINE", "VEP-ARCH-STATE", "VEP-ARCH-TRUST"]
+related_documents: ["VEP-ARCH-PIPELINE", "VEP-ARCH-STATE", "VEP-ARCH-TRUST", "VEP-OPS-NETWORK"]
 ---
 # 成果物モデル
 
@@ -78,6 +78,10 @@ configuration fingerprint、timezone-aware timestamp、warnings、redacted error
 ```
 
 AI生成物ではmodel、実行形態、Skill version、入力bundle hashを記録します。秘密情報や生の認証headerはlineageへ含めません。
+
+network sourceの`ProbeResult`はmetadata-onlyを許容し、declared size、content type、SHA-256は未確定でも
+構いません。actual SHA-256とsizeはprivate stagingへ取得した実bytesから確定し、ETag、Content-MD5、
+Box SHA-1等で代用しません。
 
 ## 4. Evidence record
 
@@ -147,6 +151,11 @@ claim type:
 - warnings
 - redacted error summary
 
+network source manifestにはtyped redacted acquisition evidenceを追加し、adapter、transport／backend／version、
+取得時刻、requested／final host、redirect count、HTTP status category、content type、declared length、actual size、
+credential mode、warningsを保持します。full URL、query、redirect Location、token、Cookie、credential path、
+生のyt-dlp出力は保持しません。
+
 ## 7. Storage layout
 
 `ACQUIRED`までの実装済みローカル配置:
@@ -157,6 +166,7 @@ claim type:
 ├─ authorization/
 │  └─ authorization.json
 ├─ source/
+│  ├─ staging/                  # network取得中だけ使用するprivate staging
 │  └─ raw/
 │     └─ <sha256>/
 │        └─ <sanitized-original-name>

@@ -5,7 +5,8 @@
 
 > [!IMPORTANT]
 > 現在実装済みなのは、core domain contracts、local workspace、`vep` CLI、明示authorization、
-> `local_file`による`CREATED → AUTHORIZED → ACQUIRED`です。network取得、FFmpeg処理、ASR、
+> `local_file`／`direct_http`／`generic_ytdlp`／`panopto`／`box`による
+> `CREATED → AUTHORIZED → ACQUIRED`です。FFmpeg処理、ASR、
 > evidence／authoring／audit／approval／exportは未実装です。
 
 ## Quickstart
@@ -59,6 +60,7 @@ raw sourceは`.local/`配下へcontent-addressedに保存され、上書きさ�
 - 文書メタデータ: [`docs/governance/metadata-schema.md`](docs/governance/metadata-schema.md)
 - CI品質ゲート: [`docs/operations/ci-quality-gates.md`](docs/operations/ci-quality-gates.md)
 - CLI／workspace運用: [`docs/operations/cli-and-local-workspace.md`](docs/operations/cli-and-local-workspace.md)
+- Network取得運用: [`docs/operations/network-acquisition.md`](docs/operations/network-acquisition.md)
 - contribution: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - security: [`SECURITY.md`](SECURITY.md)
 
@@ -92,6 +94,6 @@ uv run python scripts/validate_repository.py --root .
 
 ## Status
 
-- Implemented: core contracts、generated Schema、CLI、local workspace、`local_file` acquisition
+- Implemented: core contracts、generated Schema、CLI、local workspace、local／network acquisition
 - Current state path: `CREATED → AUTHORIZED → ACQUIRED`
-- Next: network acquisition adapters（親ロードマップの後続Issue）
+- Next: FFmpeg／ffprobeによるmedia normalization（親ロードマップの後続Issue）

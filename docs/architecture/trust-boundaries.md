@@ -18,7 +18,7 @@ source_issue: 1
 change_control: pull-request
 supersedes: []
 superseded_by: null
-related_documents: ["VEP-ARCH-CONTEXT", "VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-TECH"]
+related_documents: ["VEP-ARCH-CONTEXT", "VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-TECH", "VEP-OPS-NETWORK", "VEP-ADR-0001"]
 ---
 # 信頼境界とデータ保護
 
@@ -48,11 +48,12 @@ related_documents: ["VEP-ARCH-CONTEXT", "VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS
 
 - authorization gate
 - allowlisted adapter
-- content typeとffprobe
-- size、duration、hash
-- URL query redaction
-- command argument redaction
-- raw source隔離
+- network acquisition専用permissionとruntime credentialの分離
+- TLS verification、manual redirect、public-address DNS検査、接続先IP pin
+- credentialのorigin拘束とcross-origin転送禁止
+- transport-level content type／error body、size、streaming SHA-256検査
+- stable locatorとephemeral download URLの分離
+- private stagingからimmutable raw sourceへのexclusive publish
 
 ### TB-2: Browser credential → acquisition tool
 
@@ -69,6 +70,7 @@ related_documents: ["VEP-ARCH-CONTEXT", "VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS
 - credential pathをGit管理外
 - process output redaction
 - 最小権限の公式APIを優先
+- yt-dlpのuser config、plugin、remote component、任意引数、sidecar出力を禁止
 
 ### TB-3: Local data → optional cloud AI
 
@@ -184,8 +186,12 @@ related_documents: ["VEP-ARCH-CONTEXT", "VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS
 ログへ出してはいけない情報:
 
 - full signed URL
+- stable URLを含むfull URLとquery
+- redirect Location、Panopto download URL、Box CDN URL
 - Cookie/header
 - API token
+- credential environment value／local credential path
+- yt-dlp raw stdout／stderr
 - transcript全文
 - user draft全文
 - local secret pathの内容
