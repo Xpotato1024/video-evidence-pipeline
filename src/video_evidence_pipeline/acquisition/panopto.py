@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -40,7 +39,7 @@ class PanoptoAdapter(AcquisitionAdapter):
         *,
         client: httpx.Client | None = None,
         resolver: Resolver = default_resolver,
-        runner: SubprocessRunner = subprocess.run,
+        runner: SubprocessRunner | None = None,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self.runtime = runtime

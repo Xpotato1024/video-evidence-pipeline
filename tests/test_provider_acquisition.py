@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import json
 import subprocess
 from pathlib import Path
@@ -231,6 +232,34 @@ def test_provider_api_response_size_is_bounded(
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, content=b"{" + b"x" * (1024 * 1024))
+
+    workspace = initialized_authorized_job(tmp_path, SourceKind.PANOPTO, PANOPTO_VIEWER)
+    runtime = AcquisitionRuntimeConfig(
+        panopto_token_env="VEP_PANOPTO_ACCESS_TOKEN",
+        panopto_tenant_host="tenant.hosted.panopto.com",
+    )
+    adapter = PanoptoAdapter(
+        runtime,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        resolver=public_resolver,
+    )
+    with pytest.raises(VepError) as captured:
+        acquire_job(workspace.root, runtime, adapter)
+    assert captured.value.code == "API_RESPONSE_INVALID"
+
+
+def test_provider_api_rejects_compressed_response_before_decoding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VEP_PANOPTO_ACCESS_TOKEN", TOKEN_SECRET)
+    compressed = gzip.compress(b'{"value":"' + b"x" * (1024 * 1024) + b'"}')
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-encoding": "gzip", "content-type": "application/json"},
+            content=compressed,
+        )
 
     workspace = initialized_authorized_job(tmp_path, SourceKind.PANOPTO, PANOPTO_VIEWER)
     runtime = AcquisitionRuntimeConfig(

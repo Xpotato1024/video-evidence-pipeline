@@ -40,11 +40,18 @@
           "title": "Declared Content Length"
         },
         "final_host": {
-          "maxLength": 253,
-          "minLength": 1,
-          "pattern": "^[A-Za-z0-9.:-]+$",
-          "title": "Final Host",
-          "type": "string"
+          "anyOf": [
+            {
+              "maxLength": 253,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9.:-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Final Host"
         },
         "http_status_category": {
           "$ref": "#/$defs/HttpStatusCategory"
@@ -55,10 +62,17 @@
           "type": "string"
         },
         "redirect_count": {
-          "maximum": 20,
-          "minimum": 0,
-          "title": "Redirect Count",
-          "type": "integer"
+          "anyOf": [
+            {
+              "maximum": 20,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Redirect Count"
         },
         "requested_host": {
           "maxLength": 253,

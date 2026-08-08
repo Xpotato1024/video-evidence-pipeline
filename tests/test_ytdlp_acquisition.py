@@ -160,6 +160,54 @@ def test_runner_uses_shell_false_and_disables_plugins(tmp_path: Path) -> None:
     assert argv[argv.index("--proxy") + 1].startswith("http://127.0.0.1:")
 
 
+def test_production_runner_stops_process_when_streaming_output_exceeds_limit(
+    tmp_path: Path,
+) -> None:
+    workspace = workspace_for(tmp_path)
+    captured: dict[str, object] = {}
+
+    class FakeProcess:
+        terminated = False
+
+        def poll(self) -> None:
+            return None
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+        def wait(self, *, timeout: float) -> int:
+            assert timeout == 1
+            return 0
+
+        def kill(self) -> None:
+            raise AssertionError("terminate should be sufficient")
+
+    process = FakeProcess()
+
+    def process_factory(argv: list[str], **kwargs: object):
+        captured["argv"] = argv
+        captured["kwargs"] = kwargs
+        output_directory(argv).joinpath("source.mp4").write_bytes(b"x" * 9)
+        return process
+
+    with pytest.raises(VepError) as error:
+        run_ytdlp(
+            "https://videos.example.invalid/watch?v=stable-id",
+            workspace,
+            AcquisitionRuntimeConfig(maximum_download_bytes=8),
+            adapter_kind=SourceKind.GENERIC_YTDLP,
+            resolver=public_resolver,
+            process_factory=process_factory,
+        )
+    assert error.value.code == "SOURCE_TOO_LARGE"
+    assert process.terminated is True
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["shell"] is False
+    assert kwargs["stdout"] is subprocess.DEVNULL
+    assert kwargs["stderr"] is subprocess.DEVNULL
+
+
 @pytest.mark.parametrize("failure", ["missing", "nonzero", "multiple", "sidecar", "symlink"])
 def test_runner_failures_are_structured_and_safe(tmp_path: Path, failure: str) -> None:
     workspace = workspace_for(tmp_path)
@@ -233,6 +281,9 @@ def test_generic_ytdlp_acquisition_publishes_only_verified_output(tmp_path: Path
     assert evidence.backend == "yt-dlp"
     assert evidence.credential_mode == "browser-cookie"
     assert evidence.http_status_category == "not-observed"
+    assert evidence.final_host is None
+    assert evidence.redirect_count is None
+    assert evidence.warnings == ["yt-dlp final host and redirect count were not observed"]
     combined = "\n".join(
         path.read_text(encoding="utf-8")
         for path in [

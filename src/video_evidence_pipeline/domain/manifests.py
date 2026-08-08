@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from video_evidence_pipeline.domain import StrictModel, UtcDateTime
 from video_evidence_pipeline.domain.artifacts import ArtifactRecord, ArtifactRef, ProducerIdentity
@@ -41,8 +41,8 @@ class AcquisitionEvidence(StrictModel):
     backend_version: str = Field(min_length=1, max_length=128)
     obtained_at: UtcDateTime
     requested_host: EvidenceHost
-    final_host: EvidenceHost
-    redirect_count: int = Field(ge=0, le=20)
+    final_host: EvidenceHost | None
+    redirect_count: int | None = Field(ge=0, le=20)
     http_status_category: HttpStatusCategory
     response_content_type: str | None = Field(default=None, max_length=256)
     declared_content_length: int | None = Field(default=None, ge=0)
@@ -61,6 +61,18 @@ class SourceManifest(StrictModel):
     acquisition_evidence: AcquisitionEvidence | None = None
     created_at: UtcDateTime
     warnings: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def evidence_matches_source_kind(self) -> Self:
+        if self.source_kind is SourceKind.LOCAL_FILE:
+            if self.acquisition_evidence is not None:
+                raise ValueError("local source manifest must not contain acquisition evidence")
+        elif (
+            self.acquisition_evidence is None
+            or self.acquisition_evidence.adapter_kind is not self.source_kind
+        ):
+            raise ValueError("network source manifest requires matching acquisition evidence")
+        return self
 
 
 class StageManifest(StrictModel):

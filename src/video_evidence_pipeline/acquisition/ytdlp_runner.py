@@ -40,6 +40,69 @@ from video_evidence_pipeline.storage.permissions import (
 )
 
 SubprocessRunner = Callable[..., subprocess.CompletedProcess[bytes]]
+ProcessFactory = Callable[..., subprocess.Popen[bytes]]
+
+
+def _staged_output_size(output_directory: Path) -> int:
+    total = 0
+    for entry in output_directory.rglob("*"):
+        try:
+            metadata = entry.stat(follow_symlinks=False)
+        except OSError:
+            continue
+        if stat.S_ISREG(metadata.st_mode):
+            total += metadata.st_size
+    return total
+
+
+def _stop_process(process: subprocess.Popen[bytes]) -> None:
+    with suppress(OSError):
+        process.terminate()
+    try:
+        process.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        with suppress(OSError):
+            process.kill()
+        with suppress(OSError, subprocess.TimeoutExpired):
+            process.wait(timeout=1)
+
+
+def _run_monitored_ytdlp(
+    argv: list[str],
+    *,
+    output_directory: Path,
+    maximum_output_bytes: int,
+    deadline: AcquisitionDeadline,
+    environment: Mapping[str, str],
+    process_factory: ProcessFactory,
+) -> subprocess.CompletedProcess[bytes]:
+    try:
+        process = process_factory(
+            argv,
+            shell=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            cwd=output_directory,
+            env=environment,
+        )
+    except FileNotFoundError:
+        raise io_error("YTDLP_NOT_AVAILABLE", "yt-dlp runtime is not available") from None
+    try:
+        while True:
+            if _staged_output_size(output_directory) > maximum_output_bytes:
+                raise integrity_error(
+                    "SOURCE_TOO_LARGE",
+                    "yt-dlp output exceeded the configured limit during acquisition",
+                )
+            returncode = process.poll()
+            if returncode is not None:
+                return subprocess.CompletedProcess(argv, returncode)
+            remaining = deadline.remaining()
+            time.sleep(min(0.01, remaining))
+    except Exception:
+        _stop_process(process)
+        raise
 
 
 def ytdlp_version() -> str:
@@ -136,11 +199,12 @@ def run_ytdlp(
     runtime: AcquisitionRuntimeConfig,
     *,
     adapter_kind: SourceKind,
-    runner: SubprocessRunner = subprocess.run,
+    runner: SubprocessRunner | None = None,
     environment: Mapping[str, str] | None = None,
     resolver: Resolver = default_resolver,
     deadline: AcquisitionDeadline | None = None,
     monotonic: Callable[[], float] = time.monotonic,
+    process_factory: ProcessFactory = subprocess.Popen,
 ) -> StagedSource:
     acquisition_deadline = deadline or AcquisitionDeadline.start(
         runtime.maximum_download_seconds,
@@ -163,22 +227,37 @@ def run_ytdlp(
             deadline=acquisition_deadline,
         ) as proxy_url:
             argv = hardened_argv(locator, run_directory, runtime, proxy_url=proxy_url)
-            try:
-                completed = runner(
+            subprocess_environment = _subprocess_environment(environment or os.environ)
+            if runner is None:
+                completed = _run_monitored_ytdlp(
                     argv,
-                    shell=False,
-                    check=False,
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    cwd=run_directory,
-                    env=_subprocess_environment(environment or os.environ),
-                    timeout=acquisition_deadline.remaining(),
+                    output_directory=run_directory,
+                    maximum_output_bytes=runtime.maximum_download_bytes,
+                    deadline=acquisition_deadline,
+                    environment=subprocess_environment,
+                    process_factory=process_factory,
                 )
-            except FileNotFoundError:
-                raise io_error("YTDLP_NOT_AVAILABLE", "yt-dlp runtime is not available") from None
-            except subprocess.TimeoutExpired:
-                raise io_error("YTDLP_ACQUISITION_FAILED", "yt-dlp acquisition timed out") from None
+            else:
+                try:
+                    completed = runner(
+                        argv,
+                        shell=False,
+                        check=False,
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        cwd=run_directory,
+                        env=subprocess_environment,
+                        timeout=acquisition_deadline.remaining(),
+                    )
+                except FileNotFoundError:
+                    raise io_error(
+                        "YTDLP_NOT_AVAILABLE", "yt-dlp runtime is not available"
+                    ) from None
+                except subprocess.TimeoutExpired:
+                    raise io_error(
+                        "YTDLP_ACQUISITION_FAILED", "yt-dlp acquisition timed out"
+                    ) from None
         if completed.returncode != 0:
             raise io_error("YTDLP_ACQUISITION_FAILED", "yt-dlp acquisition failed")
         entries = list(run_directory.rglob("*"))
@@ -210,8 +289,8 @@ def run_ytdlp(
                 backend="yt-dlp",
                 backend_version=ytdlp_version(),
                 requested_host=host,
-                final_host=host,
-                redirect_count=0,
+                final_host=None,
+                redirect_count=None,
                 http_status_category=HttpStatusCategory.NOT_OBSERVED,
                 response_content_type=None,
                 declared_content_length=None,
@@ -220,6 +299,7 @@ def run_ytdlp(
                     if runtime.cookies_from_browser is not None
                     else CredentialMode.NONE
                 ),
+                warnings=("yt-dlp final host and redirect count were not observed",),
             ),
         )
     except Exception:

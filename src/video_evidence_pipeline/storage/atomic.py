@@ -102,10 +102,10 @@ def read_json_model[ModelT: BaseModel](target: Path, model: type[ModelT], *, cod
         raw = target.read_bytes()
         data = json.loads(raw.decode("utf-8"))
         return model.model_validate(data)
-    except FileNotFoundError as exc:
-        raise io_error(code, "required machine artifact does not exist") from exc
-    except (OSError, UnicodeError, json.JSONDecodeError, ValidationError) as exc:
-        raise integrity_error(code, "required machine artifact is malformed") from exc
+    except FileNotFoundError:
+        raise io_error(code, "required machine artifact does not exist") from None
+    except (OSError, UnicodeError, json.JSONDecodeError, ValidationError):
+        raise integrity_error(code, "required machine artifact is malformed") from None
 
 
 def atomic_copy_exclusive(

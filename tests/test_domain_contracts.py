@@ -11,7 +11,12 @@ from video_evidence_pipeline.domain.artifacts import ArtifactRef
 from video_evidence_pipeline.domain.authorization import AuthorizationRecord
 from video_evidence_pipeline.domain.hashing import sha256_bytes, sha256_file
 from video_evidence_pipeline.domain.identifiers import sanitize_filename
-from video_evidence_pipeline.domain.job import AssignmentSpec, JobSpec, job_fingerprint
+from video_evidence_pipeline.domain.job import (
+    AssignmentSpec,
+    JobSpec,
+    job_fingerprint,
+    parse_job_data,
+)
 from video_evidence_pipeline.domain.state import JobState
 from video_evidence_pipeline.domain.transitions import TransitionRecord, validate_transition_records
 from video_evidence_pipeline.errors import VepError
@@ -163,6 +168,22 @@ def test_sensitive_url_query_is_rejected() -> None:
                 }
             )
         )
+
+
+def test_invalid_job_error_does_not_retain_sensitive_locator() -> None:
+    secret = "synthetic-super-secret"
+    with pytest.raises(VepError) as captured:
+        parse_job_data(
+            job_data(
+                source={
+                    "kind": "direct_http",
+                    "locator": f"https://example.invalid/video?token={secret}",
+                }
+            )
+        )
+    assert captured.value.code == "JOB_INVALID"
+    assert captured.value.__cause__ is None
+    assert secret not in repr(captured.value)
 
 
 @pytest.mark.parametrize(

@@ -52,8 +52,8 @@ class AcquisitionEvidenceDraft:
     backend: str
     backend_version: str
     requested_host: str
-    final_host: str
-    redirect_count: int
+    final_host: str | None
+    redirect_count: int | None
     http_status_category: HttpStatusCategory
     response_content_type: str | None
     declared_content_length: int | None

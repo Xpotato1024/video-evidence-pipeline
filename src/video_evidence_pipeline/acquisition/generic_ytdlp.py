@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -31,7 +30,7 @@ class GenericYtdlpAdapter(AcquisitionAdapter):
         self,
         runtime: AcquisitionRuntimeConfig,
         *,
-        runner: SubprocessRunner = subprocess.run,
+        runner: SubprocessRunner | None = None,
         resolver: Resolver = default_resolver,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:

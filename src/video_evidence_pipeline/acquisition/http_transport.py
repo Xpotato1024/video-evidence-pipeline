@@ -306,7 +306,7 @@ def stream_download(
                             )
                         sleep(delay)
                         continue
-                    if not 200 <= response.status_code < 300:
+                    if response.status_code != 200:
                         raise io_error(error_code, "network source request failed")
                     content_type = _content_type(response)
                     content_encoding = response.headers.get("content-encoding", "identity").lower()
@@ -451,19 +451,23 @@ def get_json(
                     raise io_error(
                         not_found_code or error_code, "network API resource was not found"
                     )
-                if (
-                    response.status_code in _REDIRECT_STATUSES
-                    or not 200 <= response.status_code < 300
-                ):
+                if response.status_code in _REDIRECT_STATUSES or response.status_code != 200:
                     raise io_error(error_code, "network API request failed")
+                content_encoding = response.headers.get("content-encoding", "identity").lower()
+                if content_encoding not in {"", "identity"}:
+                    raise integrity_error(
+                        "API_RESPONSE_INVALID",
+                        "encoded network API response was rejected",
+                    )
                 content = bytearray()
-                for chunk in response.iter_bytes():
+                chunks = [response.content] if response.is_stream_consumed else response.iter_raw()
+                for chunk in chunks:
                     acquisition_deadline.remaining()
-                    content.extend(chunk)
-                    if len(content) > 1024 * 1024:
+                    if len(chunk) > (1024 * 1024) - len(content):
                         raise integrity_error(
                             "API_RESPONSE_INVALID", "network API response exceeded its limit"
                         )
+                    content.extend(chunk)
         except httpx.TimeoutException:
             raise io_error("NETWORK_TIMEOUT", "network API request timed out") from None
         except httpx.RequestError:

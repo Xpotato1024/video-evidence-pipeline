@@ -155,6 +155,7 @@ network source manifestにはtyped redacted acquisition evidenceを追加し、a
 取得時刻、requested／final host、redirect count、HTTP status category、content type、declared length、actual size、
 credential mode、warningsを保持します。full URL、query、redirect Location、token、Cookie、credential path、
 生のyt-dlp出力は保持しません。
+backendが観測できないfinal hostとredirect countは`null`とし、推測値へ置き換えません。
 
 ## 7. Storage layout
 

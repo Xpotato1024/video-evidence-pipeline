@@ -78,11 +78,11 @@ def _run[T](action: Callable[[], T], *, json_output: bool) -> T:
         payload = {"ok": False, "error": {"code": exc.code, "message": exc.safe_message}}
         _emit(payload, json_output=json_output)
         raise typer.Exit(code=int(exc.exit_code)) from None
-    except ValidationError as exc:
+    except ValidationError:
         error = configuration_error("CONFIG_INVALID", "configuration is invalid")
         payload = {"ok": False, "error": {"code": error.code, "message": error.safe_message}}
         _emit(payload, json_output=json_output)
-        raise typer.Exit(code=int(error.exit_code)) from exc
+        raise typer.Exit(code=int(error.exit_code)) from None
 
 
 def _version_callback(value: bool) -> None:
@@ -224,17 +224,20 @@ def acquire(
     ] = 2 * 1024 * 1024 * 1024,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    runtime = AcquisitionRuntimeConfig(
-        cookies_from_browser=cookies_from_browser,
-        box_token_env=box_token_env,
-        panopto_token_env=panopto_token_env,
-        panopto_tenant_host=panopto_tenant_host,
-        panopto_ytdlp_fallback=panopto_ytdlp_fallback,
-        network_timeout_seconds=network_timeout,
-        maximum_download_seconds=maximum_download_seconds,
-        maximum_download_bytes=maximum_download_bytes,
-    )
-    result = _run(lambda: acquire_job(workspace, runtime), json_output=json_output)
+    def acquire_with_runtime_config():
+        runtime = AcquisitionRuntimeConfig(
+            cookies_from_browser=cookies_from_browser,
+            box_token_env=box_token_env,
+            panopto_token_env=panopto_token_env,
+            panopto_tenant_host=panopto_tenant_host,
+            panopto_ytdlp_fallback=panopto_ytdlp_fallback,
+            network_timeout_seconds=network_timeout,
+            maximum_download_seconds=maximum_download_seconds,
+            maximum_download_bytes=maximum_download_bytes,
+        )
+        return acquire_job(workspace, runtime)
+
+    result = _run(acquire_with_runtime_config, json_output=json_output)
     artifact = result.source_manifest.artifact_record.artifact
     _emit(
         {

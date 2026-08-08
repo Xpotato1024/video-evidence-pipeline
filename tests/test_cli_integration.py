@@ -274,6 +274,23 @@ def test_cli_parser_failure_is_structured_json(tmp_path: Path) -> None:
     assert "Traceback" not in result.stderr
 
 
+def test_cli_runtime_config_failure_is_structured_without_secret_echo(tmp_path: Path) -> None:
+    mistaken_secret = "synthetic-runtime-token.secret"
+    result = run_vep(
+        tmp_path,
+        "acquire",
+        "does-not-exist",
+        "--box-token-env",
+        mistaken_secret,
+        "--json",
+    )
+    assert result.returncode == 2
+    assert json.loads(result.stdout)["error"]["code"] == "CONFIG_INVALID"
+    assert mistaken_secret not in result.stdout
+    assert mistaken_secret not in result.stderr
+    assert "Traceback" not in result.stderr
+
+
 def test_cli_invalid_enum_is_structured_json_without_locator_echo(tmp_path: Path) -> None:
     locator = "credential-like-locator-value"
     result = run_vep(

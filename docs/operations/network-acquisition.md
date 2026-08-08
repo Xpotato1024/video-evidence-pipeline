@@ -64,6 +64,7 @@ networkへ接続しません。source manifest公開後の停止はstage manifes
 source manifestのredacted evidenceにはadapter、transport／backend／version、取得時刻、requested／final host、
 redirect count、HTTP status category、content type、declared length、actual size、credential mode、warningsだけを
 保存します。full URL、query、credential identity／value、生のyt-dlp stdout／stderrは保存しません。
+yt-dlp backendがfinal host／redirect countを観測できない場合は`null`を保存し、warningで未観測を明示します。
 
 ## direct HTTP
 
@@ -85,6 +86,8 @@ outputはprivate staging内のexactly one regular non-link fileだけを許可�
 転送しません。browser cookieは明示時だけ使用し、Cookie file exportは標準経路にしません。
 全通信は内部のHTTPS-only local proxyを固定指定し、各`CONNECT`先をpublic-address検査して検証済みIPへpinします。
 plain HTTP、private／link-local destination、DNS rebindingをproxyで拒否し、subprocess全体にもdeadlineを設定します。
+
+production runnerはstaging内の生成bytesをprocess実行中も監視し、`--max-filesize`で長さ不明responseを判定できない場合も上限超過時にprocessを停止します。終了後のregular file／non-zero／maximum bytes検証も独立して行います。
 
 ## Panopto
 
