@@ -36,6 +36,8 @@ jobに保存するlocatorはcredentialを含まないstable identityに限定し
 locator fingerprintはcanonical locatorから計算します。Panopto download URL、Box CDN URL、redirect
 `Location`、signed URLはruntime memory内だけで扱い、job、manifest、transition、log、exceptionへ保存しません。
 
+通常queryは、YouTubeの`v`／`list`／`t`やprovider APIの`fields`など、stable identityまたは取得選択として明示した名前だけを許可します。未知のquery名はsecret／ephemeralでないと証明できないためfail closedで拒否します。
+
 ## Authorizationとcredential
 
 すべてのsourceに`allow_local_processing=true`が必要です。network sourceにはさらに

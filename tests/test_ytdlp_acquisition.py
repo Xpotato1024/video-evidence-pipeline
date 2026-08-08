@@ -149,6 +149,7 @@ def test_runner_uses_shell_false_and_disables_plugins(tmp_path: Path) -> None:
     assert kwargs["shell"] is False
     assert kwargs["stdout"] is subprocess.DEVNULL
     assert kwargs["stderr"] is subprocess.DEVNULL
+    assert kwargs["cwd"] == staged.cleanup_root
     environment = kwargs["env"]
     assert isinstance(environment, dict)
     assert environment["YTDLP_NO_PLUGINS"] == "1"

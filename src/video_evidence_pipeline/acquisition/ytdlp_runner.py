@@ -7,6 +7,7 @@ import os
 import stat
 import subprocess
 import sys
+import time
 import uuid
 from collections.abc import Callable, Mapping
 from contextlib import suppress
@@ -19,7 +20,10 @@ from video_evidence_pipeline.acquisition.network_policy import (
     default_resolver,
     validate_network_url,
 )
-from video_evidence_pipeline.acquisition.runtime import AcquisitionRuntimeConfig
+from video_evidence_pipeline.acquisition.runtime import (
+    AcquisitionDeadline,
+    AcquisitionRuntimeConfig,
+)
 from video_evidence_pipeline.acquisition.staged import (
     AcquisitionEvidenceDraft,
     StagedSource,
@@ -135,15 +139,28 @@ def run_ytdlp(
     runner: SubprocessRunner = subprocess.run,
     environment: Mapping[str, str] | None = None,
     resolver: Resolver = default_resolver,
+    deadline: AcquisitionDeadline | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> StagedSource:
+    acquisition_deadline = deadline or AcquisitionDeadline.start(
+        runtime.maximum_download_seconds,
+        monotonic=monotonic,
+    )
     run_directory = staging_directory(workspace) / uuid.uuid4().hex
     ensure_private_directory(run_directory)
-    validate_network_url(locator, resolver=resolver)
+    validate_network_url(
+        locator,
+        resolver=resolver,
+        resolve_timeout_seconds=min(
+            runtime.network_timeout_seconds,
+            acquisition_deadline.remaining(),
+        ),
+    )
     try:
         with validating_https_proxy(
             resolver=resolver,
             connect_timeout_seconds=runtime.network_timeout_seconds,
-            maximum_elapsed_seconds=runtime.maximum_download_seconds,
+            deadline=acquisition_deadline,
         ) as proxy_url:
             argv = hardened_argv(locator, run_directory, runtime, proxy_url=proxy_url)
             try:
@@ -154,13 +171,14 @@ def run_ytdlp(
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
+                    cwd=run_directory,
                     env=_subprocess_environment(environment or os.environ),
-                    timeout=runtime.maximum_download_seconds,
+                    timeout=acquisition_deadline.remaining(),
                 )
-            except FileNotFoundError as exc:
-                raise io_error("YTDLP_NOT_AVAILABLE", "yt-dlp runtime is not available") from exc
-            except subprocess.TimeoutExpired as exc:
-                raise io_error("YTDLP_ACQUISITION_FAILED", "yt-dlp acquisition timed out") from exc
+            except FileNotFoundError:
+                raise io_error("YTDLP_NOT_AVAILABLE", "yt-dlp runtime is not available") from None
+            except subprocess.TimeoutExpired:
+                raise io_error("YTDLP_ACQUISITION_FAILED", "yt-dlp acquisition timed out") from None
         if completed.returncode != 0:
             raise io_error("YTDLP_ACQUISITION_FAILED", "yt-dlp acquisition failed")
         entries = list(run_directory.rglob("*"))

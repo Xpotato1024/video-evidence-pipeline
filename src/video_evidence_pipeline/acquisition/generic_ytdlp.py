@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import subprocess
+import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
@@ -12,7 +14,10 @@ from video_evidence_pipeline.acquisition.base import (
     ProbeResult,
 )
 from video_evidence_pipeline.acquisition.network_policy import Resolver, default_resolver
-from video_evidence_pipeline.acquisition.runtime import AcquisitionRuntimeConfig
+from video_evidence_pipeline.acquisition.runtime import (
+    AcquisitionDeadline,
+    AcquisitionRuntimeConfig,
+)
 from video_evidence_pipeline.acquisition.staged import publish_staged_source
 from video_evidence_pipeline.acquisition.ytdlp_runner import SubprocessRunner, run_ytdlp
 from video_evidence_pipeline.domain.job import JobSpec, SourceKind
@@ -28,10 +33,12 @@ class GenericYtdlpAdapter(AcquisitionAdapter):
         *,
         runner: SubprocessRunner = subprocess.run,
         resolver: Resolver = default_resolver,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self.runtime = runtime
         self.runner = runner
         self.resolver = resolver
+        self.monotonic = monotonic
 
     def probe(self, job: JobSpec) -> ProbeResult:
         if job.source.kind is not SourceKind.GENERIC_YTDLP:
@@ -44,6 +51,10 @@ class GenericYtdlpAdapter(AcquisitionAdapter):
 
     def acquire(self, job: JobSpec, workspace: JobWorkspace) -> AcquisitionResult:
         started_at = datetime.now(UTC)
+        deadline = AcquisitionDeadline.start(
+            self.runtime.maximum_download_seconds,
+            monotonic=self.monotonic,
+        )
         self.probe(job)
         staged = run_ytdlp(
             job.source.locator,
@@ -52,6 +63,7 @@ class GenericYtdlpAdapter(AcquisitionAdapter):
             adapter_kind=SourceKind.GENERIC_YTDLP,
             runner=self.runner,
             resolver=self.resolver,
+            deadline=deadline,
         )
         return publish_staged_source(
             job,

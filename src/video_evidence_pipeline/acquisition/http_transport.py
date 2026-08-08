@@ -20,10 +20,14 @@ from video_evidence_pipeline.acquisition.network_policy import (
     Resolver,
     default_resolver,
     origin,
+    resolve_with_timeout,
     validate_network_url,
     validate_resolved_addresses,
 )
-from video_evidence_pipeline.acquisition.runtime import AcquisitionRuntimeConfig
+from video_evidence_pipeline.acquisition.runtime import (
+    AcquisitionDeadline,
+    AcquisitionRuntimeConfig,
+)
 from video_evidence_pipeline.acquisition.staged import (
     AcquisitionEvidenceDraft,
     StagedSource,
@@ -90,6 +94,7 @@ def build_httpx_client(
     runtime: AcquisitionRuntimeConfig,
     *,
     resolver: Resolver = default_resolver,
+    deadline: AcquisitionDeadline | None = None,
 ) -> httpx.Client:
     timeout = httpx.Timeout(
         connect=runtime.network_timeout_seconds,
@@ -97,13 +102,40 @@ def build_httpx_client(
         write=runtime.network_timeout_seconds,
         pool=runtime.network_timeout_seconds,
     )
+
+    def bounded_resolver(host: str, port: int) -> list[str]:
+        remaining = (
+            deadline.remaining() if deadline is not None else runtime.network_timeout_seconds
+        )
+        return resolve_with_timeout(
+            resolver,
+            host,
+            port,
+            timeout_seconds=min(runtime.network_timeout_seconds, remaining),
+        )
+
     return httpx.Client(
         timeout=timeout,
         follow_redirects=False,
         verify=True,
         trust_env=False,
-        transport=_PinnedHttpTransport(resolver),
+        transport=_PinnedHttpTransport(bounded_resolver),
     )
+
+
+def _request_timeout(
+    runtime: AcquisitionRuntimeConfig,
+    deadline: AcquisitionDeadline,
+) -> httpx.Timeout:
+    remaining = min(runtime.network_timeout_seconds, deadline.remaining())
+    return httpx.Timeout(connect=remaining, read=remaining, write=remaining, pool=remaining)
+
+
+def _resolve_timeout(
+    runtime: AcquisitionRuntimeConfig,
+    deadline: AcquisitionDeadline,
+) -> float:
+    return min(runtime.network_timeout_seconds, deadline.remaining())
 
 
 def _headers_for(
@@ -135,8 +167,10 @@ def _declared_length(response: httpx.Response) -> int | None:
         return None
     try:
         parsed = int(value)
-    except ValueError as exc:
-        raise integrity_error("HTTP_CONTENT_INVALID", "declared content length is invalid") from exc
+    except ValueError:
+        raise integrity_error(
+            "HTTP_CONTENT_INVALID", "declared content length is invalid"
+        ) from None
     if parsed < 0:
         raise integrity_error("HTTP_CONTENT_INVALID", "declared content length is invalid")
     return parsed
@@ -168,16 +202,25 @@ def stream_download(
     maximum_retry_after_seconds: int = 5,
     sleep: Callable[[float], None] = time.sleep,
     monotonic: Callable[[], float] = time.monotonic,
+    deadline: AcquisitionDeadline | None = None,
     error_code: str = "HTTP_ACQUISITION_FAILED",
 ) -> StagedSource:
-    deadline = monotonic() + runtime.maximum_download_seconds
+    acquisition_deadline = deadline or AcquisitionDeadline.start(
+        runtime.maximum_download_seconds,
+        monotonic=monotonic,
+    )
     owned_client = client is None
-    active_client = client or build_httpx_client(runtime, resolver=resolver)
+    active_client = client or build_httpx_client(
+        runtime,
+        resolver=resolver,
+        deadline=acquisition_deadline,
+    )
     current = requested_url
     validate_network_url(
         current,
         resolver=resolver,
         allow_sensitive_query=allow_sensitive_redirect_query,
+        resolve_timeout_seconds=_resolve_timeout(runtime, acquisition_deadline),
     )
     visited: set[str] = set()
     redirect_count = 0
@@ -186,12 +229,12 @@ def stream_download(
     staged_path = new_staging_path(workspace)
     try:
         while True:
-            if monotonic() >= deadline:
-                raise io_error("NETWORK_TIMEOUT", "network acquisition deadline was exceeded")
+            acquisition_deadline.remaining()
             final_host = validate_network_url(
                 current,
                 resolver=resolver,
                 allow_sensitive_query=allow_sensitive_redirect_query,
+                resolve_timeout_seconds=_resolve_timeout(runtime, acquisition_deadline),
             )
             if current in visited:
                 raise configuration_error(
@@ -208,6 +251,7 @@ def stream_download(
                         bearer_token=bearer_token,
                     ),
                     follow_redirects=False,
+                    timeout=_request_timeout(runtime, acquisition_deadline),
                 )
                 with response_context as response:
                     if response.status_code in _REDIRECT_STATUSES:
@@ -223,6 +267,10 @@ def stream_download(
                             next_url,
                             resolver=resolver,
                             allow_sensitive_query=allow_sensitive_redirect_query,
+                            resolve_timeout_seconds=_resolve_timeout(
+                                runtime,
+                                acquisition_deadline,
+                            ),
                         )
                         if (
                             urlsplit(current).scheme == "https"
@@ -241,10 +289,10 @@ def stream_download(
                     ):
                         try:
                             delay = int(response.headers["retry-after"])
-                        except ValueError as exc:
+                        except ValueError:
                             raise io_error(
                                 error_code, "network retry instruction was invalid"
-                            ) from exc
+                            ) from None
                         if delay < 0 or delay > maximum_retry_after_seconds:
                             raise io_error(
                                 error_code, "network retry instruction exceeded its bound"
@@ -252,7 +300,7 @@ def stream_download(
                         retries += 1
                         warnings.append("bounded Retry-After honored")
                         visited.remove(current)
-                        if monotonic() + delay >= deadline:
+                        if delay >= acquisition_deadline.remaining():
                             raise io_error(
                                 "NETWORK_TIMEOUT", "network acquisition deadline was exceeded"
                             )
@@ -290,10 +338,7 @@ def stream_download(
                             else response.iter_raw()
                         )
                         for chunk in chunks:
-                            if monotonic() >= deadline:
-                                raise io_error(
-                                    "NETWORK_TIMEOUT", "network acquisition deadline was exceeded"
-                                )
+                            acquisition_deadline.remaining()
                             if not chunk:
                                 continue
                             actual += len(chunk)
@@ -340,10 +385,10 @@ def stream_download(
                             warnings=tuple(warnings),
                         ),
                     )
-            except httpx.TimeoutException as exc:
-                raise io_error("NETWORK_TIMEOUT", "network source request timed out") from exc
-            except httpx.RequestError as exc:
-                raise io_error(error_code, "network source request failed") from exc
+            except httpx.TimeoutException:
+                raise io_error("NETWORK_TIMEOUT", "network source request timed out") from None
+            except httpx.RequestError:
+                raise io_error(error_code, "network source request failed") from None
     except Exception:
         with suppress(OSError):
             staged_path.unlink(missing_ok=True)
@@ -365,11 +410,23 @@ def get_json(
     access_denied_code: str | None = None,
     not_found_code: str | None = None,
     monotonic: Callable[[], float] = time.monotonic,
+    deadline: AcquisitionDeadline | None = None,
 ) -> JsonResponse:
-    deadline = monotonic() + runtime.network_timeout_seconds
-    host = validate_network_url(locator, resolver=resolver)
+    acquisition_deadline = deadline or AcquisitionDeadline.start(
+        runtime.maximum_download_seconds,
+        monotonic=monotonic,
+    )
+    host = validate_network_url(
+        locator,
+        resolver=resolver,
+        resolve_timeout_seconds=_resolve_timeout(runtime, acquisition_deadline),
+    )
     owned_client = client is None
-    active_client = client or build_httpx_client(runtime, resolver=resolver)
+    active_client = client or build_httpx_client(
+        runtime,
+        resolver=resolver,
+        deadline=acquisition_deadline,
+    )
     try:
         try:
             with active_client.stream(
@@ -384,6 +441,7 @@ def get_json(
                     "Accept": "application/json",
                 },
                 follow_redirects=False,
+                timeout=_request_timeout(runtime, acquisition_deadline),
             ) as response:
                 if response.status_code in {401, 403}:
                     raise io_error(
@@ -400,23 +458,22 @@ def get_json(
                     raise io_error(error_code, "network API request failed")
                 content = bytearray()
                 for chunk in response.iter_bytes():
-                    if monotonic() >= deadline:
-                        raise io_error("NETWORK_TIMEOUT", "network API deadline was exceeded")
+                    acquisition_deadline.remaining()
                     content.extend(chunk)
                     if len(content) > 1024 * 1024:
                         raise integrity_error(
                             "API_RESPONSE_INVALID", "network API response exceeded its limit"
                         )
-        except httpx.TimeoutException as exc:
-            raise io_error("NETWORK_TIMEOUT", "network API request timed out") from exc
-        except httpx.RequestError as exc:
-            raise io_error(error_code, "network API request failed") from exc
+        except httpx.TimeoutException:
+            raise io_error("NETWORK_TIMEOUT", "network API request timed out") from None
+        except httpx.RequestError:
+            raise io_error(error_code, "network API request failed") from None
         try:
             data = json.loads(bytes(content).decode("utf-8"))
-        except (ValueError, UnicodeError) as exc:
+        except (ValueError, UnicodeError):
             raise integrity_error(
                 "API_RESPONSE_INVALID", "network API response was invalid"
-            ) from exc
+            ) from None
         if not isinstance(data, dict):
             raise integrity_error("API_RESPONSE_INVALID", "network API response was invalid")
         return JsonResponse(data=data, status_code=response.status_code, host=host)

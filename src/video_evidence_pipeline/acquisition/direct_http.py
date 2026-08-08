@@ -16,7 +16,10 @@ from video_evidence_pipeline.acquisition.base import (
 )
 from video_evidence_pipeline.acquisition.http_transport import stream_download
 from video_evidence_pipeline.acquisition.network_policy import Resolver, default_resolver
-from video_evidence_pipeline.acquisition.runtime import AcquisitionRuntimeConfig
+from video_evidence_pipeline.acquisition.runtime import (
+    AcquisitionDeadline,
+    AcquisitionRuntimeConfig,
+)
 from video_evidence_pipeline.acquisition.staged import (
     AcquisitionEvidenceDraft,
     publish_staged_source,
@@ -54,6 +57,10 @@ class DirectHttpAdapter(AcquisitionAdapter):
 
     def acquire(self, job: JobSpec, workspace: JobWorkspace) -> AcquisitionResult:
         started_at = datetime.now(UTC)
+        deadline = AcquisitionDeadline.start(
+            self.runtime.maximum_download_seconds,
+            monotonic=self.monotonic,
+        )
         probe = self.probe(job)
         host = (urlsplit(job.source.locator).hostname or "").lower()
         staged = stream_download(
@@ -77,6 +84,7 @@ class DirectHttpAdapter(AcquisitionAdapter):
             resolver=self.resolver,
             display_name=probe.display_name,
             monotonic=self.monotonic,
+            deadline=deadline,
         )
         return publish_staged_source(
             job,

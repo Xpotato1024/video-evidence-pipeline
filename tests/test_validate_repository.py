@@ -228,3 +228,16 @@ requires-python = ">=3.12,<3.14"
     assert "CLI_ENTRYPOINT_INVALID" in codes
     assert "RUNTIME_PATH_MISSING" in codes
     assert "CI_COMMAND_MISSING" in codes
+
+
+def test_synthetic_media_is_allowed_only_in_test_fixtures(tmp_path: Path) -> None:
+    tracked = make_valid_repo(tmp_path)
+    fixture = "tests/fixtures/synthetic-media.mp4"
+    write(tmp_path, fixture, "synthetic bytes only")
+    tracked.add(fixture)
+    assert "FORBIDDEN_ARTIFACT" not in finding_codes(tmp_path, tracked)
+
+    outside = "tests/synthetic-media.mp4"
+    write(tmp_path, outside, "synthetic bytes only")
+    tracked.add(outside)
+    assert "FORBIDDEN_ARTIFACT" in finding_codes(tmp_path, tracked)

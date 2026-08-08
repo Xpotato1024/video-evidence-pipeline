@@ -15,7 +15,10 @@ from video_evidence_pipeline.acquisition.base import (
 )
 from video_evidence_pipeline.acquisition.http_transport import get_json, stream_download
 from video_evidence_pipeline.acquisition.network_policy import Resolver, default_resolver, origin
-from video_evidence_pipeline.acquisition.runtime import AcquisitionRuntimeConfig
+from video_evidence_pipeline.acquisition.runtime import (
+    AcquisitionDeadline,
+    AcquisitionRuntimeConfig,
+)
 from video_evidence_pipeline.acquisition.staged import (
     AcquisitionEvidenceDraft,
     publish_staged_source,
@@ -36,11 +39,13 @@ class BoxAdapter(AcquisitionAdapter):
         client: httpx.Client | None = None,
         resolver: Resolver = default_resolver,
         sleep: Callable[[float], None] = time.sleep,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self.runtime = runtime
         self.client = client
         self.resolver = resolver
         self.sleep = sleep
+        self.monotonic = monotonic
 
     def probe(self, job: JobSpec) -> ProbeResult:
         if job.source.kind is not SourceKind.BOX:
@@ -53,6 +58,10 @@ class BoxAdapter(AcquisitionAdapter):
 
     def acquire(self, job: JobSpec, workspace: JobWorkspace) -> AcquisitionResult:
         started_at = datetime.now(UTC)
+        deadline = AcquisitionDeadline.start(
+            self.runtime.maximum_download_seconds,
+            monotonic=self.monotonic,
+        )
         probe = self.probe(job)
         file_id = box_file_id(job.source.locator)
         token = self.runtime.token_from_environment(self.runtime.box_token_env, provider="box")
@@ -67,6 +76,7 @@ class BoxAdapter(AcquisitionAdapter):
             error_code="BOX_API_FAILED",
             access_denied_code="BOX_ACCESS_DENIED",
             not_found_code="BOX_FILE_NOT_FOUND",
+            deadline=deadline,
         ).data
         if str(metadata.get("id")) != file_id or metadata.get("type") != "file":
             raise integrity_error("BOX_API_INVALID", "Box metadata identity did not match")
@@ -112,6 +122,7 @@ class BoxAdapter(AcquisitionAdapter):
             retry_attempts=2,
             maximum_retry_after_seconds=5,
             sleep=self.sleep,
+            deadline=deadline,
             error_code="BOX_ACQUISITION_FAILED",
         )
         if staged.path.stat().st_size != declared_size:

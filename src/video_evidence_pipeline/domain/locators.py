@@ -13,6 +13,7 @@ _SENSITIVE_QUERY_NAMES = {
     "api-key",
     "apikey",
     "api_key",
+    "awsaccesskeyid",
     "auth",
     "auth_token",
     "authorization",
@@ -60,6 +61,23 @@ _AZURE_SAS_QUERY_NAMES = {
     "sr",
     "sv",
 }
+_STABLE_QUERY_NAMES = {
+    "course",
+    "end",
+    "feature",
+    "fields",
+    "id",
+    "index",
+    "lang",
+    "list",
+    "locale",
+    "page",
+    "quality",
+    "start",
+    "t",
+    "v",
+    "video",
+}
 _BOX_FILE_ID = re.compile(r"^[0-9]+$")
 
 
@@ -75,7 +93,11 @@ def is_sensitive_query_name(name: str) -> bool:
 
 
 def has_sensitive_query(locator: str) -> bool:
-    return any(is_sensitive_query_name(name) for name, _ in parse_qsl(urlsplit(locator).query))
+    pairs = parse_qsl(urlsplit(locator).query, keep_blank_values=True)
+    normalized_names = {name.strip().lower().replace("_", "-") for name, _ in pairs}
+    return any(is_sensitive_query_name(name) for name, _ in pairs) or any(
+        not name or name not in _STABLE_QUERY_NAMES for name in normalized_names
+    )
 
 
 def _canonical_host(parsed) -> tuple[str, str]:

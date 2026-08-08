@@ -4,15 +4,39 @@ from __future__ import annotations
 
 import os
 import re
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from enum import StrEnum
 
 from pydantic import Field, model_validator
 
 from video_evidence_pipeline.domain import StrictModel
 from video_evidence_pipeline.domain.job import SourceKind
-from video_evidence_pipeline.errors import configuration_error, state_error
+from video_evidence_pipeline.errors import configuration_error, io_error, state_error
 
 _ENVIRONMENT_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+@dataclass(frozen=True, slots=True)
+class AcquisitionDeadline:
+    expires_at: float
+    monotonic: Callable[[], float]
+
+    @classmethod
+    def start(
+        cls,
+        maximum_seconds: float,
+        *,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> AcquisitionDeadline:
+        return cls(expires_at=monotonic() + maximum_seconds, monotonic=monotonic)
+
+    def remaining(self) -> float:
+        value = self.expires_at - self.monotonic()
+        if value <= 0:
+            raise io_error("NETWORK_TIMEOUT", "network acquisition deadline was exceeded")
+        return value
 
 
 class BrowserCookieSource(StrEnum):

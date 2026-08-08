@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -54,6 +55,10 @@ def test_stable_https_locator_accepts_https_and_benign_query(locator: str, expec
         "https://example.invalid/video?api_key=secret",
         "https://example.invalid/video?hdnea=exp~acl~hmac",
         "https://example.invalid/video?client_secret=secret",
+        "https://example.invalid/video?token=",
+        "https://example.invalid/video?AWSAccessKeyId=secret",
+        "https://example.invalid/video?h=opaque&t=123",
+        "https://example.invalid/video?opaque=credential-shaped-value",
     ],
 )
 def test_unstable_or_secret_https_locator_is_rejected(locator: str) -> None:
@@ -128,6 +133,21 @@ def test_ssrf_policy_accepts_public_https() -> None:
     assert validate_network_url("https://example.invalid/video", resolver=public_resolver) == (
         "example.invalid"
     )
+
+
+def test_dns_resolution_timeout_is_safely_mapped() -> None:
+    def slow_resolver(_host: str, _port: int) -> list[str]:
+        time.sleep(0.1)
+        return ["93.184.216.34"]
+
+    with pytest.raises(VepError) as captured:
+        validate_network_url(
+            "https://example.invalid/video",
+            resolver=slow_resolver,
+            resolve_timeout_seconds=0.01,
+        )
+    assert captured.value.code == "NETWORK_TIMEOUT"
+    assert captured.value.__cause__ is None
 
 
 def test_ssrf_policy_rejects_localhost_without_dns() -> None:

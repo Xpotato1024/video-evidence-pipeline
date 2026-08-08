@@ -212,6 +212,7 @@ def test_direct_http_timeout_is_safely_mapped(tmp_path: Path) -> None:
         acquire_job(job_path, adapter.runtime, adapter)
     assert captured.value.code == "NETWORK_TIMEOUT"
     assert "token" not in captured.value.safe_message
+    assert captured.value.__cause__ is None
 
 
 def test_direct_http_total_download_deadline_is_bounded(tmp_path: Path) -> None:

@@ -17,6 +17,7 @@ from video_evidence_pipeline.acquisition.network_policy import (
     default_resolver,
     validated_network_destination,
 )
+from video_evidence_pipeline.acquisition.runtime import AcquisitionDeadline
 from video_evidence_pipeline.errors import VepError
 
 SocketConnector = Callable[[str, int, float], socket.socket]
@@ -33,7 +34,7 @@ class _ProxyServer(socketserver.ThreadingTCPServer):
     resolver: Resolver
     connector: SocketConnector
     connect_timeout_seconds: float
-    maximum_elapsed_seconds: float
+    deadline: AcquisitionDeadline
 
     def handle_error(self, _request: object, _client_address: object) -> None:
         return
@@ -46,7 +47,12 @@ class _HttpsConnectHandler(socketserver.StreamRequestHandler):
 
     def handle(self) -> None:
         server = cast(_ProxyServer, self.server)
-        self.connection.settimeout(server.connect_timeout_seconds)
+        try:
+            remaining = server.deadline.remaining()
+        except VepError:
+            self._reject()
+            return
+        self.connection.settimeout(min(server.connect_timeout_seconds, remaining))
         request_line = self.rfile.readline(4097)
         if len(request_line) > 4096:
             self._reject()
@@ -86,6 +92,10 @@ class _HttpsConnectHandler(socketserver.StreamRequestHandler):
             _host, validated_port, addresses = validated_network_destination(
                 f"https://{target}/",
                 resolver=server.resolver,
+                resolve_timeout_seconds=min(
+                    server.connect_timeout_seconds,
+                    server.deadline.remaining(),
+                ),
             )
         except VepError:
             self._reject()
@@ -94,27 +104,32 @@ class _HttpsConnectHandler(socketserver.StreamRequestHandler):
             self._reject()
             return
         try:
-            upstream = server.connector(addresses[0], port, server.connect_timeout_seconds)
-        except OSError:
+            upstream = server.connector(
+                addresses[0],
+                port,
+                min(server.connect_timeout_seconds, server.deadline.remaining()),
+            )
+        except (OSError, VepError):
             self._reject()
             return
         with upstream:
             self.wfile.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
             self.wfile.flush()
-            self._relay(upstream, deadline=time.monotonic() + server.maximum_elapsed_seconds)
+            self._relay(upstream, deadline=server.deadline)
 
-    def _relay(self, upstream: socket.socket, *, deadline: float) -> None:
+    def _relay(self, upstream: socket.socket, *, deadline: AcquisitionDeadline) -> None:
         peers = (self.connection, upstream)
-        while time.monotonic() < deadline:
+        while True:
             try:
-                readable, _, _ = select.select(peers, [], [], 0.25)
+                wait = min(0.25, deadline.remaining())
+                readable, _, _ = select.select(peers, [], [], wait)
                 for source in readable:
                     data = source.recv(64 * 1024)
                     if not data:
                         return
                     destination = upstream if source is self.connection else self.connection
                     destination.sendall(data)
-            except OSError:
+            except (OSError, VepError):
                 return
 
 
@@ -124,13 +139,18 @@ def validating_https_proxy(
     resolver: Resolver = default_resolver,
     connector: SocketConnector = _connect,
     connect_timeout_seconds: float,
-    maximum_elapsed_seconds: float,
+    deadline: AcquisitionDeadline | None = None,
+    maximum_elapsed_seconds: float | None = None,
 ) -> Iterator[str]:
+    if deadline is None:
+        if maximum_elapsed_seconds is None:
+            raise ValueError("deadline or maximum_elapsed_seconds is required")
+        deadline = AcquisitionDeadline.start(maximum_elapsed_seconds, monotonic=time.monotonic)
     server = _ProxyServer(("127.0.0.1", 0), _HttpsConnectHandler)
     server.resolver = resolver
     server.connector = connector
     server.connect_timeout_seconds = connect_timeout_seconds
-    server.maximum_elapsed_seconds = maximum_elapsed_seconds
+    server.deadline = deadline
     thread = threading.Thread(
         target=server.serve_forever,
         kwargs={"poll_interval": 0.05},

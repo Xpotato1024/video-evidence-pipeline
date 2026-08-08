@@ -247,6 +247,32 @@ def test_provider_api_response_size_is_bounded(
     assert captured.value.code == "API_RESPONSE_INVALID"
 
 
+def test_provider_http_exception_does_not_retain_token_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VEP_PANOPTO_ACCESS_TOKEN", TOKEN_SECRET)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout(SIGNED_SECRET, request=request)
+
+    workspace = initialized_authorized_job(tmp_path, SourceKind.PANOPTO, PANOPTO_VIEWER)
+    runtime = AcquisitionRuntimeConfig(
+        panopto_token_env="VEP_PANOPTO_ACCESS_TOKEN",
+        panopto_tenant_host="tenant.hosted.panopto.com",
+    )
+    adapter = PanoptoAdapter(
+        runtime,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        resolver=public_resolver,
+    )
+    with pytest.raises(VepError) as captured:
+        acquire_job(workspace.root, runtime, adapter)
+    assert captured.value.code == "NETWORK_TIMEOUT"
+    assert captured.value.__cause__ is None
+    assert TOKEN_SECRET not in captured.value.safe_message
+    assert SIGNED_SECRET not in captured.value.safe_message
+
+
 def test_panopto_browser_cookie_fallback_requires_explicit_flag(tmp_path: Path) -> None:
     workspace = initialized_authorized_job(tmp_path, SourceKind.PANOPTO, PANOPTO_VIEWER)
     runtime = AcquisitionRuntimeConfig(cookies_from_browser=BrowserCookieSource.FIREFOX)
@@ -435,6 +461,43 @@ def test_box_retry_after_is_bounded(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     evidence = result.source_manifest.acquisition_evidence
     assert evidence is not None
     assert evidence.warnings == ["bounded Retry-After honored"]
+
+
+def test_box_metadata_and_download_share_one_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = [0.0]
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if request.url.path == "/2.0/files/12345":
+            clock[0] = 0.75
+            return httpx.Response(
+                200,
+                json={"id": "12345", "type": "file", "name": "media.mp4", "size": 5},
+            )
+        clock[0] = 1.01
+        return httpx.Response(200, content=b"media")
+
+    monkeypatch.setenv("VEP_BOX_ACCESS_TOKEN", TOKEN_SECRET)
+    workspace = initialized_authorized_job(tmp_path, SourceKind.BOX, "12345")
+    runtime = AcquisitionRuntimeConfig(
+        box_token_env="VEP_BOX_ACCESS_TOKEN",
+        maximum_download_bytes=1024,
+        maximum_download_seconds=1,
+    )
+    adapter = BoxAdapter(
+        runtime,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        resolver=public_resolver,
+        monotonic=lambda: clock[0],
+    )
+    with pytest.raises(VepError) as captured:
+        acquire_job(workspace.root, runtime, adapter)
+    assert captured.value.code == "NETWORK_TIMEOUT"
+    assert calls == 2
 
 
 def test_provider_privacy_scan_covers_job_outputs(

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import subprocess
+import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 import httpx
@@ -14,7 +16,10 @@ from video_evidence_pipeline.acquisition.base import (
 )
 from video_evidence_pipeline.acquisition.http_transport import get_json, stream_download
 from video_evidence_pipeline.acquisition.network_policy import Resolver, default_resolver, origin
-from video_evidence_pipeline.acquisition.runtime import AcquisitionRuntimeConfig
+from video_evidence_pipeline.acquisition.runtime import (
+    AcquisitionDeadline,
+    AcquisitionRuntimeConfig,
+)
 from video_evidence_pipeline.acquisition.staged import (
     AcquisitionEvidenceDraft,
     publish_staged_source,
@@ -36,11 +41,13 @@ class PanoptoAdapter(AcquisitionAdapter):
         client: httpx.Client | None = None,
         resolver: Resolver = default_resolver,
         runner: SubprocessRunner = subprocess.run,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self.runtime = runtime
         self.client = client
         self.resolver = resolver
         self.runner = runner
+        self.monotonic = monotonic
 
     def probe(self, job: JobSpec) -> ProbeResult:
         if job.source.kind is not SourceKind.PANOPTO:
@@ -52,7 +59,12 @@ class PanoptoAdapter(AcquisitionAdapter):
         )
 
     def _fallback(
-        self, job: JobSpec, workspace: JobWorkspace, *, started_at: datetime
+        self,
+        job: JobSpec,
+        workspace: JobWorkspace,
+        *,
+        started_at: datetime,
+        deadline: AcquisitionDeadline,
     ) -> AcquisitionResult:
         if not self.runtime.panopto_ytdlp_fallback or self.runtime.cookies_from_browser is None:
             raise state_error(
@@ -76,6 +88,7 @@ class PanoptoAdapter(AcquisitionAdapter):
             adapter_kind=SourceKind.PANOPTO,
             runner=self.runner,
             resolver=self.resolver,
+            deadline=deadline,
         )
         return publish_staged_source(
             job,
@@ -87,6 +100,10 @@ class PanoptoAdapter(AcquisitionAdapter):
 
     def acquire(self, job: JobSpec, workspace: JobWorkspace) -> AcquisitionResult:
         started_at = datetime.now(UTC)
+        deadline = AcquisitionDeadline.start(
+            self.runtime.maximum_download_seconds,
+            monotonic=self.monotonic,
+        )
         probe = self.probe(job)
         tenant, session_id = panopto_identity(job.source.locator)
         if (
@@ -104,7 +121,12 @@ class PanoptoAdapter(AcquisitionAdapter):
             )
         except VepError as exc:
             if exc.code == "PANOPTO_CREDENTIAL_REQUIRED" and self.runtime.panopto_ytdlp_fallback:
-                return self._fallback(job, workspace, started_at=started_at)
+                return self._fallback(
+                    job,
+                    workspace,
+                    started_at=started_at,
+                    deadline=deadline,
+                )
             raise
         api_url = f"https://{tenant}/Panopto/api/v1/sessions/{session_id}"
         metadata = get_json(
@@ -117,6 +139,7 @@ class PanoptoAdapter(AcquisitionAdapter):
             error_code="PANOPTO_API_FAILED",
             access_denied_code="PANOPTO_ACCESS_DENIED",
             not_found_code="PANOPTO_SESSION_NOT_FOUND",
+            deadline=deadline,
         ).data
         response_id = metadata.get("Id")
         if not isinstance(response_id, str) or response_id.lower() != session_id.lower():
@@ -155,6 +178,7 @@ class PanoptoAdapter(AcquisitionAdapter):
             resolver=self.resolver,
             allow_sensitive_redirect_query=True,
             display_name=display_name,
+            deadline=deadline,
             error_code="PANOPTO_ACQUISITION_FAILED",
         )
         return publish_staged_source(
