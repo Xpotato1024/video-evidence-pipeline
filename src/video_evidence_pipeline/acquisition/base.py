@@ -14,8 +14,9 @@ from video_evidence_pipeline.storage.layout import JobWorkspace
 class ProbeResult:
     display_name: str
     locator_fingerprint: str
-    content_sha256: str
-    size_bytes: int
+    declared_size_bytes: int | None = None
+    content_type: str | None = None
+    content_sha256: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -17,6 +17,7 @@ class AuthorizationRecord(StrictModel):
     confirmed_by_user: StrictBool = Field(json_schema_extra={"const": True})
     authorization_basis: str = Field(min_length=1, max_length=1024)
     allow_local_processing: StrictBool
+    allow_network_acquisition: StrictBool = False
     allow_external_api: StrictBool = False
     confirmed_at: UtcDateTime
     confirmer_identity: str = Field(min_length=1, max_length=256)

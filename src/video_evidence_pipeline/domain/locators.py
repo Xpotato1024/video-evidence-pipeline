@@ -1,0 +1,123 @@
+"""Stable source locator canonicalization without credential persistence."""
+
+from __future__ import annotations
+
+import re
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from uuid import UUID
+
+from video_evidence_pipeline.domain.hashing import sha256_bytes
+
+_SENSITIVE_QUERY_NAMES = {
+    "access_token",
+    "auth",
+    "authorization",
+    "credential",
+    "expires",
+    "key-pair-id",
+    "password",
+    "policy",
+    "sig",
+    "signature",
+    "token",
+}
+_SENSITIVE_QUERY_PREFIXES = ("x-amz-", "x-goog-")
+_BOX_FILE_ID = re.compile(r"^[0-9]+$")
+
+
+def is_sensitive_query_name(name: str) -> bool:
+    normalized = name.strip().lower().replace("_", "-")
+    aliases = {item.replace("_", "-") for item in _SENSITIVE_QUERY_NAMES}
+    return normalized in aliases or normalized.startswith(_SENSITIVE_QUERY_PREFIXES)
+
+
+def has_sensitive_query(locator: str) -> bool:
+    return any(is_sensitive_query_name(name) for name, _ in parse_qsl(urlsplit(locator).query))
+
+
+def _canonical_host(parsed) -> tuple[str, str]:
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("source locator must not contain userinfo")
+    host = parsed.hostname
+    if not host:
+        raise ValueError("source locator must contain a host")
+    try:
+        canonical_host = host.encode("idna").decode("ascii").lower()
+        port = parsed.port
+    except (UnicodeError, ValueError) as exc:
+        raise ValueError("source locator host is invalid") from exc
+    netloc = canonical_host if port in {None, 443} else f"{canonical_host}:{port}"
+    return canonical_host, netloc
+
+
+def canonicalize_https_locator(locator: str, *, allow_query: bool = True) -> str:
+    parsed = urlsplit(locator)
+    if parsed.scheme.lower() != "https":
+        raise ValueError("network source locator must use HTTPS")
+    _, netloc = _canonical_host(parsed)
+    if parsed.fragment:
+        raise ValueError("source locator must not contain a fragment")
+    if parsed.query and not allow_query:
+        raise ValueError("source locator query is not supported")
+    if has_sensitive_query(locator):
+        raise ValueError("source locator must not contain credential or signed query parameters")
+    path = parsed.path or "/"
+    query = urlencode(parse_qsl(parsed.query, keep_blank_values=True), doseq=True)
+    return urlunsplit(("https", netloc, path, query, ""))
+
+
+def canonicalize_panopto_locator(locator: str) -> str:
+    parsed = urlsplit(locator)
+    if parsed.scheme.lower() == "panopto":
+        host, _ = _canonical_host(parsed)
+        match = re.fullmatch(r"/session/([0-9a-fA-F-]{36})", parsed.path)
+        if not match or parsed.query or parsed.fragment:
+            raise ValueError("Panopto locator must identify one tenant session")
+        session_id = UUID(match.group(1))
+        return f"panopto://{host}/session/{session_id}"
+    stable = canonicalize_https_locator(locator)
+    parsed = urlsplit(stable)
+    if not parsed.path.lower().endswith("/panopto/pages/viewer.aspx"):
+        raise ValueError("Panopto source must be a viewer URL")
+    identifiers = [value for name, value in parse_qsl(parsed.query) if name.lower() == "id"]
+    if len(identifiers) != 1:
+        raise ValueError("Panopto viewer URL must contain one session id")
+    try:
+        session_id = UUID(identifiers[0])
+    except ValueError as exc:
+        raise ValueError("Panopto session id is invalid") from exc
+    return f"panopto://{parsed.hostname}/session/{session_id}"
+
+
+def canonicalize_box_locator(locator: str) -> str:
+    candidate = locator.strip()
+    if _BOX_FILE_ID.fullmatch(candidate):
+        return f"box://file/{candidate}"
+    parsed = urlsplit(candidate)
+    if parsed.scheme.lower() == "box":
+        match = re.fullmatch(r"/([0-9]+)", parsed.path)
+        if parsed.netloc.lower() != "file" or not match or parsed.query or parsed.fragment:
+            raise ValueError("Box locator must identify one file")
+        return f"box://file/{match.group(1)}"
+    stable = canonicalize_https_locator(candidate)
+    parsed = urlsplit(stable)
+    host = parsed.hostname or ""
+    if host != "app.box.com" and not host.endswith(".app.box.com"):
+        raise ValueError("Box file URL must use an app.box.com host")
+    match = re.fullmatch(r"/(?:files|file)/([0-9]+)(?:/.*)?", parsed.path)
+    if not match:
+        raise ValueError("Box URL must contain a file id")
+    return f"box://file/{match.group(1)}"
+
+
+def locator_fingerprint(locator: str) -> str:
+    return sha256_bytes(locator.encode("utf-8"))
+
+
+def panopto_identity(locator: str) -> tuple[str, str]:
+    parsed = urlsplit(canonicalize_panopto_locator(locator))
+    return parsed.hostname or "", parsed.path.rsplit("/", 1)[-1]
+
+
+def box_file_id(locator: str) -> str:
+    return urlsplit(canonicalize_box_locator(locator)).path.rsplit("/", 1)[-1]

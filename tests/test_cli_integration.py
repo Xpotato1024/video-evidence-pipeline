@@ -157,7 +157,7 @@ def test_cli_created_authorized_acquired_e2e(tmp_path: Path) -> None:
     assert json.loads(stale.stdout)["error"]["code"] == "AUTHORIZATION_STALE"
 
 
-def test_cli_nonimplemented_kind_has_structured_safe_error(tmp_path: Path) -> None:
+def test_cli_network_kind_is_denied_without_dedicated_permission(tmp_path: Path) -> None:
     locator = "https://example.invalid/video"
     initialized = run_vep(
         tmp_path,
@@ -192,10 +192,53 @@ def test_cli_nonimplemented_kind_has_structured_safe_error(tmp_path: Path) -> No
     )
     assert authorized.returncode == 0
     acquired = run_vep(tmp_path, "acquire", str(job_path), "--json")
-    assert acquired.returncode == 2
+    assert acquired.returncode == 3
     payload = json.loads(acquired.stdout)
-    assert payload["error"]["code"] == "SOURCE_KIND_NOT_IMPLEMENTED"
+    assert payload["error"]["code"] == "NETWORK_ACQUISITION_NOT_AUTHORIZED"
     assert "Traceback" not in acquired.stderr
+
+
+def test_cli_network_authorization_flag_is_persisted_separately(tmp_path: Path) -> None:
+    initialized = run_vep(
+        tmp_path,
+        "job",
+        "init",
+        "network-authorized",
+        "--source-kind",
+        "direct_http",
+        "--source",
+        "https://example.invalid/video",
+        "--task-type",
+        "report",
+        "--language",
+        "ja",
+        "--output-format",
+        "markdown",
+        "--json",
+    )
+    assert initialized.returncode == 0
+    job_path = tmp_path / ".local" / "jobs" / "network-authorized"
+    authorized = run_vep(
+        tmp_path,
+        "job",
+        "authorize",
+        str(job_path),
+        "--confirm",
+        "--basis",
+        "authorized synthetic locator",
+        "--allow-local-processing",
+        "--allow-network-acquisition",
+        "--deny-external-api",
+        "--json",
+    )
+    payload = json.loads(authorized.stdout)
+    assert authorized.returncode == 0
+    assert payload["allow_network_acquisition"] is True
+    assert payload["allow_external_api"] is False
+    status = run_vep(tmp_path, "job", "status", str(job_path), "--json")
+    authorization = json.loads(status.stdout)["authorization"]
+    assert authorization["allow_network_acquisition"] is True
+    assert authorization["allow_external_api"] is False
 
 
 def test_cli_rejects_sensitive_query_without_echoing_it(tmp_path: Path) -> None:
@@ -219,7 +262,7 @@ def test_cli_rejects_sensitive_query_without_echoing_it(tmp_path: Path) -> None:
         "--json",
     )
     assert initialized.returncode == 2
-    assert json.loads(initialized.stdout)["error"]["code"] == "CONFIG_INVALID"
+    assert json.loads(initialized.stdout)["error"]["code"] == "SOURCE_LOCATOR_INVALID"
     assert secret_value not in initialized.stdout
     assert "Traceback" not in initialized.stderr
 

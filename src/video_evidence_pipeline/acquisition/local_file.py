@@ -134,20 +134,22 @@ class LocalFileAdapter(AcquisitionAdapter):
         return ProbeResult(
             display_name=_safe_display_name(source),
             locator_fingerprint=local_locator_fingerprint(source),
+            declared_size_bytes=size,
             content_sha256=content_sha256,
-            size_bytes=size,
         )
 
     def acquire(self, job: JobSpec, workspace: JobWorkspace) -> AcquisitionResult:
         started_at = _utc_now()
         probe = self.probe(job)
         configuration_sha256 = job_fingerprint(job)
+        if probe.content_sha256 is None or probe.declared_size_bytes is None:
+            raise integrity_error("SOURCE_PROBE_FAILED", "local source probe is incomplete")
         relative_path = f"source/raw/{probe.content_sha256}/{probe.display_name}"
         artifact = ArtifactRef(
             artifact_id=f"source-{probe.content_sha256[:16]}",
             artifact_type="raw_source",
             content_sha256=probe.content_sha256,
-            size_bytes=probe.size_bytes,
+            size_bytes=probe.declared_size_bytes,
             relative_storage_path=relative_path,
         )
         producer = ProducerIdentity(
@@ -173,7 +175,7 @@ class LocalFileAdapter(AcquisitionAdapter):
                 raise integrity_error("SOURCE_LOCATOR_CHANGED", "source locator identity changed")
             if (
                 existing.content_sha256 != probe.content_sha256
-                or existing.size_bytes != probe.size_bytes
+                or existing.size_bytes != probe.declared_size_bytes
             ):
                 raise integrity_error(
                     "SOURCE_CONTENT_CHANGED",

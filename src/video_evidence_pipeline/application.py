@@ -7,9 +7,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from video_evidence_pipeline.acquisition.base import AcquisitionResult
-from video_evidence_pipeline.acquisition.local_file import verify_acquired_bundle
+from video_evidence_pipeline.acquisition.base import AcquisitionAdapter, AcquisitionResult
+from video_evidence_pipeline.acquisition.bundle import (
+    reuse_acquired_network_bundle,
+    verify_acquired_bundle,
+)
 from video_evidence_pipeline.acquisition.registry import adapter_for
+from video_evidence_pipeline.acquisition.runtime import AcquisitionRuntimeConfig
 from video_evidence_pipeline.domain.authorization import AuthorizationRecord
 from video_evidence_pipeline.domain.job import (
     AssignmentSpec,
@@ -17,6 +21,7 @@ from video_evidence_pipeline.domain.job import (
     OutputSpec,
     SourceKind,
     SourceSpec,
+    canonicalize_source_locator,
     job_fingerprint,
     job_to_yaml,
     load_job_yaml,
@@ -28,7 +33,12 @@ from video_evidence_pipeline.domain.transitions import (
     validate_runtime_transition_records,
     validate_transition_fingerprints,
 )
-from video_evidence_pipeline.errors import VepError, integrity_error, state_error
+from video_evidence_pipeline.errors import (
+    VepError,
+    configuration_error,
+    integrity_error,
+    state_error,
+)
 from video_evidence_pipeline.storage.atomic import (
     atomic_write_json,
     atomic_write_new_bytes,
@@ -61,11 +71,15 @@ def initialize_job(
     output_format: str,
     requirements: list[str] | None = None,
 ) -> tuple[JobWorkspace, JobSpec]:
-    locator = (
+    raw_locator = (
         str(Path(source).expanduser().absolute())
         if source_kind is SourceKind.LOCAL_FILE
         else source
     )
+    try:
+        locator = canonicalize_source_locator(source_kind, raw_locator)
+    except ValueError as exc:
+        raise configuration_error("SOURCE_LOCATOR_INVALID", "source locator is invalid") from exc
     job = JobSpec(
         job_id=job_id,
         created_at=datetime.now(UTC),
@@ -119,6 +133,7 @@ def authorize_job(
     confirm: bool,
     basis: str,
     allow_local_processing: bool,
+    allow_network_acquisition: bool = False,
     allow_external_api: bool,
     confirmer_identity: str | None,
 ) -> AuthorizationRecord:
@@ -138,6 +153,7 @@ def authorize_job(
             confirmed_by_user=True,
             authorization_basis=basis,
             allow_local_processing=allow_local_processing,
+            allow_network_acquisition=allow_network_acquisition,
             allow_external_api=allow_external_api,
             confirmed_at=datetime.now(UTC),
             confirmer_identity=confirmer_identity or getpass.getuser() or "local-user",
@@ -203,7 +219,21 @@ def _require_local_processing(authorization: AuthorizationRecord) -> None:
         )
 
 
-def acquire_job(path: Path) -> AcquisitionResult:
+def _require_network_acquisition(job: JobSpec, authorization: AuthorizationRecord) -> None:
+    if job.source.kind is SourceKind.LOCAL_FILE:
+        return
+    if not authorization.allow_network_acquisition:
+        raise state_error(
+            "NETWORK_ACQUISITION_NOT_AUTHORIZED",
+            "network acquisition was not explicitly authorized",
+        )
+
+
+def acquire_job(
+    path: Path,
+    runtime_config: AcquisitionRuntimeConfig | None = None,
+    adapter_override: AcquisitionAdapter | None = None,
+) -> AcquisitionResult:
     workspace = JobWorkspace.open(path)
     with exclusive_append_lock(workspace.transitions_jsonl):
         workspace, job, transitions, state = _load_context(path)
@@ -211,16 +241,38 @@ def acquire_job(path: Path) -> AcquisitionResult:
             raise state_error("STATE_GATE_FAILED", "job must be AUTHORIZED before acquisition")
         authorization = _authorization(workspace)
         _require_current_authorization(job, transitions, authorization)
+        _require_network_acquisition(job, authorization)
+        runtime = runtime_config or AcquisitionRuntimeConfig()
+        runtime.validate_for(job.source.kind)
         if state is JobState.ACQUIRED:
             verify_acquired_bundle(workspace, job)
-        result = adapter_for(job.source).acquire(job, workspace)
+            if job.source.kind is not SourceKind.LOCAL_FILE:
+                reused = reuse_acquired_network_bundle(workspace, job)
+                if reused is None:
+                    raise integrity_error(
+                        "SOURCE_MANIFEST_INVALID", "network acquired bundle is incomplete"
+                    )
+                return reused
+        elif job.source.kind is not SourceKind.LOCAL_FILE:
+            recovered = reuse_acquired_network_bundle(workspace, job)
+            if recovered is not None:
+                _append_transition_locked(
+                    workspace,
+                    job,
+                    from_state=JobState.AUTHORIZED,
+                    to_state=JobState.ACQUIRED,
+                    trigger=f"acquire.{job.source.kind.value}",
+                )
+                return recovered
+        selected_adapter = adapter_override or adapter_for(job.source, runtime)
+        result = selected_adapter.acquire(job, workspace)
         if state is JobState.AUTHORIZED:
             _append_transition_locked(
                 workspace,
                 job,
                 from_state=JobState.AUTHORIZED,
                 to_state=JobState.ACQUIRED,
-                trigger="acquire.local_file",
+                trigger=f"acquire.{job.source.kind.value}",
             )
         return result
 
@@ -272,6 +324,7 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
                     "valid": True,
                     "stale": authorization.job_fingerprint != current_fingerprint,
                     "allow_local_processing": authorization.allow_local_processing,
+                    "allow_network_acquisition": authorization.allow_network_acquisition,
                     "allow_external_api": authorization.allow_external_api,
                 }
             )

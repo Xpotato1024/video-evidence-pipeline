@@ -13,6 +13,10 @@ from pydantic import ValidationError
 from typer.core import _click as click
 
 from video_evidence_pipeline import __version__
+from video_evidence_pipeline.acquisition.runtime import (
+    AcquisitionRuntimeConfig,
+    BrowserCookieSource,
+)
 from video_evidence_pipeline.application import (
     acquire_job,
     authorize_job,
@@ -151,6 +155,10 @@ def job_authorize(
     basis: Annotated[str, typer.Option("--basis")],
     confirm: Annotated[bool, typer.Option("--confirm")] = False,
     allow_local_processing: Annotated[bool, typer.Option("--allow-local-processing")] = False,
+    allow_network_acquisition: Annotated[
+        bool,
+        typer.Option("--allow-network-acquisition/--deny-network-acquisition"),
+    ] = False,
     allow_external_api: Annotated[
         bool,
         typer.Option("--allow-external-api/--deny-external-api"),
@@ -164,6 +172,7 @@ def job_authorize(
             confirm=confirm,
             basis=basis,
             allow_local_processing=allow_local_processing,
+            allow_network_acquisition=allow_network_acquisition,
             allow_external_api=allow_external_api,
             confirmer_identity=confirmer,
         ),
@@ -175,6 +184,7 @@ def job_authorize(
             "job_id": record.job_id,
             "state": "AUTHORIZED",
             "allow_local_processing": record.allow_local_processing,
+            "allow_network_acquisition": record.allow_network_acquisition,
             "allow_external_api": record.allow_external_api,
         },
         json_output=json_output,
@@ -195,9 +205,32 @@ def status(
 @app.command("acquire")
 def acquire(
     workspace: Path,
+    cookies_from_browser: Annotated[
+        BrowserCookieSource | None,
+        typer.Option("--cookies-from-browser"),
+    ] = None,
+    box_token_env: Annotated[str | None, typer.Option("--box-token-env")] = None,
+    panopto_token_env: Annotated[str | None, typer.Option("--panopto-token-env")] = None,
+    panopto_ytdlp_fallback: Annotated[
+        bool,
+        typer.Option("--panopto-ytdlp-fallback"),
+    ] = False,
+    network_timeout: Annotated[float, typer.Option("--network-timeout")] = 30.0,
+    maximum_download_bytes: Annotated[
+        int,
+        typer.Option("--maximum-download-bytes"),
+    ] = 2 * 1024 * 1024 * 1024,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    result = _run(lambda: acquire_job(workspace), json_output=json_output)
+    runtime = AcquisitionRuntimeConfig(
+        cookies_from_browser=cookies_from_browser,
+        box_token_env=box_token_env,
+        panopto_token_env=panopto_token_env,
+        panopto_ytdlp_fallback=panopto_ytdlp_fallback,
+        network_timeout_seconds=network_timeout,
+        maximum_download_bytes=maximum_download_bytes,
+    )
+    result = _run(lambda: acquire_job(workspace, runtime), json_output=json_output)
     artifact = result.source_manifest.artifact_record.artifact
     _emit(
         {

@@ -734,13 +734,13 @@ def test_initial_transition_binding_is_checked_before_authorization(
     assert not (job_path / "authorization/authorization.json").exists()
 
 
-def test_nonimplemented_source_kind_fails_explicitly(tmp_path: Path) -> None:
+def test_network_source_requires_dedicated_authorization(tmp_path: Path) -> None:
     locator = "https://example.invalid/video"
     job_path = initialized_job(tmp_path, locator, source_kind=SourceKind.DIRECT_HTTP)
     authorize(job_path)
     with pytest.raises(VepError) as captured:
         acquire_job(job_path)
-    assert captured.value.code == "SOURCE_KIND_NOT_IMPLEMENTED"
+    assert captured.value.code == "NETWORK_ACQUISITION_NOT_AUTHORIZED"
     assert "do-not-log" not in captured.value.safe_message
 
 
