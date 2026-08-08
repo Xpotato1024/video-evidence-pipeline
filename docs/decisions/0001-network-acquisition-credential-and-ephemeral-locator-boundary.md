@@ -55,7 +55,9 @@ provider APIが返すdownload URLはmemory内だけで使用します。
 stable locator、runtime-only typed credential config、redacted acquisition evidenceを分離します。HTTPはmanual
 redirect、public-address DNS validationと接続先pin、origin-bound bearer、bounded timeout／sizeで取得します。
 yt-dlpはlock済みruntime dependencyと固定argv、private single-file stagingでだけ実行します。Panoptoはofficial
-APIを優先し、明示browser-cookie時だけfallbackします。Box bearerはAPI originからCDNへ転送しません。
+APIを優先し、tokenを明示tenantへ拘束します。公式APIがdownload禁止を示すblank URLではfallbackせず、tokenなしで
+明示browser-cookie時だけfallbackします。Box bearerはAPI originからCDNへ転送しません。yt-dlp通信は
+HTTPS-only validating local proxyを固定し、各destinationのpublic-address検査とIP pinを強制します。
 
 network acquisitionには`allow_network_acquisition`を追加し、`allow_external_api`と分離します。
 

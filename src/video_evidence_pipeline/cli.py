@@ -211,11 +211,13 @@ def acquire(
     ] = None,
     box_token_env: Annotated[str | None, typer.Option("--box-token-env")] = None,
     panopto_token_env: Annotated[str | None, typer.Option("--panopto-token-env")] = None,
+    panopto_tenant_host: Annotated[str | None, typer.Option("--panopto-tenant-host")] = None,
     panopto_ytdlp_fallback: Annotated[
         bool,
         typer.Option("--panopto-ytdlp-fallback"),
     ] = False,
     network_timeout: Annotated[float, typer.Option("--network-timeout")] = 30.0,
+    maximum_download_seconds: Annotated[float, typer.Option("--maximum-download-seconds")] = 3600.0,
     maximum_download_bytes: Annotated[
         int,
         typer.Option("--maximum-download-bytes"),
@@ -226,8 +228,10 @@ def acquire(
         cookies_from_browser=cookies_from_browser,
         box_token_env=box_token_env,
         panopto_token_env=panopto_token_env,
+        panopto_tenant_host=panopto_tenant_host,
         panopto_ytdlp_fallback=panopto_ytdlp_fallback,
         network_timeout_seconds=network_timeout,
+        maximum_download_seconds=maximum_download_seconds,
         maximum_download_bytes=maximum_download_bytes,
     )
     result = _run(lambda: acquire_job(workspace, runtime), json_output=json_output)

@@ -10,25 +10,68 @@ from video_evidence_pipeline.domain.hashing import sha256_bytes
 
 _SENSITIVE_QUERY_NAMES = {
     "access_token",
+    "api-key",
+    "apikey",
+    "api_key",
     "auth",
+    "auth_token",
     "authorization",
+    "bearer",
+    "client_secret",
+    "code",
     "credential",
     "expires",
+    "hdnea",
+    "hdnts",
+    "hmac",
+    "jwt",
+    "key",
     "key-pair-id",
+    "oauth_token",
     "password",
     "policy",
+    "session",
+    "session-id",
+    "sessionid",
     "sig",
     "signature",
+    "ticket",
     "token",
 }
 _SENSITIVE_QUERY_PREFIXES = ("x-amz-", "x-goog-")
+_SENSITIVE_QUERY_SUFFIXES = (
+    "auth",
+    "credential",
+    "secret",
+    "signature",
+    "token",
+)
+_AZURE_SAS_QUERY_NAMES = {
+    "se",
+    "sig",
+    "sip",
+    "skoid",
+    "sks",
+    "skt",
+    "sktid",
+    "skv",
+    "sp",
+    "spr",
+    "sr",
+    "sv",
+}
 _BOX_FILE_ID = re.compile(r"^[0-9]+$")
 
 
 def is_sensitive_query_name(name: str) -> bool:
     normalized = name.strip().lower().replace("_", "-")
     aliases = {item.replace("_", "-") for item in _SENSITIVE_QUERY_NAMES}
-    return normalized in aliases or normalized.startswith(_SENSITIVE_QUERY_PREFIXES)
+    return (
+        normalized in aliases
+        or normalized in _AZURE_SAS_QUERY_NAMES
+        or normalized.startswith(_SENSITIVE_QUERY_PREFIXES)
+        or normalized.endswith(_SENSITIVE_QUERY_SUFFIXES)
+    )
 
 
 def has_sensitive_query(locator: str) -> bool:

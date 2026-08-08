@@ -119,9 +119,10 @@ source manifestと通常出力にはlocal absolute path、URL query、Cookie、t
 ## Network source
 
 network jobは`job authorize --allow-network-acquisition`を明示します。tokenは`vep acquire`の
-`--box-token-env`／`--panopto-token-env`で環境変数名だけを指定し、browser cookieは
+`--box-token-env`／`--panopto-token-env`で環境変数名だけを指定します。Panopto tokenにはさらに
+`--panopto-tenant-host`で送信先tenantを拘束します。browser cookieは
 `--cookies-from-browser`で明示します。timeoutとmaximum bytesは`--network-timeout`、
-`--maximum-download-bytes`でboundedに設定できます。詳細なlocator、redirect、SSRF、provider、idempotencyの
+`--maximum-download-bytes`、`--maximum-download-seconds`でboundedに設定できます。詳細なlocator、redirect、SSRF、provider、idempotencyの
 契約は[`network-acquisition.md`](network-acquisition.md)を参照してください。
 
 ## Exit code

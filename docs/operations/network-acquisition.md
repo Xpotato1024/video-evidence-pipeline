@@ -43,6 +43,7 @@ locator fingerprintはcanonical locatorから計算します。Panopto download 
 network acquisition gateには使用しません。fieldがない旧authorization recordはdenyとして読み込みます。
 
 tokenは`--box-token-env`または`--panopto-token-env`で指定した環境変数からruntimeだけで読みます。
+Panopto tokenは`--panopto-tenant-host`で明示したcanonical tenantと一致するjobにだけ使用します。
 browser cookieは`--cookies-from-browser`が明示された`generic_ytdlp`、または明示fallbackを有効にした
 `panopto`だけで使用します。token value、Cookie file、Authorization header、任意のyt-dlp引数はCLI入力に
 できません。adapterに無関係なcredential optionはfail closedです。
@@ -64,7 +65,7 @@ redirect count、HTTP status category、content type、declared length、actual 
 
 ## direct HTTP
 
-HTTPX clientはTLS verificationを有効にし、`trust_env=False`、connect／read／write／pool timeoutを明示します。
+HTTPX clientはTLS verificationを有効にし、`trust_env=False`、connect／read／write／pool timeoutと全取得deadlineを明示します。
 redirectは自動追従せず1 hopずつ検証し、relative URLを解決します。loop、上限超過、HTTPSからHTTPへの
 downgrade、signed queryへの遷移を拒否します。
 
@@ -80,13 +81,16 @@ remote component、JS runtime、cache、update、sidecar、subtitle、thumbnail�
 単一fileでaudio／videoを含むformatに限定します。任意引数、external downloader、postprocessorを受け付けません。
 outputはprivate staging内のexactly one regular non-link fileだけを許可します。stdout／stderrはuser outputへ
 転送しません。browser cookieは明示時だけ使用し、Cookie file exportは標準経路にしません。
+全通信は内部のHTTPS-only local proxyを固定指定し、各`CONNECT`先をpublic-address検査して検証済みIPへpinします。
+plain HTTP、private／link-local destination、DNS rebindingをproxyで拒否し、subprocess全体にもdeadlineを設定します。
 
 ## Panopto
 
 official REST APIを優先し、tenant API originにだけenvironment bearer tokenを送ります。session metadataの
 `Id`、`Name`、`Urls.DownloadUrl`をPanopto公式OpenAPI contractとして扱い、blank download URLは利用不可です。
-download URLはephemeralとして使用し、bearer tokenを転送しません。official downloadが利用できない場合、
-`--panopto-ytdlp-fallback`とbrowser cookieの両方が明示されたときだけyt-dlp fallbackを使用します。
+download URLはephemeralとして使用し、bearer tokenを転送しません。公式APIのblank `DownloadUrl`はproviderの
+download禁止を含み得るためfallbackせず失敗します。tokenを指定せず、`--panopto-ytdlp-fallback`とbrowser cookieの
+両方が明示されたときだけyt-dlp fallbackを使用します。
 access denial、DRM、extractor failureを回避しません。
 
 ## Box
@@ -99,7 +103,8 @@ Box SHA-1等はSHA-256の代用にせず、実bytesから独自にSHA-256を計�
 
 - `NETWORK_ACQUISITION_NOT_AUTHORIZED`: network permissionを明示して再認可可能な新jobを作成する。
 - `NETWORK_SSRF_REJECTED`: public HTTPS destinationか確認する。検査無効化optionはない。
-- `NETWORK_TIMEOUT`／`SOURCE_TOO_LARGE`: bounded runtime optionを見直す。TLS無効化はできない。
+- `NETWORK_TIMEOUT`／`SOURCE_TOO_LARGE`: `--network-timeout`、`--maximum-download-seconds`、
+  `--maximum-download-bytes`のbounded runtime optionを見直す。TLS無効化はできない。
 - `YTDLP_NOT_AVAILABLE`: lock済みdependencyを`uv sync --locked --all-groups`で復元する。
 - `PANOPTO_CREDENTIAL_REQUIRED`／`BOX_CREDENTIAL_REQUIRED`: token valueではなく環境変数名を指定する。
 - `PANOPTO_DOWNLOAD_UNAVAILABLE`: tenant policyを確認する。DRMやdownload禁止を迂回しない。

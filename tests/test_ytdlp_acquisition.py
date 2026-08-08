@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import os
+import socket
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
 from video_evidence_pipeline.acquisition.generic_ytdlp import GenericYtdlpAdapter
+from video_evidence_pipeline.acquisition.https_proxy import validating_https_proxy
 from video_evidence_pipeline.acquisition.runtime import (
     AcquisitionRuntimeConfig,
     BrowserCookieSource,
@@ -17,6 +20,10 @@ from video_evidence_pipeline.application import acquire_job, authorize_job, init
 from video_evidence_pipeline.domain.job import SourceKind
 from video_evidence_pipeline.errors import VepError
 from video_evidence_pipeline.storage.layout import JobWorkspace
+
+
+def public_resolver(_host: str, _port: int) -> list[str]:
+    return ["93.184.216.34"]
 
 
 def workspace_for(tmp_path: Path, kind: SourceKind = SourceKind.GENERIC_YTDLP) -> JobWorkspace:
@@ -55,6 +62,7 @@ def test_hardened_ytdlp_argv_is_fixed_and_single_file(tmp_path: Path) -> None:
         "https://videos.example.invalid/watch?v=stable-id",
         tmp_path,
         runtime,
+        proxy_url="http://127.0.0.1:43210",
     )
     assert argv == [
         sys.executable,
@@ -85,6 +93,8 @@ def test_hardened_ytdlp_argv_is_fixed_and_single_file(tmp_path: Path) -> None:
         "--no-overwrites",
         "--no-netrc",
         "--no-cookies",
+        "--proxy",
+        "http://127.0.0.1:43210",
         "--quiet",
         "--no-progress",
         "--no-warnings",
@@ -106,11 +116,17 @@ def test_hardened_ytdlp_argv_is_fixed_and_single_file(tmp_path: Path) -> None:
 
 
 def test_browser_cookie_is_only_added_when_explicit(tmp_path: Path) -> None:
-    plain = hardened_argv("https://example.invalid/watch", tmp_path, AcquisitionRuntimeConfig())
+    plain = hardened_argv(
+        "https://example.invalid/watch",
+        tmp_path,
+        AcquisitionRuntimeConfig(),
+        proxy_url="http://127.0.0.1:43210",
+    )
     cookie = hardened_argv(
         "https://example.invalid/watch",
         tmp_path,
         AcquisitionRuntimeConfig(cookies_from_browser=BrowserCookieSource.FIREFOX),
+        proxy_url="http://127.0.0.1:43210",
     )
     assert "--cookies-from-browser" not in plain
     assert cookie[cookie.index("--cookies-from-browser") + 1] == "firefox"
@@ -126,6 +142,7 @@ def test_runner_uses_shell_false_and_disables_plugins(tmp_path: Path) -> None:
         adapter_kind=SourceKind.GENERIC_YTDLP,
         runner=successful_runner(captured),
         environment={"PATH": os.environ.get("PATH", ""), "VEP_BOX_ACCESS_TOKEN": "must-not-pass"},
+        resolver=public_resolver,
     )
     kwargs = captured["kwargs"]
     assert isinstance(kwargs, dict)
@@ -137,6 +154,9 @@ def test_runner_uses_shell_false_and_disables_plugins(tmp_path: Path) -> None:
     assert environment["YTDLP_NO_PLUGINS"] == "1"
     assert "VEP_BOX_ACCESS_TOKEN" not in environment
     assert staged.path.name == "source.mp4"
+    argv = captured["argv"]
+    assert isinstance(argv, list)
+    assert argv[argv.index("--proxy") + 1].startswith("http://127.0.0.1:")
 
 
 @pytest.mark.parametrize("failure", ["missing", "nonzero", "multiple", "sidecar", "symlink"])
@@ -174,6 +194,7 @@ def test_runner_failures_are_structured_and_safe(tmp_path: Path, failure: str) -
             AcquisitionRuntimeConfig(maximum_download_bytes=1024),
             adapter_kind=SourceKind.GENERIC_YTDLP,
             runner=runner,
+            resolver=public_resolver,
         )
     expected = (
         "YTDLP_NOT_AVAILABLE"
@@ -200,7 +221,11 @@ def test_generic_ytdlp_acquisition_publishes_only_verified_output(tmp_path: Path
         maximum_download_bytes=1024,
     )
     captured: dict[str, object] = {}
-    adapter = GenericYtdlpAdapter(runtime, runner=successful_runner(captured))
+    adapter = GenericYtdlpAdapter(
+        runtime,
+        runner=successful_runner(captured),
+        resolver=public_resolver,
+    )
     result = acquire_job(workspace.root, runtime, adapter)
     evidence = result.source_manifest.acquisition_evidence
     assert evidence is not None
@@ -218,3 +243,67 @@ def test_generic_ytdlp_acquisition_publishes_only_verified_output(tmp_path: Path
     assert "synthetic media" not in combined
     assert "secret stdout" not in combined
     assert "secret stderr" not in combined
+
+
+def test_validating_proxy_rejects_private_connect_destination() -> None:
+    connector_called = False
+
+    def connector(_host: str, _port: int, _timeout: float) -> socket.socket:
+        nonlocal connector_called
+        connector_called = True
+        raise AssertionError("private destination must not be connected")
+
+    with validating_https_proxy(
+        resolver=lambda _host, _port: ["127.0.0.1"],
+        connector=connector,
+        connect_timeout_seconds=1,
+        maximum_elapsed_seconds=1,
+    ) as proxy_url:
+        proxy = urlsplit(proxy_url)
+        with socket.create_connection((proxy.hostname, proxy.port), timeout=1) as client:
+            client.sendall(b"CONNECT private.invalid:443 HTTP/1.1\r\nHost: private.invalid\r\n\r\n")
+            response = client.recv(1024)
+    assert response.startswith(b"HTTP/1.1 403")
+    assert connector_called is False
+
+
+def test_validating_proxy_rejects_plain_http_request() -> None:
+    with validating_https_proxy(
+        resolver=public_resolver,
+        connect_timeout_seconds=1,
+        maximum_elapsed_seconds=1,
+    ) as proxy_url:
+        proxy = urlsplit(proxy_url)
+        with socket.create_connection((proxy.hostname, proxy.port), timeout=1) as client:
+            client.sendall(
+                b"GET http://media.example.invalid/video HTTP/1.1\r\n"
+                b"Host: media.example.invalid\r\n\r\n"
+            )
+            response = client.recv(1024)
+    assert response.startswith(b"HTTP/1.1 403")
+
+
+def test_validating_proxy_pins_public_connect_destination() -> None:
+    connected: list[tuple[str, int]] = []
+    peer: socket.socket | None = None
+
+    def connector(host: str, port: int, _timeout: float) -> socket.socket:
+        nonlocal peer
+        connected.append((host, port))
+        upstream, peer = socket.socketpair()
+        return upstream
+
+    with validating_https_proxy(
+        resolver=public_resolver,
+        connector=connector,
+        connect_timeout_seconds=1,
+        maximum_elapsed_seconds=1,
+    ) as proxy_url:
+        proxy = urlsplit(proxy_url)
+        with socket.create_connection((proxy.hostname, proxy.port), timeout=1) as client:
+            client.sendall(b"CONNECT media.example.invalid:443 HTTP/1.1\r\n\r\n")
+            response = client.recv(1024)
+        if peer is not None:
+            peer.close()
+    assert response.startswith(b"HTTP/1.1 200")
+    assert connected == [("93.184.216.34", 443)]

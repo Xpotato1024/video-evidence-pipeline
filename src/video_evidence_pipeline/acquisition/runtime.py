@@ -31,8 +31,10 @@ class AcquisitionRuntimeConfig(StrictModel):
     cookies_from_browser: BrowserCookieSource | None = None
     box_token_env: str | None = Field(default=None, max_length=128)
     panopto_token_env: str | None = Field(default=None, max_length=128)
+    panopto_tenant_host: str | None = Field(default=None, max_length=253)
     panopto_ytdlp_fallback: bool = False
     network_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+    maximum_download_seconds: float = Field(default=3600.0, gt=0, le=86400)
     maximum_download_bytes: int = Field(default=2 * 1024 * 1024 * 1024, ge=1)
     maximum_redirects: int = Field(default=5, ge=0, le=10)
 
@@ -41,6 +43,12 @@ class AcquisitionRuntimeConfig(StrictModel):
         for name in (self.box_token_env, self.panopto_token_env):
             if name is not None and not _ENVIRONMENT_NAME.fullmatch(name):
                 raise ValueError("token environment variable name is invalid")
+        if self.panopto_tenant_host is not None:
+            host = self.panopto_tenant_host.rstrip(".").lower()
+            if not re.fullmatch(r"[a-z0-9.-]+", host) or ".." in host:
+                raise ValueError("Panopto tenant host is invalid")
+            if self.panopto_tenant_host != host:
+                raise ValueError("Panopto tenant host must be canonical")
         return self
 
     def validate_for(self, kind: SourceKind) -> None:
@@ -50,20 +58,31 @@ class AcquisitionRuntimeConfig(StrictModel):
                     self.cookies_from_browser,
                     self.box_token_env,
                     self.panopto_token_env,
+                    self.panopto_tenant_host,
                     self.panopto_ytdlp_fallback,
                 )
             )
         elif kind is SourceKind.GENERIC_YTDLP:
-            invalid = any((self.box_token_env, self.panopto_token_env, self.panopto_ytdlp_fallback))
+            invalid = any(
+                (
+                    self.box_token_env,
+                    self.panopto_token_env,
+                    self.panopto_tenant_host,
+                    self.panopto_ytdlp_fallback,
+                )
+            )
         elif kind is SourceKind.PANOPTO:
-            invalid = self.box_token_env is not None or (
-                self.cookies_from_browser is not None and not self.panopto_ytdlp_fallback
+            invalid = (
+                self.box_token_env is not None
+                or (self.cookies_from_browser is not None and not self.panopto_ytdlp_fallback)
+                or ((self.panopto_token_env is None) != (self.panopto_tenant_host is None))
             )
         elif kind is SourceKind.BOX:
             invalid = any(
                 (
                     self.cookies_from_browser,
                     self.panopto_token_env,
+                    self.panopto_tenant_host,
                     self.panopto_ytdlp_fallback,
                 )
             )

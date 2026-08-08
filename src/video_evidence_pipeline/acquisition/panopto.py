@@ -60,6 +60,14 @@ class PanoptoAdapter(AcquisitionAdapter):
                 "Panopto session does not expose an authorized download",
             )
         tenant, session_id = panopto_identity(job.source.locator)
+        if (
+            self.runtime.panopto_token_env is not None
+            and self.runtime.panopto_tenant_host != tenant
+        ):
+            raise state_error(
+                "PANOPTO_TENANT_MISMATCH",
+                "Panopto token is not bound to the requested tenant",
+            )
         viewer_url = f"https://{tenant}/Panopto/Pages/Viewer.aspx?id={session_id}"
         staged = run_ytdlp(
             viewer_url,
@@ -67,6 +75,7 @@ class PanoptoAdapter(AcquisitionAdapter):
             self.runtime,
             adapter_kind=SourceKind.PANOPTO,
             runner=self.runner,
+            resolver=self.resolver,
         )
         return publish_staged_source(
             job,
@@ -80,6 +89,14 @@ class PanoptoAdapter(AcquisitionAdapter):
         started_at = datetime.now(UTC)
         probe = self.probe(job)
         tenant, session_id = panopto_identity(job.source.locator)
+        if (
+            self.runtime.panopto_token_env is not None
+            and self.runtime.panopto_tenant_host != tenant
+        ):
+            raise state_error(
+                "PANOPTO_TENANT_MISMATCH",
+                "Panopto token is not bound to the requested tenant",
+            )
         try:
             token = self.runtime.token_from_environment(
                 self.runtime.panopto_token_env,
@@ -102,12 +119,15 @@ class PanoptoAdapter(AcquisitionAdapter):
             not_found_code="PANOPTO_SESSION_NOT_FOUND",
         ).data
         response_id = metadata.get("Id")
-        if response_id is not None and str(response_id).lower() != session_id.lower():
+        if not isinstance(response_id, str) or response_id.lower() != session_id.lower():
             raise integrity_error("PANOPTO_API_INVALID", "Panopto session identity did not match")
         urls = metadata.get("Urls")
         download_url = urls.get("DownloadUrl") if isinstance(urls, dict) else None
         if not isinstance(download_url, str) or not download_url.strip():
-            return self._fallback(job, workspace, started_at=started_at)
+            raise state_error(
+                "PANOPTO_DOWNLOAD_UNAVAILABLE",
+                "Panopto session does not expose an authorized download",
+            )
         name = metadata.get("Name")
         display_name = (
             sanitize_filename(name)

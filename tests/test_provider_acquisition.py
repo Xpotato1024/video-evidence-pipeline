@@ -95,6 +95,7 @@ def test_panopto_official(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     assert job.source.locator == ("panopto://tenant.hosted.panopto.com/session/" + SESSION_ID)
     runtime = AcquisitionRuntimeConfig(
         panopto_token_env="VEP_PANOPTO_ACCESS_TOKEN",
+        panopto_tenant_host="tenant.hosted.panopto.com",
         maximum_download_bytes=1024,
     )
     client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False)
@@ -127,7 +128,10 @@ def test_panopto_download_unavailable_fails_closed(
         return httpx.Response(200, json={"Id": SESSION_ID, "Urls": {"DownloadUrl": ""}})
 
     workspace = initialized_authorized_job(tmp_path, SourceKind.PANOPTO, PANOPTO_VIEWER)
-    runtime = AcquisitionRuntimeConfig(panopto_token_env="VEP_PANOPTO_ACCESS_TOKEN")
+    runtime = AcquisitionRuntimeConfig(
+        panopto_token_env="VEP_PANOPTO_ACCESS_TOKEN",
+        panopto_tenant_host="tenant.hosted.panopto.com",
+    )
     adapter = PanoptoAdapter(
         runtime,
         client=httpx.Client(transport=httpx.MockTransport(handler)),
@@ -136,6 +140,88 @@ def test_panopto_download_unavailable_fails_closed(
     with pytest.raises(VepError) as captured:
         acquire_job(workspace.root, runtime, adapter)
     assert captured.value.code == "PANOPTO_DOWNLOAD_UNAVAILABLE"
+
+
+def test_panopto_download_policy_is_not_bypassed_by_explicit_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VEP_PANOPTO_ACCESS_TOKEN", TOKEN_SECRET)
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"Id": SESSION_ID, "Urls": {"DownloadUrl": ""}})
+
+    def runner(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        raise AssertionError("provider download prohibition must not fall back")
+
+    workspace = initialized_authorized_job(tmp_path, SourceKind.PANOPTO, PANOPTO_VIEWER)
+    runtime = AcquisitionRuntimeConfig(
+        panopto_token_env="VEP_PANOPTO_ACCESS_TOKEN",
+        panopto_tenant_host="tenant.hosted.panopto.com",
+        cookies_from_browser=BrowserCookieSource.FIREFOX,
+        panopto_ytdlp_fallback=True,
+    )
+    adapter = PanoptoAdapter(
+        runtime,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        resolver=public_resolver,
+        runner=runner,
+    )
+    with pytest.raises(VepError) as captured:
+        acquire_job(workspace.root, runtime, adapter)
+    assert captured.value.code == "PANOPTO_DOWNLOAD_UNAVAILABLE"
+
+
+def test_panopto_requires_exact_session_id_field(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VEP_PANOPTO_ACCESS_TOKEN", TOKEN_SECRET)
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"Urls": {"DownloadUrl": "https://cdn.example.invalid/media"}},
+        )
+
+    workspace = initialized_authorized_job(tmp_path, SourceKind.PANOPTO, PANOPTO_VIEWER)
+    runtime = AcquisitionRuntimeConfig(
+        panopto_token_env="VEP_PANOPTO_ACCESS_TOKEN",
+        panopto_tenant_host="tenant.hosted.panopto.com",
+    )
+    adapter = PanoptoAdapter(
+        runtime,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        resolver=public_resolver,
+    )
+    with pytest.raises(VepError) as captured:
+        acquire_job(workspace.root, runtime, adapter)
+    assert captured.value.code == "PANOPTO_API_INVALID"
+
+
+def test_panopto_token_is_bound_to_explicit_tenant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VEP_PANOPTO_ACCESS_TOKEN", TOKEN_SECRET)
+    requests = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        return httpx.Response(500)
+
+    workspace = initialized_authorized_job(tmp_path, SourceKind.PANOPTO, PANOPTO_VIEWER)
+    runtime = AcquisitionRuntimeConfig(
+        panopto_token_env="VEP_PANOPTO_ACCESS_TOKEN",
+        panopto_tenant_host="other.hosted.panopto.com",
+    )
+    adapter = PanoptoAdapter(
+        runtime,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        resolver=public_resolver,
+    )
+    with pytest.raises(VepError) as captured:
+        acquire_job(workspace.root, runtime, adapter)
+    assert captured.value.code == "PANOPTO_TENANT_MISMATCH"
+    assert requests == 0
 
 
 def test_provider_api_response_size_is_bounded(
@@ -147,7 +233,10 @@ def test_provider_api_response_size_is_bounded(
         return httpx.Response(200, content=b"{" + b"x" * (1024 * 1024))
 
     workspace = initialized_authorized_job(tmp_path, SourceKind.PANOPTO, PANOPTO_VIEWER)
-    runtime = AcquisitionRuntimeConfig(panopto_token_env="VEP_PANOPTO_ACCESS_TOKEN")
+    runtime = AcquisitionRuntimeConfig(
+        panopto_token_env="VEP_PANOPTO_ACCESS_TOKEN",
+        panopto_tenant_host="tenant.hosted.panopto.com",
+    )
     adapter = PanoptoAdapter(
         runtime,
         client=httpx.Client(transport=httpx.MockTransport(handler)),
@@ -207,6 +296,7 @@ def test_panopto_no_credential_and_access_denial_remain_failures(
     monkeypatch.setenv("VEP_PANOPTO_ACCESS_TOKEN", TOKEN_SECRET)
     denied_runtime = AcquisitionRuntimeConfig(
         panopto_token_env="VEP_PANOPTO_ACCESS_TOKEN",
+        panopto_tenant_host="tenant.hosted.panopto.com",
         cookies_from_browser=BrowserCookieSource.FIREFOX,
         panopto_ytdlp_fallback=True,
     )

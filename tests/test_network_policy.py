@@ -50,6 +50,10 @@ def test_stable_https_locator_accepts_https_and_benign_query(locator: str, expec
         "https://example.invalid/video?X-Amz-Signature=secret",
         "https://example.invalid/video?X-Goog-Credential=secret",
         "https://example.invalid/video?Policy=secret&Signature=value&Key-Pair-Id=key",
+        "https://example.invalid/video?jwt=secret",
+        "https://example.invalid/video?api_key=secret",
+        "https://example.invalid/video?hdnea=exp~acl~hmac",
+        "https://example.invalid/video?client_secret=secret",
     ],
 )
 def test_unstable_or_secret_https_locator_is_rejected(locator: str) -> None:

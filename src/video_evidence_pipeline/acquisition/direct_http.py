@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from urllib.parse import unquote, urlsplit
 
@@ -34,10 +36,12 @@ class DirectHttpAdapter(AcquisitionAdapter):
         *,
         client: httpx.Client | None = None,
         resolver: Resolver = default_resolver,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self.runtime = runtime
         self.client = client
         self.resolver = resolver
+        self.monotonic = monotonic
 
     def probe(self, job: JobSpec) -> ProbeResult:
         if job.source.kind is not SourceKind.DIRECT_HTTP:
@@ -72,6 +76,7 @@ class DirectHttpAdapter(AcquisitionAdapter):
             client=self.client,
             resolver=self.resolver,
             display_name=probe.display_name,
+            monotonic=self.monotonic,
         )
         return publish_staged_source(
             job,

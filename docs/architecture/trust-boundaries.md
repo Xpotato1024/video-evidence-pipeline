@@ -71,6 +71,8 @@ related_documents: ["VEP-ARCH-CONTEXT", "VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS
 - process output redaction
 - 最小権限の公式APIを優先
 - yt-dlpのuser config、plugin、remote component、任意引数、sidecar出力を禁止
+- yt-dlp通信をHTTPS-only validating local proxyへ固定し、destination検査とIP pinを強制
+- Panopto tokenをruntimeで明示したtenant hostへ拘束
 
 ### TB-3: Local data → optional cloud AI
 

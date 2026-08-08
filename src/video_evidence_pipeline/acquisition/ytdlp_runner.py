@@ -13,6 +13,12 @@ from contextlib import suppress
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from video_evidence_pipeline.acquisition.https_proxy import validating_https_proxy
+from video_evidence_pipeline.acquisition.network_policy import (
+    Resolver,
+    default_resolver,
+    validate_network_url,
+)
 from video_evidence_pipeline.acquisition.runtime import AcquisitionRuntimeConfig
 from video_evidence_pipeline.acquisition.staged import (
     AcquisitionEvidenceDraft,
@@ -43,6 +49,8 @@ def hardened_argv(
     locator: str,
     output_directory: Path,
     runtime: AcquisitionRuntimeConfig,
+    *,
+    proxy_url: str,
 ) -> list[str]:
     argv = [
         sys.executable,
@@ -73,6 +81,8 @@ def hardened_argv(
         "--no-overwrites",
         "--no-netrc",
         "--no-cookies",
+        "--proxy",
+        proxy_url,
         "--quiet",
         "--no-progress",
         "--no-warnings",
@@ -124,26 +134,33 @@ def run_ytdlp(
     adapter_kind: SourceKind,
     runner: SubprocessRunner = subprocess.run,
     environment: Mapping[str, str] | None = None,
+    resolver: Resolver = default_resolver,
 ) -> StagedSource:
     run_directory = staging_directory(workspace) / uuid.uuid4().hex
     ensure_private_directory(run_directory)
-    argv = hardened_argv(locator, run_directory, runtime)
+    validate_network_url(locator, resolver=resolver)
     try:
-        try:
-            completed = runner(
-                argv,
-                shell=False,
-                check=False,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                env=_subprocess_environment(environment or os.environ),
-                timeout=max(300.0, min(3600.0, runtime.network_timeout_seconds * 20)),
-            )
-        except FileNotFoundError as exc:
-            raise io_error("YTDLP_NOT_AVAILABLE", "yt-dlp runtime is not available") from exc
-        except subprocess.TimeoutExpired as exc:
-            raise io_error("YTDLP_ACQUISITION_FAILED", "yt-dlp acquisition timed out") from exc
+        with validating_https_proxy(
+            resolver=resolver,
+            connect_timeout_seconds=runtime.network_timeout_seconds,
+            maximum_elapsed_seconds=runtime.maximum_download_seconds,
+        ) as proxy_url:
+            argv = hardened_argv(locator, run_directory, runtime, proxy_url=proxy_url)
+            try:
+                completed = runner(
+                    argv,
+                    shell=False,
+                    check=False,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    env=_subprocess_environment(environment or os.environ),
+                    timeout=runtime.maximum_download_seconds,
+                )
+            except FileNotFoundError as exc:
+                raise io_error("YTDLP_NOT_AVAILABLE", "yt-dlp runtime is not available") from exc
+            except subprocess.TimeoutExpired as exc:
+                raise io_error("YTDLP_ACQUISITION_FAILED", "yt-dlp acquisition timed out") from exc
         if completed.returncode != 0:
             raise io_error("YTDLP_ACQUISITION_FAILED", "yt-dlp acquisition failed")
         entries = list(run_directory.rglob("*"))

@@ -11,6 +11,7 @@ from video_evidence_pipeline.acquisition.base import (
     AcquisitionResult,
     ProbeResult,
 )
+from video_evidence_pipeline.acquisition.network_policy import Resolver, default_resolver
 from video_evidence_pipeline.acquisition.runtime import AcquisitionRuntimeConfig
 from video_evidence_pipeline.acquisition.staged import publish_staged_source
 from video_evidence_pipeline.acquisition.ytdlp_runner import SubprocessRunner, run_ytdlp
@@ -26,9 +27,11 @@ class GenericYtdlpAdapter(AcquisitionAdapter):
         runtime: AcquisitionRuntimeConfig,
         *,
         runner: SubprocessRunner = subprocess.run,
+        resolver: Resolver = default_resolver,
     ) -> None:
         self.runtime = runtime
         self.runner = runner
+        self.resolver = resolver
 
     def probe(self, job: JobSpec) -> ProbeResult:
         if job.source.kind is not SourceKind.GENERIC_YTDLP:
@@ -48,6 +51,7 @@ class GenericYtdlpAdapter(AcquisitionAdapter):
             self.runtime,
             adapter_kind=SourceKind.GENERIC_YTDLP,
             runner=self.runner,
+            resolver=self.resolver,
         )
         return publish_staged_source(
             job,

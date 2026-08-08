@@ -51,6 +51,20 @@ def validate_network_url(
     resolver: Resolver = default_resolver,
     allow_sensitive_query: bool = False,
 ) -> str:
+    host, _port, _addresses = validated_network_destination(
+        locator,
+        resolver=resolver,
+        allow_sensitive_query=allow_sensitive_query,
+    )
+    return host
+
+
+def validated_network_destination(
+    locator: str,
+    *,
+    resolver: Resolver = default_resolver,
+    allow_sensitive_query: bool = False,
+) -> tuple[str, int, list[str]]:
     parsed = urlsplit(locator)
     if parsed.scheme.lower() != "https":
         raise configuration_error("NETWORK_URL_REJECTED", "network access requires HTTPS")
@@ -68,8 +82,8 @@ def validate_network_url(
         port = parsed.port or 443
     except ValueError as exc:
         raise configuration_error("NETWORK_URL_REJECTED", "network URL port is invalid") from exc
-    validate_resolved_addresses(resolver(host, port))
-    return host
+    addresses = validate_resolved_addresses(resolver(host, port))
+    return host, port, addresses
 
 
 def origin(locator: str) -> tuple[str, str, int]:

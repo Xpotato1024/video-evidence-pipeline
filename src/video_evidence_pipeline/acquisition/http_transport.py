@@ -167,8 +167,10 @@ def stream_download(
     retry_attempts: int = 0,
     maximum_retry_after_seconds: int = 5,
     sleep: Callable[[float], None] = time.sleep,
+    monotonic: Callable[[], float] = time.monotonic,
     error_code: str = "HTTP_ACQUISITION_FAILED",
 ) -> StagedSource:
+    deadline = monotonic() + runtime.maximum_download_seconds
     owned_client = client is None
     active_client = client or build_httpx_client(runtime, resolver=resolver)
     current = requested_url
@@ -184,6 +186,8 @@ def stream_download(
     staged_path = new_staging_path(workspace)
     try:
         while True:
+            if monotonic() >= deadline:
+                raise io_error("NETWORK_TIMEOUT", "network acquisition deadline was exceeded")
             final_host = validate_network_url(
                 current,
                 resolver=resolver,
@@ -248,6 +252,10 @@ def stream_download(
                         retries += 1
                         warnings.append("bounded Retry-After honored")
                         visited.remove(current)
+                        if monotonic() + delay >= deadline:
+                            raise io_error(
+                                "NETWORK_TIMEOUT", "network acquisition deadline was exceeded"
+                            )
                         sleep(delay)
                         continue
                     if not 200 <= response.status_code < 300:
@@ -282,6 +290,10 @@ def stream_download(
                             else response.iter_raw()
                         )
                         for chunk in chunks:
+                            if monotonic() >= deadline:
+                                raise io_error(
+                                    "NETWORK_TIMEOUT", "network acquisition deadline was exceeded"
+                                )
                             if not chunk:
                                 continue
                             actual += len(chunk)
@@ -352,7 +364,9 @@ def get_json(
     error_code: str,
     access_denied_code: str | None = None,
     not_found_code: str | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> JsonResponse:
+    deadline = monotonic() + runtime.network_timeout_seconds
     host = validate_network_url(locator, resolver=resolver)
     owned_client = client is None
     active_client = client or build_httpx_client(runtime, resolver=resolver)
@@ -386,6 +400,8 @@ def get_json(
                     raise io_error(error_code, "network API request failed")
                 content = bytearray()
                 for chunk in response.iter_bytes():
+                    if monotonic() >= deadline:
+                        raise io_error("NETWORK_TIMEOUT", "network API deadline was exceeded")
                     content.extend(chunk)
                     if len(content) > 1024 * 1024:
                         raise integrity_error(

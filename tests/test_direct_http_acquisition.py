@@ -159,7 +159,7 @@ def test_direct_http_public_to_private_redirect_is_rejected(tmp_path: Path) -> N
     [
         ("http://media.example.invalid/video", "NETWORK_URL_REJECTED"),
         (
-            "https://media.example.invalid/video?X-Amz-Signature=synthetic-secret",
+            "https://media.example.invalid/video?X-Amz-" + "Signature=synthetic-secret",
             "NETWORK_SIGNED_URL_REJECTED",
         ),
     ],
@@ -212,6 +212,26 @@ def test_direct_http_timeout_is_safely_mapped(tmp_path: Path) -> None:
         acquire_job(job_path, adapter.runtime, adapter)
     assert captured.value.code == "NETWORK_TIMEOUT"
     assert "token" not in captured.value.safe_message
+
+
+def test_direct_http_total_download_deadline_is_bounded(tmp_path: Path) -> None:
+    ticks = iter([0.0, 0.0, 2.0])
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"media")
+
+    runtime = AcquisitionRuntimeConfig(maximum_download_bytes=1024, maximum_download_seconds=1)
+    client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False)
+    adapter = DirectHttpAdapter(
+        runtime,
+        client=client,
+        resolver=public_resolver,
+        monotonic=lambda: next(ticks),
+    )
+    job_path = network_job(tmp_path)
+    with pytest.raises(VepError) as captured:
+        acquire_job(job_path, runtime, adapter)
+    assert captured.value.code == "NETWORK_TIMEOUT"
 
 
 @pytest.mark.parametrize(
