@@ -1,13 +1,23 @@
 from __future__ import annotations
 
+import importlib.metadata
+import ssl
 import time
 from pathlib import Path
 
+import httpcore
 import pytest
 from pydantic import ValidationError
 
-from video_evidence_pipeline.acquisition.http_transport import _PinnedResolverBackend
+from video_evidence_pipeline.acquisition.http_transport import (
+    _PinnedResolverBackend,
+    build_httpx_client,
+)
 from video_evidence_pipeline.acquisition.network_policy import validate_network_url
+from video_evidence_pipeline.acquisition.runtime import (
+    AcquisitionDeadline,
+    AcquisitionRuntimeConfig,
+)
 from video_evidence_pipeline.application import authorize_job, initialize_job
 from video_evidence_pipeline.domain.authorization import AuthorizationRecord
 from video_evidence_pipeline.domain.job import JobSpec, SourceKind
@@ -24,6 +34,53 @@ from video_evidence_pipeline.storage.layout import JobWorkspace
 
 def public_resolver(_host: str, _port: int) -> list[str]:
     return ["93.184.216.34"]
+
+
+class _StaticHttpStream(httpcore.NetworkStream):
+    def __init__(self, response: bytes) -> None:
+        self.response = response
+        self.writes: list[bytes] = []
+        self.tls_server_names: list[str | None] = []
+
+    def read(self, _max_bytes: int, timeout: float | None = None) -> bytes:
+        del timeout
+        response, self.response = self.response, b""
+        return response
+
+    def write(self, buffer: bytes, timeout: float | None = None) -> None:
+        del timeout
+        self.writes.append(buffer)
+
+    def close(self) -> None:
+        pass
+
+    def start_tls(
+        self,
+        _ssl_context: ssl.SSLContext,
+        server_hostname: str | None = None,
+        timeout: float | None = None,
+    ) -> httpcore.NetworkStream:
+        del timeout
+        self.tls_server_names.append(server_hostname)
+        return self
+
+
+class _RecordingBackend(httpcore.NetworkBackend):
+    def __init__(self, stream: httpcore.NetworkStream) -> None:
+        self.stream = stream
+        self.connect_hosts: list[str] = []
+
+    def connect_tcp(
+        self,
+        host: str,
+        _port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options=None,
+    ) -> httpcore.NetworkStream:
+        del timeout, local_address, socket_options
+        self.connect_hosts.append(host)
+        return self.stream
 
 
 @pytest.mark.parametrize(
@@ -164,17 +221,69 @@ def test_connection_backend_revalidates_and_pins_the_resolved_address() -> None:
             connected.append(host)
             return object()
 
-    backend = _PinnedResolverBackend(lambda _host, _port: ["93.184.216.34"])
-    backend._backend = FakeBackend()  # type: ignore[assignment]
+    backend = _PinnedResolverBackend(
+        lambda _host, _port: ["93.184.216.34"],
+        AcquisitionRuntimeConfig(),
+        None,
+        backend=FakeBackend(),  # type: ignore[arg-type]
+    )
     backend.connect_tcp("example.invalid", 443)
     assert connected == ["93.184.216.34"]
 
 
 def test_connection_backend_rejects_dns_rebinding_before_connect() -> None:
-    backend = _PinnedResolverBackend(lambda _host, _port: ["127.0.0.1"])
+    backend = _PinnedResolverBackend(
+        lambda _host, _port: ["127.0.0.1"],
+        AcquisitionRuntimeConfig(),
+        None,
+    )
     with pytest.raises(VepError) as captured:
         backend.connect_tcp("example.invalid", 443)
     assert captured.value.code == "NETWORK_SSRF_REJECTED"
+
+
+def test_production_httpx_transport_uses_pinned_public_ip_and_custom_pool() -> None:
+    stream = _StaticHttpStream(
+        b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nmedia"
+    )
+    backend = _RecordingBackend(stream)
+    runtime = AcquisitionRuntimeConfig(network_timeout_seconds=30)
+    deadline = AcquisitionDeadline.start(10, monotonic=lambda: 0.0)
+    with build_httpx_client(
+        runtime,
+        resolver=lambda host, _port: ["93.184.216.34"] if host == "media.example.invalid" else [],
+        deadline=deadline,
+        network_backend=backend,
+    ) as client:
+        response = client.get("https://media.example.invalid/video.mp4")
+
+    assert response.content == b"media"
+    assert backend.connect_hosts == ["93.184.216.34"]
+    assert "media.example.invalid" not in backend.connect_hosts
+    assert stream.tls_server_names == ["media.example.invalid"]
+    assert any(b"GET /video.mp4 HTTP/1.1" in write for write in stream.writes)
+
+
+def test_production_httpx_transport_rejects_rebound_ip_before_socket_connect() -> None:
+    stream = _StaticHttpStream(b"")
+    backend = _RecordingBackend(stream)
+    with (
+        build_httpx_client(
+            AcquisitionRuntimeConfig(),
+            resolver=lambda _host, _port: ["127.0.0.1"],
+            network_backend=backend,
+        ) as client,
+        pytest.raises(VepError) as captured,
+    ):
+        client.get("https://media.example.invalid/video.mp4")
+
+    assert captured.value.code == "NETWORK_SSRF_REJECTED"
+    assert backend.connect_hosts == []
+
+
+def test_httpx_httpcore_security_pair_is_exactly_audited_versions() -> None:
+    assert importlib.metadata.version("httpx") == "0.28.1"
+    assert importlib.metadata.version("httpcore") == "1.0.9"
 
 
 def _job(root: Path, kind: SourceKind, locator: str) -> Path:

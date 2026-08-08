@@ -51,7 +51,7 @@ related_documents: ["VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-TRUST",
 | Local search | SQLite FTS5 | preferred |
 | Hash | streaming SHA-256 | required／implemented |
 | local source | `local_file` adapter | required／implemented |
-| direct HTTP | httpx | required／implemented |
+| direct HTTP | httpx 0.28.1 + httpcore 1.0.9 | required／implemented |
 | generic/Panopto backend | pinned yt-dlp adapter | preferred／implemented |
 | Panopto API | official REST v1 contract | preferred／implemented |
 | Box API | official API adapter | optional／implemented |
@@ -63,7 +63,9 @@ related_documents: ["VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-TRUST",
 | DOCX／Typst／Pandoc／HTML | export adapters | optional |
 
 network acquisitionは実装済みです。media以降のbackendは未実装です。具体dependency versionは
-`pyproject.toml`と`uv.lock`を正本とし、yt-dlpのruntime self-updateは許可しません。
+`pyproject.toml`と`uv.lock`を正本とし、yt-dlpのruntime self-updateは許可しません。SSRF防御の接続先IP pinningは
+HTTPX/httpcoreのtransport contractへ依存するため、監査済みのexact versionをdirect dependencyとして固定します。
+更新は別PRでcompatibility testとsecurity auditを通します。
 
 ## 4. Deferred／rejected
 

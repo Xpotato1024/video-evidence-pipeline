@@ -69,6 +69,9 @@ yt-dlp backendがfinal host／redirect countを観測できない場合は`null`
 ## direct HTTP
 
 HTTPX clientはTLS verificationを有効にし、`trust_env=False`、connect／read／write／pool timeoutと全取得deadlineを明示します。
+metadata、DNS、redirect、response header、stream body、Retry-Afterは同一absolute deadlineを共有します。production transportは
+connect、TLS handshake、socket write、各socket readの直前に残り時間を再計算し、per-operation timeoutとの小さい方を適用します。
+SSRF防御のcustom pool contractはHTTPX 0.28.1／httpcore 1.0.9で監査・固定し、upgradeは別PRで再監査します。
 redirectは自動追従せず1 hopずつ検証し、relative URLを解決します。loop、上限超過、HTTPSからHTTPへの
 downgrade、signed queryへの遷移を拒否します。
 

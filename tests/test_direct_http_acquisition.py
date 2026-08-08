@@ -3,14 +3,20 @@ from __future__ import annotations
 import gzip
 import json
 import os
+import ssl
 import stat
 from pathlib import Path
 
+import httpcore
 import httpx
 import pytest
 
 from video_evidence_pipeline.acquisition.direct_http import DirectHttpAdapter
-from video_evidence_pipeline.acquisition.runtime import AcquisitionRuntimeConfig
+from video_evidence_pipeline.acquisition.http_transport import build_httpx_client
+from video_evidence_pipeline.acquisition.runtime import (
+    AcquisitionDeadline,
+    AcquisitionRuntimeConfig,
+)
 from video_evidence_pipeline.application import (
     acquire_job,
     authorize_job,
@@ -27,6 +33,55 @@ from video_evidence_pipeline.storage.layout import JobWorkspace
 
 def public_resolver(_host: str, _port: int) -> list[str]:
     return ["93.184.216.34"]
+
+
+class _StallingBodyStream(httpcore.NetworkStream):
+    def __init__(self, clock: list[float]) -> None:
+        self.clock = clock
+        self.read_timeouts: list[float | None] = []
+        self.read_count = 0
+
+    def read(self, _max_bytes: int, timeout: float | None = None) -> bytes:
+        self.read_timeouts.append(timeout)
+        self.read_count += 1
+        if self.read_count == 1:
+            self.clock[0] = 9.5
+            return (
+                b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n"
+                b"Content-Type: video/mp4\r\nConnection: close\r\n\r\nfirst"
+            )
+        raise httpcore.ReadTimeout
+
+    def write(self, _buffer: bytes, timeout: float | None = None) -> None:
+        del timeout
+
+    def close(self) -> None:
+        pass
+
+    def start_tls(
+        self,
+        _ssl_context: ssl.SSLContext,
+        server_hostname: str | None = None,
+        timeout: float | None = None,
+    ) -> httpcore.NetworkStream:
+        del server_hostname, timeout
+        return self
+
+
+class _SingleStreamBackend(httpcore.NetworkBackend):
+    def __init__(self, stream: httpcore.NetworkStream) -> None:
+        self.stream = stream
+
+    def connect_tcp(
+        self,
+        _host: str,
+        _port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options=None,
+    ) -> httpcore.NetworkStream:
+        del timeout, local_address, socket_options
+        return self.stream
 
 
 def network_job(tmp_path: Path, locator: str = "https://media.example.invalid/video.mp4") -> Path:
@@ -272,6 +327,54 @@ def test_direct_http_total_download_deadline_is_bounded(tmp_path: Path) -> None:
     with pytest.raises(VepError) as captured:
         acquire_job(job_path, runtime, adapter)
     assert captured.value.code == "NETWORK_TIMEOUT"
+
+
+def test_direct_http_stalled_next_read_uses_current_absolute_deadline(tmp_path: Path) -> None:
+    clock = [0.0]
+    stream = _StallingBodyStream(clock)
+    runtime = AcquisitionRuntimeConfig(
+        maximum_download_bytes=1024,
+        maximum_download_seconds=10,
+        network_timeout_seconds=30,
+    )
+    client_deadline = AcquisitionDeadline.start(10, monotonic=lambda: clock[0])
+    job_path = network_job(tmp_path)
+
+    with (
+        build_httpx_client(
+            runtime,
+            resolver=public_resolver,
+            deadline=client_deadline,
+            network_backend=_SingleStreamBackend(stream),
+        ) as client,
+        pytest.raises(VepError) as captured,
+    ):
+        acquire_job(
+            job_path,
+            runtime,
+            DirectHttpAdapter(
+                runtime,
+                client=client,
+                resolver=public_resolver,
+                monotonic=lambda: clock[0],
+            ),
+        )
+
+    assert captured.value.code == "NETWORK_TIMEOUT"
+    assert len(stream.read_timeouts) == 2
+    assert stream.read_timeouts[0] == pytest.approx(10)
+    assert stream.read_timeouts[1] is not None
+    assert 0 < stream.read_timeouts[1] <= 0.5
+    workspace = JobWorkspace.open(job_path)
+    assert not workspace.source_manifest_json.exists()
+    assert not workspace.acquisition_manifest_json.exists()
+    assert list(workspace.safe_path("source/staging").iterdir()) == []
+    status, _exit_code = job_status(job_path)
+    assert status["stored_state"] == "AUTHORIZED"
+    transitions = read_jsonl(workspace.transitions_jsonl, TransitionRecord)
+    assert all(record.to_state.value != "ACQUIRED" for record in transitions)
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
 
 
 @pytest.mark.parametrize(

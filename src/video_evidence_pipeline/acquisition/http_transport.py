@@ -57,10 +57,74 @@ class JsonResponse:
     host: str
 
 
+class _DeadlineNetworkStream(httpcore.NetworkStream):
+    """Clamp every blocking stream operation to the current absolute deadline."""
+
+    def __init__(
+        self,
+        stream: httpcore.NetworkStream,
+        runtime: AcquisitionRuntimeConfig,
+        deadline: AcquisitionDeadline | None,
+    ) -> None:
+        self._stream = stream
+        self._runtime = runtime
+        self._deadline = deadline
+
+    def _timeout(self, requested: float | None) -> float:
+        candidates = [self._runtime.network_timeout_seconds]
+        if requested is not None:
+            candidates.append(requested)
+        if self._deadline is not None:
+            candidates.append(self._deadline.remaining())
+        return min(candidates)
+
+    def read(self, max_bytes: int, timeout: float | None = None) -> bytes:
+        return self._stream.read(max_bytes, timeout=self._timeout(timeout))
+
+    def write(self, buffer: bytes, timeout: float | None = None) -> None:
+        self._stream.write(buffer, timeout=self._timeout(timeout))
+
+    def close(self) -> None:
+        self._stream.close()
+
+    def start_tls(
+        self,
+        ssl_context: ssl.SSLContext,
+        server_hostname: str | None = None,
+        timeout: float | None = None,
+    ) -> httpcore.NetworkStream:
+        secured = self._stream.start_tls(
+            ssl_context,
+            server_hostname=server_hostname,
+            timeout=self._timeout(timeout),
+        )
+        return _DeadlineNetworkStream(secured, self._runtime, self._deadline)
+
+    def get_extra_info(self, info: str) -> Any:
+        return self._stream.get_extra_info(info)
+
+
 class _PinnedResolverBackend(httpcore.SyncBackend):
-    def __init__(self, resolver: Resolver) -> None:
+    def __init__(
+        self,
+        resolver: Resolver,
+        runtime: AcquisitionRuntimeConfig,
+        deadline: AcquisitionDeadline | None,
+        *,
+        backend: httpcore.NetworkBackend | None = None,
+    ) -> None:
         self._resolver = resolver
-        self._backend = httpcore.SyncBackend()
+        self._runtime = runtime
+        self._deadline = deadline
+        self._backend = backend or httpcore.SyncBackend()
+
+    def _timeout(self, requested: float | None) -> float:
+        candidates = [self._runtime.network_timeout_seconds]
+        if requested is not None:
+            candidates.append(requested)
+        if self._deadline is not None:
+            candidates.append(self._deadline.remaining())
+        return min(candidates)
 
     def connect_tcp(
         self,
@@ -71,21 +135,34 @@ class _PinnedResolverBackend(httpcore.SyncBackend):
         socket_options=None,
     ) -> httpcore.NetworkStream:
         addresses = validate_resolved_addresses(self._resolver(host, port))
-        return self._backend.connect_tcp(
+        stream = self._backend.connect_tcp(
             addresses[0],
             port,
-            timeout=timeout,
+            timeout=self._timeout(timeout),
             local_address=local_address,
             socket_options=socket_options,
         )
+        return _DeadlineNetworkStream(stream, self._runtime, self._deadline)
 
 
 class _PinnedHttpTransport(httpx.HTTPTransport):
-    def __init__(self, resolver: Resolver) -> None:
+    def __init__(
+        self,
+        resolver: Resolver,
+        runtime: AcquisitionRuntimeConfig,
+        deadline: AcquisitionDeadline | None,
+        *,
+        network_backend: httpcore.NetworkBackend | None = None,
+    ) -> None:
         super().__init__(verify=True, trust_env=False, retries=0)
         self._pool = httpcore.ConnectionPool(
             ssl_context=ssl.create_default_context(),
-            network_backend=_PinnedResolverBackend(resolver),
+            network_backend=_PinnedResolverBackend(
+                resolver,
+                runtime,
+                deadline,
+                backend=network_backend,
+            ),
             retries=0,
         )
 
@@ -95,6 +172,7 @@ def build_httpx_client(
     *,
     resolver: Resolver = default_resolver,
     deadline: AcquisitionDeadline | None = None,
+    network_backend: httpcore.NetworkBackend | None = None,
 ) -> httpx.Client:
     timeout = httpx.Timeout(
         connect=runtime.network_timeout_seconds,
@@ -119,7 +197,12 @@ def build_httpx_client(
         follow_redirects=False,
         verify=True,
         trust_env=False,
-        transport=_PinnedHttpTransport(bounded_resolver),
+        transport=_PinnedHttpTransport(
+            bounded_resolver,
+            runtime,
+            deadline,
+            network_backend=network_backend,
+        ),
     )
 
 
