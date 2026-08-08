@@ -1,5 +1,5 @@
 ---
-schema_version: "1.0"
+schema_version: "1.1"
 document_id: VEP-ARCH-TECH
 title: "技術基準"
 document_type: architecture
@@ -37,16 +37,20 @@ related_documents: ["VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-TRUST",
 | Dependency updates | Dependabot uv／github-actions | configured |
 | Agent policy | `.agents/`＋thin adapters | required／configured |
 | Skill registry | TOML＋SKILL.md＋eval TOML | required／configured |
+| Python package | `video_evidence_pipeline`（`src/` layout） | required／implemented |
+| CLI executable | `vep` | required／implemented |
+| JSON Schema | Pydantic modelから決定的生成 | required／implemented |
 
 ## 3. Domain implementation baseline
 
 | 項目 | 技術 | 状態 |
 |---|---|---|
-| CLI | Typer | preferred |
-| Domain validation | Pydantic v2 | required |
-| Machine artifacts | JSON／JSONL | required |
+| CLI | Typer | required／implemented through `ACQUIRED` |
+| Domain validation | Pydantic v2、unknown field拒否 | required／implemented |
+| Machine artifacts | UTF-8 JSON／append-only JSONL | required／implemented |
 | Local search | SQLite FTS5 | preferred |
-| Hash | SHA-256 | required |
+| Hash | streaming SHA-256 | required／implemented |
+| local source | `local_file` adapter | required／implemented |
 | direct HTTP | httpx | preferred |
 | generic/Panopto backend | yt-dlp adapter | preferred |
 | Box API | official API adapter | optional |
@@ -56,6 +60,8 @@ related_documents: ["VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-TRUST",
 | cloud transcription | explicit permission only | optional |
 | canonical draft | Markdown | required |
 | DOCX／Typst／Pandoc／HTML | export adapters | optional |
+
+`direct_http`、`generic_ytdlp`、`panopto`、`box`と、media以降のbackendは未実装です。
 
 ## 4. Deferred／rejected
 

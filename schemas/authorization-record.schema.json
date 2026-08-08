@@ -1,0 +1,70 @@
+{
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/authorization-record.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "allow_external_api": {
+      "default": false,
+      "title": "Allow External Api",
+      "type": "boolean"
+    },
+    "allow_local_processing": {
+      "title": "Allow Local Processing",
+      "type": "boolean"
+    },
+    "authorization_basis": {
+      "maxLength": 1024,
+      "minLength": 1,
+      "title": "Authorization Basis",
+      "type": "string"
+    },
+    "confirmed_at": {
+      "format": "date-time",
+      "title": "Confirmed At",
+      "type": "string"
+    },
+    "confirmed_by_user": {
+      "const": true,
+      "title": "Confirmed By User",
+      "type": "boolean"
+    },
+    "confirmer_identity": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Confirmer Identity",
+      "type": "string"
+    },
+    "job_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Job Fingerprint",
+      "type": "string"
+    },
+    "job_id": {
+      "maxLength": 63,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+      "title": "Job Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "job_id",
+    "job_fingerprint",
+    "confirmed_by_user",
+    "authorization_basis",
+    "allow_local_processing",
+    "confirmed_at",
+    "confirmer_identity"
+  ],
+  "title": "AuthorizationRecord",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

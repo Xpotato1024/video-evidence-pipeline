@@ -45,6 +45,7 @@ related_documents:
 ## Operations
 
 - [`operations/ci-quality-gates.md`](operations/ci-quality-gates.md)
+- [`operations/cli-and-local-workspace.md`](operations/cli-and-local-workspace.md)
 
 ## Agent system
 

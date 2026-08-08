@@ -211,3 +211,20 @@ def test_unpinned_action_fails(tmp_path: Path) -> None:
     )
     tracked.add(".github/workflows/ci.yml")
     assert "ACTION_UNPINNED" in finding_codes(tmp_path, tracked)
+
+
+def test_runtime_cli_contract_is_required_when_pyproject_exists(tmp_path: Path) -> None:
+    tracked = make_valid_repo(tmp_path)
+    write(
+        tmp_path,
+        "pyproject.toml",
+        """[project]
+name = "test"
+requires-python = ">=3.12,<3.14"
+""",
+    )
+    tracked.add("pyproject.toml")
+    codes = finding_codes(tmp_path, tracked)
+    assert "CLI_ENTRYPOINT_INVALID" in codes
+    assert "RUNTIME_PATH_MISSING" in codes
+    assert "CI_COMMAND_MISSING" in codes

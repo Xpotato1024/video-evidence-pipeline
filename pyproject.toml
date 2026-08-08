@@ -1,20 +1,26 @@
 [project]
 name = "video-evidence-pipeline"
-version = "0.0.0"
-description = "Repository governance and validation foundation for a video evidence pipeline"
+version = "0.1.0"
+description = "Auditable local pipeline contracts for authorized video evidence processing"
 requires-python = ">=3.12,<3.14"
 dependencies = [
+  "pydantic>=2.11,<3",
   "PyYAML>=6.0.2,<7",
+  "typer>=0.16,<1",
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+vep = "video_evidence_pipeline.cli:app"
 
 [dependency-groups]
 dev = [
   "pytest>=8.4,<9",
   "ruff>=0.12,<1",
 ]
-
-[tool.uv]
-package = false
 
 [tool.pytest.ini_options]
 addopts = "-ra"

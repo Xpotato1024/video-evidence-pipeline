@@ -111,11 +111,27 @@ SECRET_PATTERNS = {
         re.IGNORECASE,
     ),
     "signed-query": re.compile(
-        r"[?&](?:token|access_token|sig|signature|x-amz-signature)=[^&\s]{16,}",
+        r"[?&](?:token|access_token|sig|signature|x-amz-signature|"
+        r"x-amz-security-token|x-amz-credential|policy|key-pair-id)=[^&\s]{16,}",
         re.IGNORECASE,
     ),
 }
 TEXT_SUFFIXES = {".md", ".py", ".toml", ".yaml", ".yml", ".json", ".jsonl", ".txt"}
+RUNTIME_REQUIRED_PATHS = {
+    "src/video_evidence_pipeline/__init__.py",
+    "src/video_evidence_pipeline/cli.py",
+    "src/video_evidence_pipeline/domain/job.py",
+    "src/video_evidence_pipeline/acquisition/local_file.py",
+    "src/video_evidence_pipeline/storage/layout.py",
+    "src/video_evidence_pipeline/schemas/generation.py",
+}
+CI_REQUIRED_COMMANDS = {
+    "uv run ruff check src scripts tests",
+    "uv run ruff format --check src scripts tests",
+    "uv run pytest -q",
+    "uv run vep schema check",
+    "uv run python scripts/validate_repository.py --root .",
+}
 
 
 @dataclass(frozen=True, order=True)
@@ -158,6 +174,7 @@ class RepositoryValidator:
         self._validate_adapters()
         self._validate_links()
         self._validate_workflows()
+        self._validate_runtime_contracts()
         self._validate_forbidden_artifacts()
         self._validate_secrets()
         return sorted(set(self.findings))
@@ -539,6 +556,68 @@ class RepositoryValidator:
                 ref = use.rsplit("@", 1)[1]
                 if not SHA40_RE.fullmatch(ref):
                     self.add("ACTION_UNPINNED", relative, use)
+
+    def _validate_runtime_contracts(self) -> None:
+        pyproject_path = self.root / "pyproject.toml"
+        if not pyproject_path.is_file():
+            return
+        try:
+            pyproject = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError):
+            return
+        project = pyproject.get("project") or {}
+        scripts = project.get("scripts") or {}
+        if scripts.get("vep") != "video_evidence_pipeline.cli:app":
+            self.add(
+                "CLI_ENTRYPOINT_INVALID",
+                "pyproject.toml",
+                "project.scripts.vep must point to video_evidence_pipeline.cli:app",
+            )
+        if project.get("requires-python") != ">=3.12,<3.14":
+            self.add("PYTHON_BASELINE_INVALID", "pyproject.toml", "Python 3.12 baseline changed")
+        for relative in sorted(RUNTIME_REQUIRED_PATHS):
+            if not (self.root / relative).is_file():
+                self.add("RUNTIME_PATH_MISSING", relative, "required package contract is missing")
+
+        workflow_path = self.root / ".github/workflows/ci.yml"
+        try:
+            workflow = workflow_path.read_text(encoding="utf-8")
+        except OSError:
+            workflow = ""
+        for command in sorted(CI_REQUIRED_COMMANDS):
+            if command not in workflow:
+                self.add("CI_COMMAND_MISSING", ".github/workflows/ci.yml", command)
+
+        source_root = str(self.root / "src")
+        inserted = source_root not in sys.path
+        if inserted:
+            sys.path.insert(0, source_root)
+        try:
+            from video_evidence_pipeline.schemas.generation import generated_schemas
+
+            generated = generated_schemas()
+            for filename, expected in generated.items():
+                path = self.root / "schemas" / filename
+                if not path.is_file():
+                    self.add(
+                        "SCHEMA_MISSING", path.relative_to(self.root), "generated Schema is missing"
+                    )
+                elif path.read_bytes() != expected:
+                    self.add(
+                        "SCHEMA_DRIFT", path.relative_to(self.root), "generated Schema is stale"
+                    )
+            for path in sorted((self.root / "schemas").glob("*.schema.json")):
+                if path.name not in generated:
+                    self.add(
+                        "SCHEMA_DRIFT",
+                        path.relative_to(self.root),
+                        "unexpected generated Schema is committed",
+                    )
+        except Exception as exc:
+            self.add("SCHEMA_GENERATION_FAILED", "schemas", type(exc).__name__)
+        finally:
+            if inserted:
+                sys.path.remove(source_root)
 
     def _validate_forbidden_artifacts(self) -> None:
         for relative in sorted(self.tracked_files):

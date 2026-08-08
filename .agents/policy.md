@@ -1,5 +1,5 @@
 ---
-schema_version: "1.0"
+schema_version: "1.1"
 document_id: VEP-AGENT-POLICY
 title: "AIエージェント共通ポリシー"
 document_type: agent-policy
@@ -69,9 +69,10 @@ related_documents: ["VEP-AGENT-GOV", "VEP-ARCH-AGENTS", "VEP-GOV-DOCUMENTS", "VE
 
 ```bash
 uv sync --locked --all-groups
-uv run ruff check scripts tests
-uv run ruff format --check scripts tests
+uv run ruff check src scripts tests
+uv run ruff format --check src scripts tests
 uv run pytest -q
+uv run vep schema check
 uv run python scripts/validate_repository.py --root .
 ```
 

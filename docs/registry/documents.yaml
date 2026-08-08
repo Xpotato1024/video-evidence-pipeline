@@ -254,6 +254,15 @@ documents:
   owners:
   - Xpotato1024
   metadata_mode: front-matter
+- document_id: VEP-OPS-CLI-LOCAL
+  path: docs/operations/cli-and-local-workspace.md
+  document_type: operations
+  status: draft
+  canonical: true
+  canonical_for: cli-local-workspace-operations
+  owners:
+  - Xpotato1024
+  metadata_mode: front-matter
 - document_id: VEP-README
   path: README.md
   document_type: repository-overview

@@ -1,5 +1,5 @@
 ---
-schema_version: "1.0"
+schema_version: "1.1"
 document_id: VEP-ARCH-ARTIFACTS
 title: "成果物モデル"
 document_type: architecture
@@ -49,25 +49,31 @@ related_documents: ["VEP-ARCH-PIPELINE", "VEP-ARCH-STATE", "VEP-ARCH-TRUST"]
 
 すべての派生成果物は、少なくとも次を追跡できる必要があります。
 
+実装済みの`ArtifactRef`、`ArtifactRecord`、`ProducerIdentity`は、artifact ID／type、content
+SHA-256、size、workspace-relative path、input artifact、producer kind／name／version、normalized
+configuration fingerprint、timezone-aware timestamp、warnings、redacted errorをstrict modelとして
+保持します。JSON SchemaはPydantic modelから生成します。
+
 ```json
 {
-  "artifact_id": "T001284",
-  "artifact_type": "transcript_segment",
-  "created_at": "2026-08-06T16:07:00+09:00",
-  "input_artifacts": [
-    {
-      "artifact_id": "AUDIO-001",
-      "sha256": "..."
-    }
-  ],
-  "producer": {
-    "kind": "tool",
-    "name": "faster-whisper",
-    "version": "...",
-    "model": "large-v3"
+  "schema_version": "1.0",
+  "artifact": {
+    "artifact_id": "source-0123456789abcdef",
+    "artifact_type": "raw_source",
+    "content_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "size_bytes": 123,
+    "relative_storage_path": "source/raw/0123456789abcdef.../synthetic.bin"
   },
-  "configuration_sha256": "...",
-  "content_sha256": "..."
+  "input_artifacts": [],
+  "producer": {
+    "kind": "adapter",
+    "name": "local_file",
+    "version": "0.1.0"
+  },
+  "configuration_sha256": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+  "created_at": "2026-08-07T00:00:00Z",
+  "warnings": [],
+  "redacted_error": null
 }
 ```
 
@@ -143,24 +149,27 @@ claim type:
 
 ## 7. Storage layout
 
-予定されるローカル配置:
+`ACQUIRED`までの実装済みローカル配置:
 
 ```text
 .local/jobs/<job-id>/
 ├─ job.yaml
+├─ authorization/
+│  └─ authorization.json
 ├─ source/
-├─ normalized/
-├─ observations/
-├─ evidence/
-├─ drafts/
-├─ audits/
-├─ approvals/
-├─ exports/
+│  └─ raw/
+│     └─ <sha256>/
+│        └─ <sanitized-original-name>
 ├─ manifests/
-└─ index/
+│  ├─ source-manifest.json
+│  ├─ transitions.jsonl
+│  └─ stages/
+│     └─ acquisition.json
+└─ logs/
 ```
 
 pathは識別子ではありません。artifact IDとhashを正本とします。
+`normalized/`以降の配置は、それぞれのstage実装時に追加します。
 
 ## 8. Approval binding
 

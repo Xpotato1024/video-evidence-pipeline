@@ -1,5 +1,5 @@
 ---
-schema_version: "1.0"
+schema_version: "1.1"
 document_id: VEP-ARCH-PIPELINE
 title: "パイプラインアーキテクチャ"
 document_type: architecture
@@ -25,6 +25,10 @@ related_documents: ["VEP-ARCH-CONTEXT", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-STATE", 
 ## 1. 設計目標
 
 中核は「動画からレポートを生成すること」ではなく、「動画から検証可能な証拠パッケージを構築し、その証拠から任意の成果物を生成すること」です。
+
+現在、Intake / Authorizationのcore contractと、Acquisitionの`local_file`経路だけが実装済みです。
+実動作するstate pathは`CREATED → AUTHORIZED → ACQUIRED`です。その他のsource adapterと後続層は
+設計済みですが未実装です。
 
 ## 2. 層
 
@@ -189,7 +193,7 @@ authorization、要件確定、自分の考察、曖昧箇所確認、最終承�
 
 初期adapter category:
 
-- `source`: local, direct_http, panopto, box, generic_ytdlp
+- `source`: `local_file`のみ実装済み。`direct_http`、`panopto`、`box`、`generic_ytdlp`は未実装
 - `transcription`: captions, faster_whisper, optional_cloud
 - `vision`: contact_sheet/manual selection, optional model
 - `authoring`: report, summary
