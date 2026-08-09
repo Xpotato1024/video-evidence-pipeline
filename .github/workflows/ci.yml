@@ -49,6 +49,10 @@ jobs:
           enable-cache: true
       - run: uv python install "${{ env.PYTHON_VERSION }}"
       - run: uv sync --locked --all-groups
+      - name: Install system FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ffmpeg
       - name: Verify system FFmpeg capabilities
         run: >-
           uv run python -c "from video_evidence_pipeline.media.runner import FFmpegRunner;

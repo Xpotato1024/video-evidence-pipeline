@@ -45,7 +45,7 @@ GitHubプランが要件を満たした時点で、`lint`、`tests`、`repositor
 
 ## 3. 検査内容
 
-`lint`はRuffのlint／format、`tests`はvalidatorのunit/contract testに加えてsystem FFmpeg／ffprobeの
+`lint`はRuffのlint／format、`tests`はUbuntu package repositoryからsystem FFmpeg／ffprobeを明示導入し、
 capability確認とsynthetic mediaだけを使う実変換integrationを必須化し、
 `repository-validation`は実リポジトリ全体の次を検査します。
 
