@@ -45,7 +45,7 @@ related_documents: ["VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-TRUST",
 
 | 項目 | 技術 | 状態 |
 |---|---|---|
-| CLI | Typer | required／implemented through `ACQUIRED` |
+| CLI | Typer | required／implemented through `NORMALIZED` |
 | Domain validation | Pydantic v2、unknown field拒否 | required／implemented |
 | Machine artifacts | UTF-8 JSON／append-only JSONL | required／implemented |
 | Local search | SQLite FTS5 | preferred |
@@ -55,14 +55,14 @@ related_documents: ["VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-TRUST",
 | generic/Panopto backend | pinned yt-dlp adapter | preferred／implemented |
 | Panopto API | official REST v1 contract | preferred／implemented |
 | Box API | official API adapter | optional／implemented |
-| media | FFmpeg／ffprobe | required |
-| scene candidate | PySceneDetect AdaptiveDetector | preferred |
+| media | system FFmpeg／ffprobe、generic decoder-limit capability／executable SHA検証 | required／implemented |
+| scene candidate | FFmpeg `select` scene score + periodic + pure-Python pHash | required／implemented |
 | local ASR | faster-whisper | preferred |
 | cloud transcription | explicit permission only | optional |
 | canonical draft | Markdown | required |
 | DOCX／Typst／Pandoc／HTML | export adapters | optional |
 
-network acquisitionは実装済みです。media以降のbackendは未実装です。具体dependency versionは
+network acquisitionとmedia normalizationは実装済みです。transcription以降のbackendは未実装です。具体dependency versionは
 `pyproject.toml`と`uv.lock`を正本とし、yt-dlpのruntime self-updateは許可しません。SSRF防御の接続先IP pinningは
 HTTPX/httpcoreのtransport contractへ依存するため、監査済みのexact versionをdirect dependencyとして固定します。
 更新は別PRでcompatibility testとsecurity auditを通します。
@@ -76,5 +76,6 @@ HTTPX/httpcoreのtransport contractへ依存するため、監査済みのexact 
 - single giant Skill: rejected
 - author and auditor same context: rejected
 - actual lecture media in CI: rejected
+- PySceneDetect dependency: deferred（現MVPはFFmpeg scene filterでprocess／identity境界を統一）
 
 required／preferred技術の変更またはdeferred技術の主要導入には原則ADRを作成します。

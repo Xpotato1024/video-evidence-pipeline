@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import stat
-import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -14,6 +12,7 @@ from pydantic import BaseModel, ValidationError
 
 from video_evidence_pipeline.domain.serialization import canonical_json_bytes
 from video_evidence_pipeline.errors import integrity_error, io_error
+from video_evidence_pipeline.storage.locking import exclusive_file_lock
 from video_evidence_pipeline.storage.permissions import (
     PRIVATE_FILE_MODE,
     enforce_private_descriptor,
@@ -24,52 +23,14 @@ from video_evidence_pipeline.storage.permissions import (
 @contextmanager
 def exclusive_append_lock(path: Path) -> Iterator[None]:
     lock_path = path.with_name(f".{path.name}.lock")
-    descriptor: int | None = None
-    try:
-        is_junction = getattr(lock_path, "is_junction", lambda: False)
-        if lock_path.is_symlink() or is_junction():
-            raise OSError("lock path must not be a link or junction")
-        flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
-        descriptor = os.open(lock_path, flags, 0o600)
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-            raise OSError("lock path must be a regular file")
-        enforce_private_descriptor(descriptor, PRIVATE_FILE_MODE)
-        os.ftruncate(descriptor, 1)
-        os.lseek(descriptor, 0, os.SEEK_SET)
-        _acquire_process_lock(descriptor)
+    with exclusive_file_lock(
+        lock_path,
+        busy_code="TRANSITION_LOG_BUSY",
+        busy_message="transition log is being updated",
+        failure_code="TRANSITION_LOCK_FAILED",
+        failure_message="transition log could not be locked",
+    ):
         yield
-    except BlockingIOError as exc:
-        raise integrity_error("TRANSITION_LOG_BUSY", "transition log is being updated") from exc
-    except OSError as exc:
-        raise io_error("TRANSITION_LOCK_FAILED", "transition log could not be locked") from exc
-    finally:
-        if descriptor is not None:
-            os.close(descriptor)
-
-
-def _acquire_process_lock(descriptor: int) -> None:
-    deadline = time.monotonic() + 0.25
-    while True:
-        os.lseek(descriptor, 0, os.SEEK_SET)
-        try:
-            _try_process_lock(descriptor)
-            return
-        except OSError as exc:
-            if time.monotonic() >= deadline:
-                raise BlockingIOError from exc
-            time.sleep(0.01)
-
-
-def _try_process_lock(descriptor: int) -> None:
-    if os.name == "nt":
-        import msvcrt
-
-        msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
-        return
-
-    import fcntl
-
-    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
 
 def append_jsonl(path: Path, record: BaseModel) -> None:

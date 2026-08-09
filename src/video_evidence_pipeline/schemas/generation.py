@@ -11,6 +11,15 @@ from video_evidence_pipeline.domain.artifacts import ArtifactRecord
 from video_evidence_pipeline.domain.authorization import AuthorizationRecord
 from video_evidence_pipeline.domain.job import JobSpec
 from video_evidence_pipeline.domain.manifests import SourceManifest, StageManifest
+from video_evidence_pipeline.domain.media import (
+    FrameIndex,
+    FrameRecord,
+    MediaManifest,
+    MediaProbe,
+    MediaStream,
+    NormalizationConfig,
+    NormalizedSubtitle,
+)
 from video_evidence_pipeline.domain.transitions import TransitionRecord
 from video_evidence_pipeline.errors import configuration_error
 from video_evidence_pipeline.storage.atomic import atomic_write_bytes
@@ -25,6 +34,13 @@ SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "source-manifest.schema.json": SourceManifest,
     "stage-manifest.schema.json": StageManifest,
     "transition-record.schema.json": TransitionRecord,
+    "media-probe.schema.json": MediaProbe,
+    "media-stream.schema.json": MediaStream,
+    "media-manifest.schema.json": MediaManifest,
+    "normalized-subtitle.schema.json": NormalizedSubtitle,
+    "frame-record.schema.json": FrameRecord,
+    "frame-index.schema.json": FrameIndex,
+    "normalization-config.schema.json": NormalizationConfig,
 }
 
 

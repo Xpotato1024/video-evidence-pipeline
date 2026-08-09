@@ -1,0 +1,144 @@
+{
+  "$defs": {
+    "ArtifactRef": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "artifact_type": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Artifact Type",
+          "type": "string"
+        },
+        "content_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "relative_storage_path": {
+          "title": "Relative Storage Path",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "artifact_type",
+        "content_sha256",
+        "size_bytes",
+        "relative_storage_path"
+      ],
+      "title": "ArtifactRef",
+      "type": "object"
+    },
+    "FrameReason": {
+      "enum": [
+        "periodic",
+        "scene-change"
+      ],
+      "title": "FrameReason",
+      "type": "string"
+    },
+    "FrameRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "candidate_timestamps_ms": {
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 1,
+          "title": "Candidate Timestamps Ms",
+          "type": "array"
+        },
+        "frame_id": {
+          "pattern": "^F[0-9]{6}$",
+          "title": "Frame Id",
+          "type": "string"
+        },
+        "perceptual_hash": {
+          "pattern": "^[0-9a-f]{16}$",
+          "title": "Perceptual Hash",
+          "type": "string"
+        },
+        "reasons": {
+          "items": {
+            "$ref": "#/$defs/FrameReason"
+          },
+          "maxItems": 2,
+          "minItems": 1,
+          "title": "Reasons",
+          "type": "array"
+        },
+        "timestamp_ms": {
+          "minimum": 0,
+          "title": "Timestamp Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "frame_id",
+        "timestamp_ms",
+        "artifact",
+        "perceptual_hash",
+        "reasons",
+        "candidate_timestamps_ms"
+      ],
+      "title": "FrameRecord",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/frame-index.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "candidate_count": {
+      "minimum": 0,
+      "title": "Candidate Count",
+      "type": "integer"
+    },
+    "duplicate_count": {
+      "minimum": 0,
+      "title": "Duplicate Count",
+      "type": "integer"
+    },
+    "duration_ms": {
+      "exclusiveMinimum": 0,
+      "title": "Duration Ms",
+      "type": "integer"
+    },
+    "records": {
+      "items": {
+        "$ref": "#/$defs/FrameRecord"
+      },
+      "title": "Records",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "duration_ms",
+    "candidate_count",
+    "duplicate_count"
+  ],
+  "title": "FrameIndex",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

@@ -23,9 +23,9 @@ related_documents:
 
 ## 実装範囲
 
-`vep`は現在、job作成、validation、明示authorization、local／network acquisition、status／integrity
-確認、JSON Schema生成／drift確認を実装しています。実行可能なstate pathは
-`CREATED → AUTHORIZED → ACQUIRED`です。
+`vep`は現在、job作成、validation、明示authorization、local／network acquisition、media normalization、
+status／integrity確認、JSON Schema生成／drift確認を実装しています。実行可能なstate pathは
+`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED`です。
 
 ## Commands
 
@@ -36,11 +36,12 @@ vep job validate
 vep job authorize
 vep job status
 vep acquire
+vep normalize
 vep schema export
 vep schema check
 ```
 
-`validate`、`status`、`acquire`は`--json`で機械可読出力を返します。通常の契約違反はstableな
+`validate`、`status`、`acquire`、`normalize`は`--json`で機械可読出力を返します。通常の契約違反はstableな
 error codeとsafe messageを返し、Python stack traceを表示しません。
 
 `job init`ではassignment requirementをrepeatableな`--requirement`で指定します。未指定時は空配列で、
@@ -84,11 +85,20 @@ CLIは再認可を推測しません。このMVPではin-place再認可も実装
 │  └─ raw/
 │     └─ <sha256>/
 │        └─ <sanitized-original-name>
+├─ normalized/
+│  ├─ staging/
+│  ├─ analysis/<sha256>/analysis.mp4
+│  ├─ audio/<sha256>/speech.wav
+│  ├─ subtitles/<sha256>/subtitle-<stream>.{vtt,jsonl}
+│  ├─ frames/<sha256>/F<id>.png
+│  └─ index/<sha256>/frame-index.json
 ├─ manifests/
 │  ├─ source-manifest.json
+│  ├─ media-manifest.json
 │  ├─ transitions.jsonl
 │  └─ stages/
-│     └─ acquisition.json
+│     ├─ acquisition.json
+│     └─ normalization.json
 └─ logs/
 ```
 
@@ -145,4 +155,29 @@ network jobは`job authorize --allow-network-acquisition`を明示します。to
 - `YTDLP_NOT_AVAILABLE`: lock済みdependencyを再同期する。
 - `PANOPTO_CREDENTIAL_REQUIRED`／`BOX_CREDENTIAL_REQUIRED`: token valueではなく環境変数名を指定する。
 
-FFmpeg、subtitle、frame、ASR、evidence、authoring、independent audit、approval、exportは本運用範囲外です。
+## Media normalization
+
+`vep normalize JOB [--json]`は検証済み`ACQUIRED` raw artifactだけを入力とし、任意のFFmpeg引数を
+受け付けません。analysis proxy、必要時の`speech.wav`、embedded text subtitleのWebVTT／normalized decoded cue JSONL、
+periodic／scene-change frameとframe indexをprivate stagingで検証後、content-addressed pathへ排他的に公開し、
+`NORMALIZED`へ遷移します。audioまたはsubtitleがないmediaは成功し、audioなしは
+`AUDIO_STREAM_UNAVAILABLE` warningを記録します。normalizable-text allowlistは`subrip`／`srt`／`text`／
+`webvtt`だけで、ASS、SSA、`mov_text`、bitmap、unknown codecは変換成功とせずunsupportedとして記録します。cue
+JSONLはFFmpegのWebVTT transcodeから得たnormalized decoded cue textであり、`raw_text_preserved`は常にfalseです。
+raw media bytesはimmutableですが、SRT／WebVTT presentationやcontrol markupを含むcue textのexact preservationは約束しません。
+
+FFmpeg処理中はtransition用job lockを保持しませんが、normalization専用lockはoperation全体で保持します。これにより
+active attemptがstale cleanupで削除されず、hard crash後のstale attemptだけを同lock下でdirect childとして検証・削除します。
+link、junction、mount point、traversal形状は削除せず拒否します。全local inputにはconfigの`-max_streams`、
+`-max_pixels`、`-max_samples`をprobe／decode前に指定し、両toolのgeneric decoder-limit capabilityを確認します。
+tool executableはcapability discoveryの両edge、pin後の各subprocess起動直前／終了直後、publish直前にSHA-256と
+stable metadataで再検証するためpersistentまたは偶発的replacementは拒否します。same-userがhash境界内だけ置換して
+復元するtransient raceはcovered threatではなく、tool installationはtrusted local-admin boundaryです。各outputとaggregate staging budgetを生成中に確認し、subtitle full readは
+per-subtitle上限を`stat`で確認してから実行します。frame indexはseek要求値ではなくobserved FFmpeg PTSを保存し、
+要求candidateは理由とともに別フィールドへ残します。処理前snapshotと公開直前のstate／raw hashをlock下で再検証し、
+競合bundleのfingerprintが異なれば拒否します。decoder slotのdefaultはvideo 34,070,528、audio 1,048,576で、
+configでもこのhard capを超えられません。完全bundleの再実行、`job validate`、`job status`は保存済みtool identity込み
+fingerprint、全artifact hash、media manifest、normalization stage manifestを検証し、subprocessなしで再利用します。
+partial manifestは検証可能な完全artifactがある場合だけ復旧します。
+
+ASR、evidence、authoring、independent audit、approval、exportは本運用範囲外です。

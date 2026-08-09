@@ -1,0 +1,179 @@
+{
+  "$defs": {
+    "ArtifactRef": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "artifact_type": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Artifact Type",
+          "type": "string"
+        },
+        "content_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "relative_storage_path": {
+          "title": "Relative Storage Path",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "artifact_type",
+        "content_sha256",
+        "size_bytes",
+        "relative_storage_path"
+      ],
+      "title": "ArtifactRef",
+      "type": "object"
+    },
+    "SubtitleKind": {
+      "enum": [
+        "text",
+        "bitmap",
+        "unknown"
+      ],
+      "title": "SubtitleKind",
+      "type": "string"
+    },
+    "SubtitleProvenance": {
+      "enum": [
+        "embedded",
+        "official",
+        "sidecar"
+      ],
+      "title": "SubtitleProvenance",
+      "type": "string"
+    },
+    "SubtitleStatus": {
+      "enum": [
+        "normalized",
+        "unsupported"
+      ],
+      "title": "SubtitleStatus",
+      "type": "string"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/normalized-subtitle.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "codec_name": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Codec Name",
+      "type": "string"
+    },
+    "cue_count": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Cue Count",
+      "type": "integer"
+    },
+    "cues_artifact": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "is_default": {
+      "title": "Is Default",
+      "type": "boolean"
+    },
+    "is_forced": {
+      "title": "Is Forced",
+      "type": "boolean"
+    },
+    "kind": {
+      "$ref": "#/$defs/SubtitleKind"
+    },
+    "language": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Language"
+    },
+    "provenance": {
+      "$ref": "#/$defs/SubtitleProvenance"
+    },
+    "raw_text_preserved": {
+      "const": false,
+      "default": false,
+      "description": "Always false: WebVTT normalization does not preserve source cue markup",
+      "title": "Raw Text Preserved",
+      "type": "boolean"
+    },
+    "status": {
+      "$ref": "#/$defs/SubtitleStatus"
+    },
+    "stream_index": {
+      "minimum": 0,
+      "title": "Stream Index",
+      "type": "integer"
+    },
+    "warning_code": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Warning Code"
+    },
+    "webvtt_artifact": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "stream_index",
+    "codec_name",
+    "kind",
+    "provenance",
+    "is_default",
+    "is_forced",
+    "status"
+  ],
+  "title": "NormalizedSubtitle",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

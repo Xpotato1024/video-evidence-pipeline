@@ -1,0 +1,282 @@
+{
+  "$defs": {
+    "MediaRational": {
+      "additionalProperties": false,
+      "properties": {
+        "denominator": {
+          "exclusiveMinimum": 0,
+          "maximum": 2147483647,
+          "title": "Denominator",
+          "type": "integer"
+        },
+        "numerator": {
+          "exclusiveMinimum": 0,
+          "maximum": 2147483647,
+          "title": "Numerator",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "numerator",
+        "denominator"
+      ],
+      "title": "MediaRational",
+      "type": "object"
+    },
+    "MediaStream": {
+      "additionalProperties": false,
+      "properties": {
+        "channels": {
+          "anyOf": [
+            {
+              "maximum": 64,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Channels"
+        },
+        "codec_name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Codec Name",
+          "type": "string"
+        },
+        "duration_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duration Ms"
+        },
+        "frame_rate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MediaRational"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "height": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Height"
+        },
+        "index": {
+          "minimum": 0,
+          "title": "Index",
+          "type": "integer"
+        },
+        "is_default": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Is Default"
+        },
+        "is_forced": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Is Forced"
+        },
+        "language": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Language"
+        },
+        "sample_rate_hz": {
+          "anyOf": [
+            {
+              "maximum": 384000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sample Rate Hz"
+        },
+        "start_time_ms": {
+          "anyOf": [
+            {
+              "maximum": 86400000,
+              "minimum": -86400000,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Time Ms"
+        },
+        "stream_type": {
+          "$ref": "#/$defs/MediaStreamType"
+        },
+        "subtitle_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SubtitleKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "subtitle_provenance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SubtitleProvenance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "time_base": {
+          "$ref": "#/$defs/MediaRational"
+        },
+        "width": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Width"
+        }
+      },
+      "required": [
+        "index",
+        "stream_type",
+        "codec_name",
+        "time_base"
+      ],
+      "title": "MediaStream",
+      "type": "object"
+    },
+    "MediaStreamType": {
+      "enum": [
+        "video",
+        "audio",
+        "subtitle"
+      ],
+      "title": "MediaStreamType",
+      "type": "string"
+    },
+    "SubtitleKind": {
+      "enum": [
+        "text",
+        "bitmap",
+        "unknown"
+      ],
+      "title": "SubtitleKind",
+      "type": "string"
+    },
+    "SubtitleProvenance": {
+      "enum": [
+        "embedded",
+        "official",
+        "sidecar"
+      ],
+      "title": "SubtitleProvenance",
+      "type": "string"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/media-probe.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "duration_ms": {
+      "exclusiveMinimum": 0,
+      "title": "Duration Ms",
+      "type": "integer"
+    },
+    "format_name": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Format Name",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "start_time_ms": {
+      "default": 0,
+      "maximum": 86400000,
+      "minimum": -86400000,
+      "title": "Start Time Ms",
+      "type": "integer"
+    },
+    "streams": {
+      "items": {
+        "$ref": "#/$defs/MediaStream"
+      },
+      "maxItems": 1024,
+      "minItems": 1,
+      "title": "Streams",
+      "type": "array"
+    }
+  },
+  "required": [
+    "format_name",
+    "duration_ms",
+    "streams"
+  ],
+  "title": "MediaProbe",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

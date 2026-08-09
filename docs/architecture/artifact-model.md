@@ -159,7 +159,7 @@ backendが観測できないfinal hostとredirect countは`null`とし、推測�
 
 ## 7. Storage layout
 
-`ACQUIRED`までの実装済みローカル配置:
+`NORMALIZED`までの実装済みローカル配置:
 
 ```text
 .local/jobs/<job-id>/
@@ -171,16 +171,25 @@ backendが観測できないfinal hostとredirect countは`null`とし、推測�
 │  └─ raw/
 │     └─ <sha256>/
 │        └─ <sanitized-original-name>
+├─ normalized/
+│  ├─ staging/                 # FFmpeg処理中だけ使用するprivate attempt
+│  ├─ analysis/<sha256>/analysis.mp4
+│  ├─ audio/<sha256>/speech.wav
+│  ├─ subtitles/<sha256>/subtitle-<stream>.{vtt,jsonl}
+│  ├─ frames/<sha256>/F<id>.png
+│  └─ index/<sha256>/frame-index.json
 ├─ manifests/
 │  ├─ source-manifest.json
+│  ├─ media-manifest.json
 │  ├─ transitions.jsonl
 │  └─ stages/
-│     └─ acquisition.json
+│     ├─ acquisition.json
+│     └─ normalization.json
 └─ logs/
 ```
 
 pathは識別子ではありません。artifact IDとhashを正本とします。
-`normalized/`以降の配置は、それぞれのstage実装時に追加します。
+normalized artifactもrawと同様にcontent-addressed pathへ排他的に公開し、raw sourceを上書きしません。
 
 ## 8. Approval binding
 
