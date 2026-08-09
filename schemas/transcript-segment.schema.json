@@ -1,0 +1,293 @@
+{
+  "$defs": {
+    "ArtifactRef": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "artifact_type": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Artifact Type",
+          "type": "string"
+        },
+        "content_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "relative_storage_path": {
+          "title": "Relative Storage Path",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "artifact_type",
+        "content_sha256",
+        "size_bytes",
+        "relative_storage_path"
+      ],
+      "title": "ArtifactRef",
+      "type": "object"
+    },
+    "SegmentLineage": {
+      "additionalProperties": false,
+      "properties": {
+        "backend_identity_fingerprint": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Backend Identity Fingerprint",
+          "type": "string"
+        },
+        "source_artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "source_record_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Source Record Id",
+          "type": "string"
+        },
+        "source_stream_index": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Stream Index"
+        },
+        "subtitle_provenance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SubtitleProvenance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "source_artifact",
+        "source_record_id",
+        "backend_identity_fingerprint"
+      ],
+      "title": "SegmentLineage",
+      "type": "object"
+    },
+    "SubtitleProvenance": {
+      "enum": [
+        "embedded",
+        "official",
+        "sidecar"
+      ],
+      "title": "SubtitleProvenance",
+      "type": "string"
+    },
+    "TranscriptConfidence": {
+      "additionalProperties": false,
+      "description": "Raw confidence metadata, deliberately not a calibrated probability.",
+      "properties": {
+        "avg_logprob": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Avg Logprob"
+        },
+        "kind": {
+          "$ref": "#/$defs/TranscriptConfidenceKind"
+        },
+        "no_speech_probability": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "No Speech Probability"
+        },
+        "word_probability_count": {
+          "default": 0,
+          "maximum": 1000000,
+          "minimum": 0,
+          "title": "Word Probability Count",
+          "type": "integer"
+        },
+        "word_probability_max": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Word Probability Max"
+        },
+        "word_probability_mean": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Word Probability Mean"
+        },
+        "word_probability_min": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Word Probability Min"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "TranscriptConfidence",
+      "type": "object"
+    },
+    "TranscriptConfidenceKind": {
+      "enum": [
+        "not_available",
+        "backend_metric"
+      ],
+      "title": "TranscriptConfidenceKind",
+      "type": "string"
+    },
+    "TranscriptSource": {
+      "enum": [
+        "normalized_subtitle",
+        "asr"
+      ],
+      "title": "TranscriptSource",
+      "type": "string"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/transcript-segment.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "confidence": {
+      "$ref": "#/$defs/TranscriptConfidence"
+    },
+    "end_ms": {
+      "exclusiveMinimum": 0,
+      "title": "End Ms",
+      "type": "integer"
+    },
+    "flags": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 64,
+      "title": "Flags",
+      "type": "array"
+    },
+    "lineage": {
+      "$ref": "#/$defs/SegmentLineage"
+    },
+    "normalized_text": {
+      "maxLength": 65536,
+      "minLength": 1,
+      "title": "Normalized Text",
+      "type": "string"
+    },
+    "raw_text": {
+      "maxLength": 65536,
+      "minLength": 1,
+      "title": "Raw Text",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "segment_id": {
+      "pattern": "^T[0-9]{6}$",
+      "title": "Segment Id",
+      "type": "string"
+    },
+    "source": {
+      "$ref": "#/$defs/TranscriptSource"
+    },
+    "speaker": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Speaker"
+    },
+    "start_ms": {
+      "minimum": 0,
+      "title": "Start Ms",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "segment_id",
+    "start_ms",
+    "end_ms",
+    "raw_text",
+    "normalized_text",
+    "source",
+    "confidence",
+    "lineage"
+  ],
+  "title": "TranscriptSegment",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

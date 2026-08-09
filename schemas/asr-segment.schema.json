@@ -1,0 +1,163 @@
+{
+  "$defs": {
+    "TranscriptConfidence": {
+      "additionalProperties": false,
+      "description": "Raw confidence metadata, deliberately not a calibrated probability.",
+      "properties": {
+        "avg_logprob": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Avg Logprob"
+        },
+        "kind": {
+          "$ref": "#/$defs/TranscriptConfidenceKind"
+        },
+        "no_speech_probability": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "No Speech Probability"
+        },
+        "word_probability_count": {
+          "default": 0,
+          "maximum": 1000000,
+          "minimum": 0,
+          "title": "Word Probability Count",
+          "type": "integer"
+        },
+        "word_probability_max": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Word Probability Max"
+        },
+        "word_probability_mean": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Word Probability Mean"
+        },
+        "word_probability_min": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Word Probability Min"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "TranscriptConfidence",
+      "type": "object"
+    },
+    "TranscriptConfidenceKind": {
+      "enum": [
+        "not_available",
+        "backend_metric"
+      ],
+      "title": "TranscriptConfidenceKind",
+      "type": "string"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/asr-segment.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "backend_segment_id": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Backend Segment Id",
+      "type": "string"
+    },
+    "confidence": {
+      "$ref": "#/$defs/TranscriptConfidence"
+    },
+    "end_ms": {
+      "exclusiveMinimum": 0,
+      "title": "End Ms",
+      "type": "integer"
+    },
+    "flags": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 64,
+      "title": "Flags",
+      "type": "array"
+    },
+    "raw_text": {
+      "maxLength": 65536,
+      "minLength": 1,
+      "title": "Raw Text",
+      "type": "string"
+    },
+    "speaker": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Speaker"
+    },
+    "start_ms": {
+      "minimum": 0,
+      "title": "Start Ms",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "start_ms",
+    "end_ms",
+    "raw_text",
+    "backend_segment_id",
+    "confidence"
+  ],
+  "title": "AsrSegment",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

@@ -41,6 +41,47 @@
       "title": "ArtifactRef",
       "type": "object"
     },
+    "EvidenceLedgerArtifactRef": {
+      "additionalProperties": false,
+      "description": "Artifact reference for canonical evidence JSONL, including a zero-line ledger.",
+      "properties": {
+        "artifact_id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "artifact_type": {
+          "const": "evidence_records",
+          "default": "evidence_records",
+          "title": "Artifact Type",
+          "type": "string"
+        },
+        "content_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "relative_storage_path": {
+          "title": "Relative Storage Path",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "content_sha256",
+        "size_bytes",
+        "relative_storage_path"
+      ],
+      "title": "EvidenceLedgerArtifactRef",
+      "type": "object"
+    },
     "JobState": {
       "enum": [
         "CREATED",
@@ -138,7 +179,14 @@
     },
     "output_artifacts": {
       "items": {
-        "$ref": "#/$defs/ArtifactRef"
+        "anyOf": [
+          {
+            "$ref": "#/$defs/EvidenceLedgerArtifactRef"
+          },
+          {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        ]
       },
       "title": "Output Artifacts",
       "type": "array"

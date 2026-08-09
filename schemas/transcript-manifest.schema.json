@@ -1,0 +1,436 @@
+{
+  "$defs": {
+    "ArtifactRef": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "artifact_type": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Artifact Type",
+          "type": "string"
+        },
+        "content_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "relative_storage_path": {
+          "title": "Relative Storage Path",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "artifact_type",
+        "content_sha256",
+        "size_bytes",
+        "relative_storage_path"
+      ],
+      "title": "ArtifactRef",
+      "type": "object"
+    },
+    "GapPolicy": {
+      "enum": [
+        "record",
+        "reject"
+      ],
+      "title": "GapPolicy",
+      "type": "string"
+    },
+    "OverlapPolicy": {
+      "enum": [
+        "preserve",
+        "reject"
+      ],
+      "title": "OverlapPolicy",
+      "type": "string"
+    },
+    "SubtitleProvenance": {
+      "enum": [
+        "embedded",
+        "official",
+        "sidecar"
+      ],
+      "title": "SubtitleProvenance",
+      "type": "string"
+    },
+    "TranscriptInterval": {
+      "additionalProperties": false,
+      "properties": {
+        "end_ms": {
+          "exclusiveMinimum": 0,
+          "title": "End Ms",
+          "type": "integer"
+        },
+        "segment_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Segment Ids",
+          "type": "array"
+        },
+        "start_ms": {
+          "minimum": 0,
+          "title": "Start Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start_ms",
+        "end_ms"
+      ],
+      "title": "TranscriptInterval",
+      "type": "object"
+    },
+    "TranscriptSource": {
+      "enum": [
+        "normalized_subtitle",
+        "asr"
+      ],
+      "title": "TranscriptSource",
+      "type": "string"
+    },
+    "TranscriptionBackendIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "local_files_only": {
+          "const": true,
+          "default": true,
+          "title": "Local Files Only",
+          "type": "boolean"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "model_fingerprint": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Fingerprint"
+        },
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "runtime": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Runtime"
+        },
+        "source": {
+          "$ref": "#/$defs/TranscriptSource"
+        },
+        "version": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "name",
+        "version"
+      ],
+      "title": "TranscriptionBackendIdentity",
+      "type": "object"
+    },
+    "TranscriptionConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "asr_beam_size": {
+          "const": 5,
+          "default": 5,
+          "title": "Asr Beam Size",
+          "type": "integer"
+        },
+        "asr_compute_type": {
+          "const": "int8",
+          "default": "int8",
+          "title": "Asr Compute Type",
+          "type": "string"
+        },
+        "asr_condition_on_previous_text": {
+          "const": false,
+          "default": false,
+          "title": "Asr Condition On Previous Text",
+          "type": "boolean"
+        },
+        "asr_device": {
+          "const": "cpu",
+          "default": "cpu",
+          "title": "Asr Device",
+          "type": "string"
+        },
+        "asr_language": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Asr Language"
+        },
+        "asr_temperature": {
+          "const": 0.0,
+          "default": 0.0,
+          "title": "Asr Temperature",
+          "type": "number"
+        },
+        "gap_policy": {
+          "$ref": "#/$defs/GapPolicy",
+          "default": "record"
+        },
+        "maximum_segments": {
+          "default": 100000,
+          "maximum": 1000000,
+          "minimum": 1,
+          "title": "Maximum Segments",
+          "type": "integer"
+        },
+        "maximum_total_text_chars": {
+          "default": 64000000,
+          "maximum": 256000000,
+          "minimum": 1,
+          "title": "Maximum Total Text Chars",
+          "type": "integer"
+        },
+        "minimum_caption_coverage": {
+          "default": 0.8,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Minimum Caption Coverage",
+          "type": "number"
+        },
+        "overlap_policy": {
+          "$ref": "#/$defs/OverlapPolicy",
+          "default": "preserve"
+        },
+        "preferred_languages": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Preferred Languages",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "title": "TranscriptionConfig",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/transcript-manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "backends": {
+      "items": {
+        "$ref": "#/$defs/TranscriptionBackendIdentity"
+      },
+      "maxItems": 8,
+      "minItems": 1,
+      "title": "Backends",
+      "type": "array"
+    },
+    "caption_coverage": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Caption Coverage"
+    },
+    "configuration": {
+      "$ref": "#/$defs/TranscriptionConfig"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "duration_ms": {
+      "exclusiveMinimum": 0,
+      "title": "Duration Ms",
+      "type": "integer"
+    },
+    "gaps": {
+      "items": {
+        "$ref": "#/$defs/TranscriptInterval"
+      },
+      "title": "Gaps",
+      "type": "array"
+    },
+    "implementation_version": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Implementation Version",
+      "type": "string"
+    },
+    "job_id": {
+      "maxLength": 63,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+      "title": "Job Id",
+      "type": "string"
+    },
+    "media_bundle_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Media Bundle Fingerprint",
+      "type": "string"
+    },
+    "overlaps": {
+      "items": {
+        "$ref": "#/$defs/TranscriptInterval"
+      },
+      "title": "Overlaps",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "segment_count": {
+      "minimum": 1,
+      "title": "Segment Count",
+      "type": "integer"
+    },
+    "segments_artifact": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "selected_source_artifacts": {
+      "items": {
+        "$ref": "#/$defs/ArtifactRef"
+      },
+      "maxItems": 32,
+      "minItems": 1,
+      "title": "Selected Source Artifacts",
+      "type": "array"
+    },
+    "selected_subtitle_provenance": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SubtitleProvenance"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "selected_subtitle_stream_index": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Selected Subtitle Stream Index"
+    },
+    "started_at": {
+      "format": "date-time",
+      "title": "Started At",
+      "type": "string"
+    },
+    "transcription_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Transcription Fingerprint",
+      "type": "string"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 128,
+      "title": "Warnings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "job_id",
+    "transcription_fingerprint",
+    "media_bundle_fingerprint",
+    "implementation_version",
+    "configuration",
+    "backends",
+    "selected_source_artifacts",
+    "segments_artifact",
+    "segment_count",
+    "duration_ms",
+    "started_at",
+    "created_at"
+  ],
+  "title": "TranscriptManifest",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

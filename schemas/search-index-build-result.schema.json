@@ -1,0 +1,277 @@
+{
+  "$defs": {
+    "ArtifactRef": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "artifact_type": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Artifact Type",
+          "type": "string"
+        },
+        "content_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "relative_storage_path": {
+          "title": "Relative Storage Path",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "artifact_type",
+        "content_sha256",
+        "size_bytes",
+        "relative_storage_path"
+      ],
+      "title": "ArtifactRef",
+      "type": "object"
+    },
+    "EvidenceLedgerArtifactRef": {
+      "additionalProperties": false,
+      "description": "Artifact reference for canonical evidence JSONL, including a zero-line ledger.",
+      "properties": {
+        "artifact_id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "artifact_type": {
+          "const": "evidence_records",
+          "default": "evidence_records",
+          "title": "Artifact Type",
+          "type": "string"
+        },
+        "content_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "relative_storage_path": {
+          "title": "Relative Storage Path",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "content_sha256",
+        "size_bytes",
+        "relative_storage_path"
+      ],
+      "title": "EvidenceLedgerArtifactRef",
+      "type": "object"
+    },
+    "SearchIndexMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "builder_version": {
+          "const": "external-content-fts5-builder-v1",
+          "default": "external-content-fts5-builder-v1",
+          "title": "Builder Version",
+          "type": "string"
+        },
+        "built_at": {
+          "format": "date-time",
+          "title": "Built At",
+          "type": "string"
+        },
+        "complete": {
+          "const": true,
+          "default": true,
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "documents_fingerprint": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Documents Fingerprint",
+          "type": "string"
+        },
+        "evidence_artifact": {
+          "$ref": "#/$defs/EvidenceLedgerArtifactRef"
+        },
+        "evidence_bundle_fingerprint": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Evidence Bundle Fingerprint",
+          "type": "string"
+        },
+        "evidence_count": {
+          "maximum": 100000,
+          "minimum": 0,
+          "title": "Evidence Count",
+          "type": "integer"
+        },
+        "fts5_available": {
+          "const": true,
+          "default": true,
+          "title": "Fts5 Available",
+          "type": "boolean"
+        },
+        "implementation_version": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Implementation Version",
+          "type": "string"
+        },
+        "indexed_utf8_bytes": {
+          "maximum": 67108864,
+          "minimum": 1,
+          "title": "Indexed Utf8 Bytes",
+          "type": "integer"
+        },
+        "job_id": {
+          "maxLength": 63,
+          "minLength": 1,
+          "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+          "title": "Job Id",
+          "type": "string"
+        },
+        "maximum_indexed_utf8_bytes": {
+          "const": 67108864,
+          "default": 67108864,
+          "title": "Maximum Indexed Utf8 Bytes",
+          "type": "integer"
+        },
+        "normalizer": {
+          "const": "unicode-nfkc-whitespace-v1",
+          "default": "unicode-nfkc-whitespace-v1",
+          "title": "Normalizer",
+          "type": "string"
+        },
+        "query_version": {
+          "const": "literal-trigram-query-v1",
+          "default": "literal-trigram-query-v1",
+          "title": "Query Version",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "semantic_fingerprint": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Semantic Fingerprint",
+          "type": "string"
+        },
+        "short_query_scan_limit_per_kind": {
+          "const": 4096,
+          "default": 4096,
+          "title": "Short Query Scan Limit Per Kind",
+          "type": "integer"
+        },
+        "sqlite_capability": {
+          "const": "fts5-trigram",
+          "default": "fts5-trigram",
+          "title": "Sqlite Capability",
+          "type": "string"
+        },
+        "sqlite_version": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Sqlite Version",
+          "type": "string"
+        },
+        "tokenizer": {
+          "const": "trigram",
+          "default": "trigram",
+          "title": "Tokenizer",
+          "type": "string"
+        },
+        "transcript_bundle_fingerprint": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Transcript Bundle Fingerprint",
+          "type": "string"
+        },
+        "transcript_count": {
+          "maximum": 100000,
+          "minimum": 1,
+          "title": "Transcript Count",
+          "type": "integer"
+        },
+        "transcript_segments_artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "transcription_fingerprint": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Transcription Fingerprint",
+          "type": "string"
+        },
+        "trigram_available": {
+          "const": true,
+          "default": true,
+          "title": "Trigram Available",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "job_id",
+        "transcript_segments_artifact",
+        "evidence_artifact",
+        "transcription_fingerprint",
+        "transcript_bundle_fingerprint",
+        "evidence_bundle_fingerprint",
+        "semantic_fingerprint",
+        "documents_fingerprint",
+        "implementation_version",
+        "sqlite_version",
+        "indexed_utf8_bytes",
+        "transcript_count",
+        "evidence_count",
+        "built_at"
+      ],
+      "title": "SearchIndexMetadata",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/search-index-build-result.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "metadata": {
+      "$ref": "#/$defs/SearchIndexMetadata"
+    },
+    "reused": {
+      "title": "Reused",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "metadata",
+    "reused"
+  ],
+  "title": "SearchIndexBuildResult",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

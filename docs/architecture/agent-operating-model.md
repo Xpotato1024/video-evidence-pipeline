@@ -7,7 +7,7 @@ status: draft
 canonical: true
 canonical_for: agent-operating-model
 created_at: 2026-08-06T16:07:00+09:00
-updated_at: 2026-08-06T16:28:00+09:00
+updated_at: 2026-08-10T02:00:00+09:00
 authors: ["Xpotato1024", "OpenAI ChatGPT"]
 owners: ["Xpotato1024"]
 reviewers: []
@@ -47,9 +47,11 @@ adapterは自動検出の互換層であり、共通規則を弱めません。
 
 ## 3. Skills
 
-active Skillは`repository-sot-audit`のみです。動画処理・evidence・authoring・audit関連Skillは、
-必要Schemaと実装が存在しないためdraft／instruction-onlyです。実装Issueで契約を満たした後に
-個別evalを通してactiveへ昇格します。
+active Skillは`repository-sot-audit`のみです。transcript／evidence Schemaと`EVIDENCE_READY`までの
+実装が存在しても、`analyze-video-evidence`はdraft／explicit-onlyのままです。現行evalは2つの
+expected／forbidden caseだけで、promotion threshold 9に必要なscore、representative run、成果物evidence、
+owner reviewを満たす検証はNot Runです。authoring／audit関連Skillも個別evalを完了するまでdraftのままとし、
+実装完了だけを理由にimplicit invocationへ昇格しません。
 
 ## 4. Authoring contract
 

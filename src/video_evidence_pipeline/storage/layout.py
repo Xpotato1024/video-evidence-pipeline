@@ -71,6 +71,12 @@ class JobWorkspace:
             root / "source/raw",
             root / "normalized",
             root / "normalized/staging",
+            root / "transcript",
+            root / "transcript/staging",
+            root / "evidence",
+            root / "evidence/staging",
+            root / "search",
+            root / "search/staging",
             root / "manifests",
             root / "manifests/stages",
             root / "logs",
@@ -130,6 +136,50 @@ class JobWorkspace:
     @property
     def normalization_lock_path(self) -> Path:
         return self.safe_path("normalized/.normalization.lock")
+
+    @property
+    def transcript_manifest_json(self) -> Path:
+        return self.safe_path("manifests/transcript-manifest.json")
+
+    @property
+    def transcript_candidate_manifest_json(self) -> Path:
+        return self.safe_path("manifests/stages/transcription-candidate.json")
+
+    @property
+    def transcription_stage_manifest_json(self) -> Path:
+        return self.safe_path("manifests/stages/transcription.json")
+
+    @property
+    def transcription_lock_path(self) -> Path:
+        return self.safe_path("transcript/.transcription.lock")
+
+    @property
+    def evidence_request_json(self) -> Path:
+        return self.safe_path("evidence/request.json")
+
+    @property
+    def evidence_manifest_json(self) -> Path:
+        return self.safe_path("manifests/evidence-manifest.json")
+
+    @property
+    def evidence_candidate_manifest_json(self) -> Path:
+        return self.safe_path("manifests/stages/evidence-candidate.json")
+
+    @property
+    def evidence_stage_manifest_json(self) -> Path:
+        return self.safe_path("manifests/stages/evidence.json")
+
+    @property
+    def evidence_lock_path(self) -> Path:
+        return self.safe_path("evidence/.evidence.lock")
+
+    @property
+    def search_index_sqlite(self) -> Path:
+        return self.safe_path("search/index.sqlite3")
+
+    @property
+    def search_lock_path(self) -> Path:
+        return self.safe_path("search/.search.lock")
 
     @property
     def transitions_jsonl(self) -> Path:

@@ -1,0 +1,58 @@
+{
+  "$defs": {
+    "AssignmentRequirement": {
+      "additionalProperties": false,
+      "properties": {
+        "requirement_id": {
+          "pattern": "^R[0-9]{6}$",
+          "title": "Requirement Id",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "requirement_id",
+        "text"
+      ],
+      "title": "AssignmentRequirement",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/evidence-assignment-context.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "language": {
+      "maxLength": 32,
+      "minLength": 2,
+      "title": "Language",
+      "type": "string"
+    },
+    "requirements": {
+      "items": {
+        "$ref": "#/$defs/AssignmentRequirement"
+      },
+      "maxItems": 100,
+      "title": "Requirements",
+      "type": "array"
+    },
+    "task_type": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Task Type",
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_type",
+    "language"
+  ],
+  "title": "EvidenceAssignmentContext",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

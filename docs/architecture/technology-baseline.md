@@ -7,7 +7,7 @@ status: draft
 canonical: true
 canonical_for: technology-baseline
 created_at: 2026-08-06T16:07:00+09:00
-updated_at: 2026-08-06T16:28:00+09:00
+updated_at: 2026-08-10T02:00:00+09:00
 authors: ["Xpotato1024", "OpenAI ChatGPT"]
 owners: ["Xpotato1024"]
 reviewers: []
@@ -45,10 +45,10 @@ related_documents: ["VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-TRUST",
 
 | 項目 | 技術 | 状態 |
 |---|---|---|
-| CLI | Typer | required／implemented through `NORMALIZED` |
+| CLI | Typer | required／implemented through `EVIDENCE_READY` |
 | Domain validation | Pydantic v2、unknown field拒否 | required／implemented |
 | Machine artifacts | UTF-8 JSON／append-only JSONL | required／implemented |
-| Local search | SQLite FTS5 | preferred |
+| Local search | SQLite FTS5 `trigram`、private rebuildable cache | preferred／implemented |
 | Hash | streaming SHA-256 | required／implemented |
 | local source | `local_file` adapter | required／implemented |
 | direct HTTP | httpx 0.28.1 + httpcore 1.0.9 | required／implemented |
@@ -57,12 +57,17 @@ related_documents: ["VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-TRUST",
 | Box API | official API adapter | optional／implemented |
 | media | system FFmpeg／ffprobe、generic decoder-limit capability／executable SHA検証 | required／implemented |
 | scene candidate | FFmpeg `select` scene score + periodic + pure-Python pHash | required／implemented |
-| local ASR | faster-whisper | preferred |
-| cloud transcription | explicit permission only | optional |
+| caption transcription | normalized subtitle、strict segment／lineage model | required／implemented |
+| local ASR | lazy faster-whisper adapter、explicit existing model directory、offline only | preferred／implemented adapter、runtime package optional |
+| semantic evidence exchange | fixed JSON request／strict provider-neutral JSON response | required／implemented |
+| cloud transcription | explicit permission only | optional／not implemented |
 | canonical draft | Markdown | required |
 | DOCX／Typst／Pandoc／HTML | export adapters | optional |
 
-network acquisitionとmedia normalizationは実装済みです。transcription以降のbackendは未実装です。具体dependency versionは
+network acquisition、media normalization、transcription、semantic evidence exchange、private search cacheは実装済みです。
+faster-whisperは新しいlock dependencyにせず、ASRが必要なjobだけでlazy importします。model size名を受け付けず、
+必要fileが揃った既存local directoryと`local_files_only`を必須にし、package／model不在をstructured errorとして返します。
+cloud ASR／vision routeは実装していません。具体dependency versionは
 `pyproject.toml`と`uv.lock`を正本とし、yt-dlpのruntime self-updateは許可しません。SSRF防御の接続先IP pinningは
 HTTPX/httpcoreのtransport contractへ依存するため、監査済みのexact versionをdirect dependencyとして固定します。
 更新は別PRでcompatibility testとsecurity auditを通します。

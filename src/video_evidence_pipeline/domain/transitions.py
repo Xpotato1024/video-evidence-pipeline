@@ -50,6 +50,8 @@ IMPLEMENTED_TRANSITIONS = {
     (JobState.CREATED, JobState.AUTHORIZED),
     (JobState.AUTHORIZED, JobState.ACQUIRED),
     (JobState.ACQUIRED, JobState.NORMALIZED),
+    (JobState.NORMALIZED, JobState.TRANSCRIBED),
+    (JobState.TRANSCRIBED, JobState.EVIDENCE_READY),
 }
 
 

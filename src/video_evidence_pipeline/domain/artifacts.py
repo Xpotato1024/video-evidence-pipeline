@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import Field, StringConstraints, field_validator
+from pydantic import Field, StringConstraints, field_validator, model_validator
 
 from video_evidence_pipeline.domain import StrictModel, UtcDateTime
 from video_evidence_pipeline.domain.identifiers import Sha256, validate_relative_storage_path
@@ -35,6 +35,23 @@ class ArtifactRef(StrictModel):
     @classmethod
     def storage_path_is_safe(cls, value: str) -> str:
         return validate_relative_storage_path(value)
+
+
+class EvidenceLedgerArtifactRef(ArtifactRef):
+    """Artifact reference for canonical evidence JSONL, including a zero-line ledger."""
+
+    artifact_type: Literal["evidence_records"] = "evidence_records"
+    size_bytes: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def empty_ledger_has_canonical_identity(self) -> Self:
+        if (
+            self.size_bytes == 0
+            and self.content_sha256
+            != "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        ):
+            raise ValueError("empty evidence ledger must use the canonical empty SHA-256")
+        return self
 
 
 class ArtifactRecord(StrictModel):

@@ -1,0 +1,85 @@
+{
+  "$defs": {
+    "SearchDocumentKind": {
+      "enum": [
+        "transcript",
+        "evidence"
+      ],
+      "title": "SearchDocumentKind",
+      "type": "string"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/search-hit.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "content": {
+      "maxLength": 65536,
+      "minLength": 1,
+      "title": "Content",
+      "type": "string"
+    },
+    "end_ms": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "End Ms"
+    },
+    "kind": {
+      "$ref": "#/$defs/SearchDocumentKind"
+    },
+    "rank": {
+      "maximum": 100,
+      "minimum": 1,
+      "title": "Rank",
+      "type": "integer"
+    },
+    "record_id": {
+      "maxLength": 7,
+      "minLength": 1,
+      "title": "Record Id",
+      "type": "string"
+    },
+    "score": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Score"
+    },
+    "start_ms": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Start Ms"
+    }
+  },
+  "required": [
+    "rank",
+    "kind",
+    "record_id",
+    "content"
+  ],
+  "title": "SearchHit",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

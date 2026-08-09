@@ -1,0 +1,25 @@
+{
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/assignment-requirement.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "requirement_id": {
+      "pattern": "^R[0-9]{6}$",
+      "title": "Requirement Id",
+      "type": "string"
+    },
+    "text": {
+      "maxLength": 512,
+      "minLength": 1,
+      "title": "Text",
+      "type": "string"
+    }
+  },
+  "required": [
+    "requirement_id",
+    "text"
+  ],
+  "title": "AssignmentRequirement",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

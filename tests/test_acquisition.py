@@ -732,7 +732,7 @@ def test_unimplemented_transition_is_rejected_before_integrity_status(tmp_path: 
         occurred_at=records[-1].occurred_at,
         job_fingerprint=records[-1].job_fingerprint,
     )
-    append = TransitionRecord(
+    transcribed = TransitionRecord(
         sequence=5,
         job_id="demo-report",
         from_state=normalized.to_state,
@@ -741,9 +741,29 @@ def test_unimplemented_transition_is_rejected_before_integrity_status(tmp_path: 
         occurred_at=records[-1].occurred_at,
         job_fingerprint=records[-1].job_fingerprint,
     )
+    evidence_ready = TransitionRecord(
+        sequence=6,
+        job_id="demo-report",
+        from_state=transcribed.to_state,
+        to_state="EVIDENCE_READY",
+        trigger="tampered.unimplemented",
+        occurred_at=records[-1].occurred_at,
+        job_fingerprint=records[-1].job_fingerprint,
+    )
+    drafted = TransitionRecord(
+        sequence=7,
+        job_id="demo-report",
+        from_state=evidence_ready.to_state,
+        to_state="DRAFTED",
+        trigger="tampered.unimplemented",
+        occurred_at=records[-1].occurred_at,
+        job_fingerprint=records[-1].job_fingerprint,
+    )
     with transitions_path.open("ab") as handle:
         handle.write((normalized.model_dump_json() + "\n").encode())
-        handle.write((append.model_dump_json() + "\n").encode())
+        handle.write((transcribed.model_dump_json() + "\n").encode())
+        handle.write((evidence_ready.model_dump_json() + "\n").encode())
+        handle.write((drafted.model_dump_json() + "\n").encode())
     artifact = result.source_manifest.artifact_record.artifact
     (job_path / artifact.relative_storage_path).write_bytes(b"tampered")
 
