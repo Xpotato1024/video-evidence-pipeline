@@ -42,9 +42,10 @@ related_documents: ["VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-AGENTS"
 | `FAILED` | stageが失敗し、有効な出力がない |
 | `CANCELLED` | ユーザーが処理を中止した |
 
-全stateは`JobState` enumとして実装されています。実行可能な遷移は現在
-`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → EVIDENCE_READY`です。
-`DRAFTED`以降はmodel／policy上の設計契約として存在しても、CLIから実行できません。
+全stateは`JobState` enumとして実装されています。実行可能な直線経路は現在
+`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → EVIDENCE_READY → DRAFTED → AUDITED → HUMAN_REVIEW_READY`
+です。P0／P1がある場合は`AUDITED → REVISION_REQUIRED → DRAFTED`を最大2回反復し、上限後も
+material findingが残れば`AUDITED → BLOCKED`へ進みます。`HUMAN_APPROVED`／`EXPORTED`は未実装です。
 
 ## 2. 遷移
 
@@ -133,23 +134,31 @@ stateDiagram-v2
 - canonical JSON／JSONLからprivate FTS5 trigram cacheを再構築しintegrity checkできる
 - final transition lock内の全上流bundle再検証後、primary manifestをcommit marker、transitionを最後にappend
 
-ここまでが実装済みgateです。以下は未実装stageの設計gateであり、現在のCLIでは実行できません。
-
 ### `EVIDENCE_READY → DRAFTED`
 
-- assignment requirement map作成可能
-- selected evidenceが存在
-- user opinionが必要な箇所を捏造していない
-- draftとclaim ledgerが対応
+- jobに属するfixed evidence bundleにselected evidenceが1件以上存在
+- provider-neutral author request／responseがexact requirements、evidence、Skill snapshotへ束縛される
+- video／visual／inference／external fact claimが許可されたinterpretation levelとevidenceへ相互に対応
+- user opinionは生成せず、必要箇所を`[要確認]`として残す
+- immutable `v001` draft、claim ledger、requirement map、response、manifest／stage manifestをfull verify可能
+- repository-local Skillが`active`でないproduction importを拒否する
 
 ### `DRAFTED → AUDITED`
 
-- fresh-context auditor
-- audit claims
-- findings
-- severity
-- source refs
-- author claimsとの差分
+- audit requestの物理serializationにauthor claim／run／context／prompt history／private reasoningを含めない
+- target draftとfixed evidenceに束縛したfresh context auditorで、過去author／reviser／auditor contextを再利用しない
+- audit claims、P0／P1／P2 findings、exact evidence／SourceRefを検証する
+- 全findingをdraft／audit claim／requirementへ束縛し、P0／P1はexact draft spanを必須とする
+- validated import後にauthor claimとの差分artifactを決定的に生成する
+- P0／P1があれば`REVISION_REQUIRED`、なければ`HUMAN_REVIEW_READY`へ進める
+
+### `AUDITED → REVISION_REQUIRED → DRAFTED`
+
+- findingごとの`accept`／`reject`／`defer`とevidence根拠をresolution ledgerへ記録
+- accepted findingのinsert／replace／delete hunkをold／new spanとして決定的diffと完全一致させる
+- accepted resolutionのevidenceをfindingと完全一致させ、各hunkをそのfindingのdraft spanへ位置的に帰属させる
+- `v002`／`v003`をimmutableに公開し、predecessor、audit、request、response、全fresh contextをlineageへ固定
+- revision countは最大2回で、上限後もP0／P1があれば`AUDITED → BLOCKED`とし`v004`を作らない
 
 ### `AUDITED → HUMAN_REVIEW_READY`
 
@@ -157,6 +166,11 @@ stateDiagram-v2
 - `P1 = 0`
 - unresolved `[要確認]` の扱いが明示
 - length／format等のdeterministic gate成功
+- current draft、audit findings、claim comparison、requirement map、revision history、approval target SHA-256を
+  human-review bundleへ固定
+- bundleは`is_approval: false`であり、人間承認recordを生成しない
+
+ここまでが実装済みgateです。以下は未実装stageの設計gateであり、現在のCLIでは実行できません。
 
 ### `HUMAN_REVIEW_READY → HUMAN_APPROVED`
 

@@ -1,0 +1,279 @@
+{
+  "$defs": {
+    "AgentExecutionMode": {
+      "enum": [
+        "external_exchange",
+        "test_fixture"
+      ],
+      "title": "AgentExecutionMode",
+      "type": "string"
+    },
+    "AgentIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "context_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "title": "Context Id",
+          "type": "string"
+        },
+        "execution_mode": {
+          "$ref": "#/$defs/AgentExecutionMode"
+        },
+        "executor": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Executor",
+          "type": "string"
+        },
+        "external_api_used": {
+          "title": "External Api Used",
+          "type": "boolean"
+        },
+        "model": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Model",
+          "type": "string"
+        },
+        "provider": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Provider",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/AgentRole"
+        },
+        "version": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "provider",
+        "model",
+        "version",
+        "executor",
+        "context_id",
+        "execution_mode",
+        "external_api_used"
+      ],
+      "title": "AgentIdentity",
+      "type": "object"
+    },
+    "AgentRole": {
+      "enum": [
+        "author",
+        "auditor",
+        "reviser"
+      ],
+      "title": "AgentRole",
+      "type": "string"
+    },
+    "ArtifactRef": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "artifact_type": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Artifact Type",
+          "type": "string"
+        },
+        "content_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "relative_storage_path": {
+          "title": "Relative Storage Path",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "artifact_type",
+        "content_sha256",
+        "size_bytes",
+        "relative_storage_path"
+      ],
+      "title": "ArtifactRef",
+      "type": "object"
+    },
+    "SkillSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "automatic_trigger": {
+          "const": false,
+          "default": false,
+          "title": "Automatic Trigger",
+          "type": "boolean"
+        },
+        "content_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "eval_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Eval Sha256",
+          "type": "string"
+        },
+        "explicit_selection": {
+          "const": true,
+          "default": true,
+          "title": "Explicit Selection",
+          "type": "boolean"
+        },
+        "lifecycle": {
+          "enum": [
+            "draft",
+            "active"
+          ],
+          "title": "Lifecycle",
+          "type": "string"
+        },
+        "owner": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Owner",
+          "type": "string"
+        },
+        "relative_path": {
+          "pattern": "^\\.agents/skills/[a-z0-9-]+/SKILL\\.md$",
+          "title": "Relative Path",
+          "type": "string"
+        },
+        "side_effect_policy": {
+          "const": "instruction-only",
+          "default": "instruction-only",
+          "title": "Side Effect Policy",
+          "type": "string"
+        },
+        "skill_id": {
+          "pattern": "^[a-z0-9][a-z0-9-]{0,127}$",
+          "title": "Skill Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "skill_id",
+        "relative_path",
+        "content_sha256",
+        "eval_sha256",
+        "lifecycle",
+        "owner"
+      ],
+      "title": "SkillSnapshot",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/agent-run-record.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "finished_at": {
+      "format": "date-time",
+      "title": "Finished At",
+      "type": "string"
+    },
+    "identity": {
+      "$ref": "#/$defs/AgentIdentity"
+    },
+    "input_artifacts": {
+      "items": {
+        "$ref": "#/$defs/ArtifactRef"
+      },
+      "maxItems": 100000,
+      "title": "Input Artifacts",
+      "type": "array"
+    },
+    "output_artifacts": {
+      "items": {
+        "$ref": "#/$defs/ArtifactRef"
+      },
+      "maxItems": 100000,
+      "title": "Output Artifacts",
+      "type": "array"
+    },
+    "request_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Request Fingerprint",
+      "type": "string"
+    },
+    "response_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Response Fingerprint",
+      "type": "string"
+    },
+    "role": {
+      "$ref": "#/$defs/AgentRole"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "skill": {
+      "$ref": "#/$defs/SkillSnapshot"
+    },
+    "started_at": {
+      "format": "date-time",
+      "title": "Started At",
+      "type": "string"
+    },
+    "warnings": {
+      "items": {
+        "maxLength": 256,
+        "minLength": 1,
+        "pattern": ".*\\S.*",
+        "type": "string"
+      },
+      "maxItems": 256,
+      "title": "Warnings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "role",
+    "skill",
+    "identity",
+    "request_fingerprint",
+    "response_fingerprint",
+    "started_at",
+    "finished_at"
+  ],
+  "title": "AgentRunRecord",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

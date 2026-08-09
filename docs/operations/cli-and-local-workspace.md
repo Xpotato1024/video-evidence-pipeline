@@ -24,9 +24,10 @@ related_documents:
 ## 実装範囲
 
 `vep`は現在、job作成、validation、明示authorization、local／network acquisition、media normalization、
-transcription、semantic evidence prepare／import、private search cache、status／integrity確認、JSON Schema
-生成／drift確認を実装しています。実行可能なstate pathは
-`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → EVIDENCE_READY`です。
+transcription、semantic evidence／authoring／audit／revision prepare／import、private search cache、
+human-review package、status／integrity確認、JSON Schema生成／drift確認を実装しています。実行可能な直線経路は
+`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → EVIDENCE_READY → DRAFTED → AUDITED → HUMAN_REVIEW_READY`
+で、P0／P1が残る経路は最大2回のrevision後に`BLOCKED`です。
 
 ## Commands
 
@@ -41,6 +42,12 @@ vep normalize
 vep transcribe
 vep evidence prepare
 vep evidence import --response PATH
+vep author prepare --skill SKILL
+vep author import --response PATH
+vep audit prepare --skill SKILL
+vep audit import --response PATH
+vep revision prepare --skill SKILL
+vep revision import --response PATH
 vep index build
 vep search JOB QUERY --limit N
 vep schema export
@@ -110,17 +117,29 @@ CLIは再認可を推測しません。このMVPではin-place再認可も実装
 ├─ search/
 │  ├─ staging/
 │  └─ index.sqlite3
+├─ semantic/
+│  └─ staging/
+├─ authoring/
+│  ├─ requests/{author,audit,revision}-vNNN.json
+│  ├─ responses/<sha256>/{author,audit,revision}-response.json
+│  ├─ drafts/vNNN/{draft.md,claims.jsonl,requirement-map.json,agent-run.json}
+│  ├─ audits/vNNN/{audit-claims.jsonl,findings.json,claim-comparison.jsonl,agent-run.json}
+│  └─ revisions/vNNN/resolutions.jsonl
+├─ human-review/
+│  └─ vNNN/bundle.json
 ├─ manifests/
 │  ├─ source-manifest.json
 │  ├─ media-manifest.json
 │  ├─ transcript-manifest.json
 │  ├─ evidence-manifest.json
+│  ├─ authoring/{draft-vNNN,audit-vNNN,revision-vNNN,human-review}.json
 │  ├─ transitions.jsonl
 │  └─ stages/
 │     ├─ acquisition.json
 │     ├─ normalization.json
 │     ├─ transcription.json
-│     └─ evidence.json
+│     ├─ evidence.json
+│     └─ {authoring,audit,revision,human-review}-vNNN.json
 └─ logs/
 ```
 
@@ -247,7 +266,32 @@ limitは1〜100、indexed textは64 MiB、DBは512 MiBに制限します。metad
 fingerprint、tokenizer、normalizer、query／builder／implementation version、SQLite capabilityを保持します。
 stale／corrupt cacheは専用lock下のprivate stagingで再構築し、SQLiteとFTS integrity check後にatomic publishします。
 
-`job validate`と`job status`は`TRANSCRIBED`／`EVIDENCE_READY`でも全upstream artifact、transcript／evidence
-manifest、ledger、lineageをfull verifyし、canonical JSON／JSONLからindexを再構築できることを確認します。
+`job validate`と`job status`は`TRANSCRIBED`以降でも全upstream artifact、transcript／evidence／authoring／audit／
+revision／human-review manifest、ledger、lineageをfull verifyし、canonical JSON／JSONLからindexを再構築できることを
+確認します。
 
-authoring、independent audit、approval、exportは本運用範囲外です。
+## Authoring／audit／revision exchange
+
+`vep author prepare JOB --skill SKILL`はjobに属するselected evidenceを1件以上含むfixed bundleを`author-v001` requestへ
+固定します。`vep author import JOB --response PATH`はclaim／evidence／requirementの相互対応とUTF-8 byte上限を
+検証し、immutable draft `v001`を公開して`DRAFTED`へ進めます。
+
+`vep audit prepare JOB --skill SKILL`はtarget draft本文とfixed evidenceだけを固定し、author claim／run／context／prompt
+history／private reasoningを物理serializationから除外します。`vep audit import`は過去の全author／reviser／auditor
+contextと異なるfresh context、exact target SHA-256、evidence／SourceRef、severityを検証します。P0／P1がなければ
+human-review bundleを作成して`HUMAN_REVIEW_READY`、あれば`REVISION_REQUIRED`へ進みます。
+全findingはdraft／audit claim／requirementへ束縛し、P0／P1はexact draft spanを必要とします。
+
+`vep revision prepare JOB --skill SKILL`／`vep revision import JOB --response PATH`はmaterial findingごとのresolutionと
+決定的diff hunkを検証し、`v002`／`v003`
+だけを許可します。2回修正後の監査にもP0／P1が残れば`BLOCKED`とし、`v004`を生成しません。
+ACCEPTのevidenceは対応findingと完全一致し、各hunkはそのfindingのdraft spanへ帰属する必要があります。
+
+provider-neutral production importは対応Skillの`lifecycle = "active"`を必須とします。現行のauthoring／audit／
+revision Skillは`draft`なのでrequest作成は可能ですが、production importは`DRAFT_SKILL_FORBIDDEN`で停止します。
+fixture identityを許可する経路はrepository test内部だけです。human-review bundleは承認対象hashと監査／差分を整理する
+`is_approval: false`のpackageであり、human approval／exportは未実装です。
+requestへ保存したSkill snapshotはimmutableです。現在の同一content／eval／identityが`active`へ昇格した場合だけ
+pending production importを許可し、その他の変更は`SKILL_SNAPSHOT_STALE`で拒否します。completed historyの
+validate／statusはmutableな現在Skillへ再結合しません。完成済みのauthor／audit／revision importを同一responseで
+再実行する場合も、保存済みrequestとcanonical responseの完全一致を検証したうえで現在Skillの再適格性判定を行いません。

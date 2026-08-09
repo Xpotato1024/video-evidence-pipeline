@@ -1,0 +1,399 @@
+{
+  "$defs": {
+    "AgentExecutionMode": {
+      "enum": [
+        "external_exchange",
+        "test_fixture"
+      ],
+      "title": "AgentExecutionMode",
+      "type": "string"
+    },
+    "AgentIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "context_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "title": "Context Id",
+          "type": "string"
+        },
+        "execution_mode": {
+          "$ref": "#/$defs/AgentExecutionMode"
+        },
+        "executor": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Executor",
+          "type": "string"
+        },
+        "external_api_used": {
+          "title": "External Api Used",
+          "type": "boolean"
+        },
+        "model": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Model",
+          "type": "string"
+        },
+        "provider": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Provider",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/AgentRole"
+        },
+        "version": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "provider",
+        "model",
+        "version",
+        "executor",
+        "context_id",
+        "execution_mode",
+        "external_api_used"
+      ],
+      "title": "AgentIdentity",
+      "type": "object"
+    },
+    "AgentRole": {
+      "enum": [
+        "author",
+        "auditor",
+        "reviser"
+      ],
+      "title": "AgentRole",
+      "type": "string"
+    },
+    "AuditClaimRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "audit_claim_id": {
+          "pattern": "^AC[0-9]{6}$",
+          "title": "Audit Claim Id",
+          "type": "string"
+        },
+        "claim_type": {
+          "$ref": "#/$defs/ClaimType"
+        },
+        "draft_span": {
+          "$ref": "#/$defs/DraftSpan"
+        },
+        "evidence_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 256,
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "audit_claim_id",
+        "draft_span",
+        "text",
+        "claim_type"
+      ],
+      "title": "AuditClaimRecord",
+      "type": "object"
+    },
+    "AuditFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "audit_claim_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10000,
+          "title": "Audit Claim Ids",
+          "type": "array"
+        },
+        "category": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Category",
+          "type": "string"
+        },
+        "confidence": {
+          "$ref": "#/$defs/ClaimConfidence"
+        },
+        "draft_span": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DraftSpan"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "evidence_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10000,
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "finding_id": {
+          "pattern": "^AF[0-9]{6}$",
+          "title": "Finding Id",
+          "type": "string"
+        },
+        "rationale": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Rationale",
+          "type": "string"
+        },
+        "requirement_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100,
+          "title": "Requirement Ids",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "severity": {
+          "$ref": "#/$defs/AuditSeverity"
+        },
+        "source_refs": {
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "maxItems": 10000,
+          "title": "Source Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "finding_id",
+        "severity",
+        "category",
+        "rationale",
+        "confidence"
+      ],
+      "title": "AuditFinding",
+      "type": "object"
+    },
+    "AuditSeverity": {
+      "enum": [
+        "P0",
+        "P1",
+        "P2"
+      ],
+      "title": "AuditSeverity",
+      "type": "string"
+    },
+    "ClaimConfidence": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "ClaimConfidence",
+      "type": "string"
+    },
+    "ClaimType": {
+      "enum": [
+        "video_fact",
+        "visual_fact",
+        "inference",
+        "user_opinion",
+        "external_fact",
+        "transition_or_rhetoric"
+      ],
+      "title": "ClaimType",
+      "type": "string"
+    },
+    "DraftSpan": {
+      "additionalProperties": false,
+      "properties": {
+        "end": {
+          "description": "Exclusive Python Unicode code-point offset",
+          "exclusiveMinimum": 0,
+          "title": "End",
+          "type": "integer"
+        },
+        "start": {
+          "description": "Inclusive Python Unicode code-point offset",
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        },
+        "text": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "text"
+      ],
+      "title": "DraftSpan",
+      "type": "object"
+    },
+    "SourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "content_sha256": {
+          "description": "Transcript-record semantic fingerprint or canonical frame artifact SHA-256",
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "end_ms": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Ms"
+        },
+        "kind": {
+          "$ref": "#/$defs/SourceRefKind"
+        },
+        "ref_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Ref Id",
+          "type": "string"
+        },
+        "start_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Ms"
+        }
+      },
+      "required": [
+        "kind",
+        "ref_id",
+        "content_sha256"
+      ],
+      "title": "SourceRef",
+      "type": "object"
+    },
+    "SourceRefKind": {
+      "enum": [
+        "transcript_segment",
+        "frame",
+        "approved_artifact"
+      ],
+      "title": "SourceRefKind",
+      "type": "string"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/audit-response-manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "audit_claims": {
+      "items": {
+        "$ref": "#/$defs/AuditClaimRecord"
+      },
+      "maxItems": 100000,
+      "minItems": 1,
+      "title": "Audit Claims",
+      "type": "array"
+    },
+    "auditor": {
+      "$ref": "#/$defs/AgentIdentity"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/AuditFinding"
+      },
+      "maxItems": 100000,
+      "title": "Findings",
+      "type": "array"
+    },
+    "request_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Request Fingerprint",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "target_draft_sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Target Draft Sha256",
+      "type": "string"
+    }
+  },
+  "required": [
+    "request_fingerprint",
+    "target_draft_sha256",
+    "auditor",
+    "audit_claims",
+    "created_at"
+  ],
+  "title": "AuditResponseManifest",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

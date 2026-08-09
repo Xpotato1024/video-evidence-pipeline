@@ -759,11 +759,41 @@ def test_unimplemented_transition_is_rejected_before_integrity_status(tmp_path: 
         occurred_at=records[-1].occurred_at,
         job_fingerprint=records[-1].job_fingerprint,
     )
+    audited = TransitionRecord(
+        sequence=8,
+        job_id="demo-report",
+        from_state=drafted.to_state,
+        to_state="AUDITED",
+        trigger="tampered.unimplemented",
+        occurred_at=records[-1].occurred_at,
+        job_fingerprint=records[-1].job_fingerprint,
+    )
+    human_review_ready = TransitionRecord(
+        sequence=9,
+        job_id="demo-report",
+        from_state=audited.to_state,
+        to_state="HUMAN_REVIEW_READY",
+        trigger="tampered.unimplemented",
+        occurred_at=records[-1].occurred_at,
+        job_fingerprint=records[-1].job_fingerprint,
+    )
+    human_approved = TransitionRecord(
+        sequence=10,
+        job_id="demo-report",
+        from_state=human_review_ready.to_state,
+        to_state="HUMAN_APPROVED",
+        trigger="tampered.unimplemented",
+        occurred_at=records[-1].occurred_at,
+        job_fingerprint=records[-1].job_fingerprint,
+    )
     with transitions_path.open("ab") as handle:
         handle.write((normalized.model_dump_json() + "\n").encode())
         handle.write((transcribed.model_dump_json() + "\n").encode())
         handle.write((evidence_ready.model_dump_json() + "\n").encode())
         handle.write((drafted.model_dump_json() + "\n").encode())
+        handle.write((audited.model_dump_json() + "\n").encode())
+        handle.write((human_review_ready.model_dump_json() + "\n").encode())
+        handle.write((human_approved.model_dump_json() + "\n").encode())
     artifact = result.source_manifest.artifact_record.artifact
     (job_path / artifact.relative_storage_path).write_bytes(b"tampered")
 

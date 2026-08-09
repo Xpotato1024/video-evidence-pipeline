@@ -14,6 +14,51 @@ from video_evidence_pipeline.acquisition.bundle import (
 )
 from video_evidence_pipeline.acquisition.registry import adapter_for
 from video_evidence_pipeline.acquisition.runtime import AcquisitionRuntimeConfig
+from video_evidence_pipeline.authoring.pipeline import (
+    AuditPrepareResult,
+    AuditResult,
+    AuthoringPrepareResult,
+    DraftResult,
+    HumanReviewResult,
+    RevisionPrepareResult,
+    RevisionResult,
+    build_fixed_evidence_bundle,
+    commit_audit,
+    commit_draft,
+    commit_human_review,
+    commit_revision,
+    load_audit,
+    load_audit_request,
+    load_authoring_request,
+    load_draft,
+    load_human_review,
+    load_revision,
+    load_revision_request,
+    prepare_audit_request,
+    prepare_authoring_request,
+    prepare_revision_request,
+    read_audit_response,
+    read_authoring_response,
+    read_revision_response,
+    recover_audit,
+    recover_human_review,
+    recover_initial_draft,
+    recover_revision,
+    stage_audit,
+    stage_human_review,
+    stage_initial_draft,
+    stage_revision,
+)
+from video_evidence_pipeline.authoring.pipeline import (
+    cleanup_attempt as cleanup_authoring_attempt,
+)
+from video_evidence_pipeline.authoring.pipeline import (
+    cleanup_stale_attempts as cleanup_stale_authoring_attempts,
+)
+from video_evidence_pipeline.authoring.pipeline import (
+    create_attempt_directory as create_authoring_attempt_directory,
+)
+from video_evidence_pipeline.domain.authoring import AuditDisposition, FixedEvidenceBundle
 from video_evidence_pipeline.domain.authorization import AuthorizationRecord
 from video_evidence_pipeline.domain.job import (
     AssignmentSpec,
@@ -175,24 +220,33 @@ def validate_job(path: Path) -> dict[str, Any]:
         authorization = _authorization(workspace)
         _validate_authorization_binding(job, transitions, authorization)
         _require_current_authorization_fingerprint(job, authorization)
+    authoring_states = {
+        JobState.DRAFTED,
+        JobState.AUDITED,
+        JobState.REVISION_REQUIRED,
+        JobState.HUMAN_REVIEW_READY,
+        JobState.BLOCKED,
+    }
     acquired_states = {
         JobState.ACQUIRED,
         JobState.NORMALIZED,
         JobState.TRANSCRIBED,
         JobState.EVIDENCE_READY,
+        *authoring_states,
     }
     normalized_states = {
         JobState.NORMALIZED,
         JobState.TRANSCRIBED,
         JobState.EVIDENCE_READY,
+        *authoring_states,
     }
     if state in acquired_states:
         raw_artifact = verify_acquired_bundle(workspace, job)
         if state in normalized_states:
             media_manifest = load_normalization_result(workspace, job, raw_artifact).media_manifest
-            if state in {JobState.TRANSCRIBED, JobState.EVIDENCE_READY}:
+            if state in {JobState.TRANSCRIBED, JobState.EVIDENCE_READY, *authoring_states}:
                 transcription = load_transcription_result(workspace, job, media_manifest)
-                if state is JobState.EVIDENCE_READY:
+                if state in {JobState.EVIDENCE_READY, *authoring_states}:
                     load_evidence_result(
                         workspace,
                         job,
@@ -200,6 +254,8 @@ def validate_job(path: Path) -> dict[str, Any]:
                         transcription.transcript_manifest,
                         transcription.segments,
                     )
+                    if state in authoring_states:
+                        _load_authoring_state_integrity(workspace, job, state)
     return {
         "valid": True,
         "job_id": job.job_id,
@@ -909,6 +965,904 @@ def _import_evidence_job_locked(
                     raise
 
 
+def _load_fixed_evidence(workspace: JobWorkspace, job: JobSpec):
+    raw_artifact = verify_acquired_bundle(workspace, job)
+    media = load_normalization_result(workspace, job, raw_artifact).media_manifest
+    transcription = load_transcription_result(workspace, job, media)
+    evidence = load_evidence_result(
+        workspace,
+        job,
+        media,
+        transcription.transcript_manifest,
+        transcription.segments,
+    )
+    request = load_evidence_request(
+        workspace,
+        job,
+        media,
+        transcription.transcript_manifest,
+        transcription.segments,
+    )
+    return build_fixed_evidence_bundle(
+        job,
+        request,
+        evidence.evidence_manifest,
+        evidence.evidence_records,
+        evidence.ambiguity_records,
+    )
+
+
+def _latest_draft_version(workspace: JobWorkspace) -> str | None:
+    found = [
+        version
+        for version in ("v001", "v002", "v003")
+        if workspace.safe_path(f"manifests/authoring/draft-{version}.json").exists()
+    ]
+    if not found:
+        return None
+    expected = [f"v{index:03d}" for index in range(1, len(found) + 1)]
+    if found != expected:
+        raise integrity_error("DRAFT_HISTORY_INVALID", "draft history is not contiguous")
+    return found[-1]
+
+
+def _load_authoring_history(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    fixed,
+) -> tuple[tuple[DraftResult, AuditResult | None], ...]:
+    latest = _latest_draft_version(workspace)
+    if latest is None:
+        return ()
+    count = int(latest[1:])
+    history: list[tuple[DraftResult, AuditResult | None]] = []
+    for index in range(1, count + 1):
+        version = f"v{index:03d}"
+        if index == 1:
+            draft = load_draft(workspace, job, version, fixed)
+            request = load_authoring_request(workspace, job, fixed)
+            if (
+                draft.manifest.request_fingerprint != request.request_fingerprint
+                or draft.agent_run.skill != request.skill
+            ):
+                raise integrity_error(
+                    "DRAFT_HISTORY_INVALID", "initial draft request lineage is invalid"
+                )
+        else:
+            predecessor, predecessor_audit = history[-1]
+            if predecessor_audit is None:
+                raise integrity_error(
+                    "DRAFT_HISTORY_INVALID", "revision predecessor audit is absent"
+                )
+            request = load_revision_request(
+                workspace,
+                job,
+                fixed,
+                predecessor,
+                predecessor_audit,
+            )
+            revision = load_revision(
+                workspace,
+                job,
+                version,
+                fixed,
+                predecessor,
+                predecessor_audit,
+                request,
+                tuple(history),
+            )
+            draft = revision.draft
+        audit_path = workspace.safe_path(f"manifests/authoring/audit-{version}.json")
+        pending_history = (*history, (draft, None))
+        audit = (
+            load_audit(workspace, job, draft, fixed, pending_history)
+            if audit_path.exists()
+            else None
+        )
+        history.append((draft, audit))
+    return tuple(history)
+
+
+def _load_authoring_state_integrity(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    state: JobState,
+) -> tuple[
+    FixedEvidenceBundle,
+    tuple[tuple[DraftResult, AuditResult | None], ...],
+    HumanReviewResult | None,
+]:
+    fixed = _load_fixed_evidence(workspace, job)
+    history = _load_authoring_history(workspace, job, fixed)
+    if not history:
+        raise integrity_error("DRAFT_HISTORY_INVALID", "draft history is absent")
+    draft, audit = history[-1]
+    if state is JobState.DRAFTED:
+        return fixed, history, None
+    if audit is None:
+        raise integrity_error("AUDIT_BUNDLE_INVALID", "latest audit is absent")
+    expected_disposition = {
+        JobState.REVISION_REQUIRED: AuditDisposition.REVISION_REQUIRED,
+        JobState.HUMAN_REVIEW_READY: AuditDisposition.HUMAN_REVIEW_READY,
+        JobState.BLOCKED: AuditDisposition.BLOCKED,
+    }.get(state)
+    if expected_disposition is not None and audit.manifest.disposition is not expected_disposition:
+        raise integrity_error("AUDIT_BUNDLE_INVALID", "audit disposition does not match state")
+    human_review = None
+    if state is JobState.HUMAN_REVIEW_READY:
+        human_review = load_human_review(workspace, job, fixed, draft, audit, history)
+    return fixed, history, human_review
+
+
+def _authoring_context_ids(
+    history: tuple[tuple[DraftResult, AuditResult | None], ...],
+) -> tuple[str, ...]:
+    return tuple(sorted({draft.manifest.producer.context_id for draft, _audit in history}))
+
+
+def _audit_forbidden_context_ids(
+    history: tuple[tuple[DraftResult, AuditResult | None], ...],
+) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            {
+                *(_authoring_context_ids(history)),
+                *(
+                    audit.manifest.auditor.context_id
+                    for _draft, audit in history[:-1]
+                    if audit is not None
+                ),
+            }
+        )
+    )
+
+
+def _all_agent_context_ids(
+    history: tuple[tuple[DraftResult, AuditResult | None], ...],
+) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            {
+                *(_authoring_context_ids(history)),
+                *(
+                    audit.manifest.auditor.context_id
+                    for _draft, audit in history
+                    if audit is not None
+                ),
+            }
+        )
+    )
+
+
+def prepare_authoring_job(path: Path, skill_id: str) -> AuthoringPrepareResult:
+    workspace = JobWorkspace.open(path)
+    with (
+        exclusive_file_lock(
+            workspace.semantic_lock_path,
+            busy_code="SEMANTIC_STAGE_BUSY",
+            busy_message="authoring, audit, or revision is already running",
+            failure_code="SEMANTIC_STAGE_LOCK_FAILED",
+            failure_message="semantic stage could not be locked",
+        ),
+        exclusive_append_lock(workspace.transitions_jsonl),
+    ):
+        workspace, job, transitions, state = _load_context(path)
+        if state not in {
+            JobState.EVIDENCE_READY,
+            JobState.DRAFTED,
+            JobState.AUDITED,
+            JobState.REVISION_REQUIRED,
+            JobState.HUMAN_REVIEW_READY,
+            JobState.BLOCKED,
+        }:
+            raise state_error("STATE_GATE_FAILED", "job must be EVIDENCE_READY before authoring")
+        authorization = _authorization(workspace)
+        _require_current_authorization(job, transitions, authorization)
+        fixed = _load_fixed_evidence(workspace, job)
+        return prepare_authoring_request(workspace, job, fixed, skill_id)
+
+
+def import_authoring_job(
+    path: Path,
+    response_path: Path,
+    *,
+    _allow_fixture: bool = False,
+) -> DraftResult:
+    workspace = JobWorkspace.open(path)
+    with exclusive_file_lock(
+        workspace.semantic_lock_path,
+        busy_code="SEMANTIC_STAGE_BUSY",
+        busy_message="authoring, audit, or revision is already running",
+        failure_code="SEMANTIC_STAGE_LOCK_FAILED",
+        failure_message="semantic stage could not be locked",
+    ):
+        cleanup_stale_authoring_attempts(workspace)
+        return _import_authoring_job_locked(path, response_path, allow_fixture=_allow_fixture)
+
+
+def _import_authoring_fixture(path: Path, response_path: Path) -> DraftResult:
+    return import_authoring_job(path, response_path, _allow_fixture=True)
+
+
+def _import_authoring_job_locked(
+    path: Path,
+    response_path: Path,
+    *,
+    allow_fixture: bool,
+) -> DraftResult:
+    workspace = JobWorkspace.open(path)
+    with exclusive_append_lock(workspace.transitions_jsonl):
+        workspace, job, transitions, state = _load_context(path)
+        if state not in {
+            JobState.EVIDENCE_READY,
+            JobState.DRAFTED,
+            JobState.AUDITED,
+            JobState.REVISION_REQUIRED,
+            JobState.HUMAN_REVIEW_READY,
+            JobState.BLOCKED,
+        }:
+            raise state_error("STATE_GATE_FAILED", "job must be EVIDENCE_READY before authoring")
+        authorization = _authorization(workspace)
+        _require_current_authorization(job, transitions, authorization)
+        snapshot_sequence = transitions[-1].sequence
+        snapshot_job = job
+        snapshot_authorization = authorization
+        fixed = _load_fixed_evidence(workspace, job)
+        request = load_authoring_request(workspace, job, fixed)
+        existing = (
+            load_draft(workspace, job, "v001", fixed)
+            if state is not JobState.EVIDENCE_READY
+            else None
+        )
+    if existing is not None:
+        response = read_authoring_response(
+            workspace,
+            response_path,
+            request,
+            allow_fixture=allow_fixture,
+            enforce_current_skill=False,
+        )
+        if response.author.external_api_used and not snapshot_authorization.allow_external_api:
+            raise state_error(
+                "EXTERNAL_API_NOT_AUTHORIZED",
+                "authoring response used an external API without authorization",
+            )
+        if (
+            existing.manifest.response_fingerprint != fingerprint(response)
+            or existing.response != response
+        ):
+            raise integrity_error("AUTHORING_FINGERPRINT_MISMATCH", "draft uses another response")
+        return existing
+    response = read_authoring_response(
+        workspace,
+        response_path,
+        request,
+        allow_fixture=allow_fixture,
+    )
+    if response.author.external_api_used and not snapshot_authorization.allow_external_api:
+        raise state_error(
+            "EXTERNAL_API_NOT_AUTHORIZED",
+            "authoring response used an external API without authorization",
+        )
+    response_fingerprint = fingerprint(response)
+
+    attempt = create_authoring_attempt_directory(workspace)
+    operation_failed = False
+    try:
+        recovered_orphan = False
+        if workspace.safe_path("manifests/authoring/draft-v001.json").exists():
+            staged = load_draft(workspace, job, "v001", fixed)
+            if staged.manifest.response_fingerprint != response_fingerprint:
+                raise integrity_error(
+                    "AUTHORING_FINGERPRINT_MISMATCH", "recoverable draft uses another response"
+                )
+        else:
+            staged = recover_initial_draft(workspace, job, request, response)
+            if staged is None:
+                staged = stage_initial_draft(
+                    workspace,
+                    job,
+                    request,
+                    response,
+                    attempt,
+                )
+            else:
+                recovered_orphan = True
+        with exclusive_append_lock(workspace.transitions_jsonl):
+            workspace, current_job, transitions, current_state = _load_context(path)
+            current_authorization = _authorization(workspace)
+            if (
+                current_state is not JobState.EVIDENCE_READY
+                or transitions[-1].sequence != snapshot_sequence
+                or current_job != snapshot_job
+                or current_authorization != snapshot_authorization
+            ):
+                raise state_error("AUTHORING_SNAPSHOT_STALE", "job changed during authoring")
+            current_fixed = _load_fixed_evidence(workspace, current_job)
+            current_request = load_authoring_request(workspace, current_job, current_fixed)
+            if current_fixed != fixed or current_request != request:
+                raise state_error("AUTHORING_SNAPSHOT_STALE", "evidence changed during authoring")
+            if not staged.reused:
+                staged = commit_draft(
+                    workspace,
+                    staged,
+                    attempt=None if recovered_orphan else attempt,
+                )
+            else:
+                staged = load_draft(workspace, current_job, "v001", current_fixed)
+            _append_transition_locked(
+                workspace,
+                current_job,
+                from_state=JobState.EVIDENCE_READY,
+                to_state=JobState.DRAFTED,
+                trigger="author.import",
+            )
+            return staged
+    except Exception:
+        operation_failed = True
+        raise
+    finally:
+        try:
+            cleanup_authoring_attempt(workspace, attempt)
+        except VepError:
+            if not operation_failed:
+                raise
+
+
+def prepare_audit_job(path: Path, skill_id: str) -> AuditPrepareResult:
+    workspace = JobWorkspace.open(path)
+    with (
+        exclusive_file_lock(
+            workspace.semantic_lock_path,
+            busy_code="SEMANTIC_STAGE_BUSY",
+            busy_message="authoring, audit, or revision is already running",
+            failure_code="SEMANTIC_STAGE_LOCK_FAILED",
+            failure_message="semantic stage could not be locked",
+        ),
+        exclusive_append_lock(workspace.transitions_jsonl),
+    ):
+        workspace, job, transitions, state = _load_context(path)
+        if state not in {
+            JobState.DRAFTED,
+            JobState.AUDITED,
+            JobState.REVISION_REQUIRED,
+            JobState.HUMAN_REVIEW_READY,
+            JobState.BLOCKED,
+        }:
+            raise state_error("STATE_GATE_FAILED", "job must be DRAFTED before audit")
+        authorization = _authorization(workspace)
+        _require_current_authorization(job, transitions, authorization)
+        fixed = _load_fixed_evidence(workspace, job)
+        history = _load_authoring_history(workspace, job, fixed)
+        if not history:
+            raise integrity_error("DRAFT_HISTORY_INVALID", "draft history is absent")
+        draft = history[-1][0]
+        return prepare_audit_request(workspace, job, fixed, draft, skill_id)
+
+
+def import_audit_job(
+    path: Path,
+    response_path: Path,
+    *,
+    _allow_fixture: bool = False,
+) -> AuditResult:
+    workspace = JobWorkspace.open(path)
+    with exclusive_file_lock(
+        workspace.semantic_lock_path,
+        busy_code="SEMANTIC_STAGE_BUSY",
+        busy_message="authoring, audit, or revision is already running",
+        failure_code="SEMANTIC_STAGE_LOCK_FAILED",
+        failure_message="semantic stage could not be locked",
+    ):
+        cleanup_stale_authoring_attempts(workspace)
+        return _import_audit_job_locked(path, response_path, allow_fixture=_allow_fixture)
+
+
+def _import_audit_fixture(path: Path, response_path: Path) -> AuditResult:
+    return import_audit_job(path, response_path, _allow_fixture=True)
+
+
+def _audit_with_human_review(audit: AuditResult, human_review) -> AuditResult:
+    return AuditResult(
+        manifest=audit.manifest,
+        stage_manifest=audit.stage_manifest,
+        response=audit.response,
+        audit_claims=audit.audit_claims,
+        claim_comparisons=audit.claim_comparisons,
+        findings=audit.findings,
+        agent_run=audit.agent_run,
+        human_review=human_review.manifest if human_review is not None else None,
+        reused=audit.reused,
+    )
+
+
+def _import_audit_job_locked(
+    path: Path,
+    response_path: Path,
+    *,
+    allow_fixture: bool,
+) -> AuditResult:
+    workspace = JobWorkspace.open(path)
+    allowed_states = {
+        JobState.DRAFTED,
+        JobState.AUDITED,
+        JobState.REVISION_REQUIRED,
+        JobState.HUMAN_REVIEW_READY,
+        JobState.BLOCKED,
+    }
+    with exclusive_append_lock(workspace.transitions_jsonl):
+        workspace, job, transitions, state = _load_context(path)
+        if state not in allowed_states:
+            raise state_error("STATE_GATE_FAILED", "job must be DRAFTED before audit")
+        authorization = _authorization(workspace)
+        _require_current_authorization(job, transitions, authorization)
+        snapshot_sequence = transitions[-1].sequence
+        snapshot_state = state
+        snapshot_job = job
+        snapshot_authorization = authorization
+        fixed = _load_fixed_evidence(workspace, job)
+        history = _load_authoring_history(workspace, job, fixed)
+        if not history:
+            raise integrity_error("DRAFT_HISTORY_INVALID", "draft history is absent")
+        draft = history[-1][0]
+        request = load_audit_request(workspace, job, fixed, draft)
+        context_ids = _audit_forbidden_context_ids(history)
+        completed_existing = None
+        if state in {
+            JobState.REVISION_REQUIRED,
+            JobState.HUMAN_REVIEW_READY,
+            JobState.BLOCKED,
+        }:
+            pending_history = (*history[:-1], (draft, None))
+            completed_existing = load_audit(workspace, job, draft, fixed, pending_history)
+    response = read_audit_response(
+        workspace,
+        response_path,
+        request,
+        forbidden_context_ids=context_ids,
+        allow_fixture=allow_fixture,
+        enforce_current_skill=completed_existing is None,
+    )
+    if response.auditor.external_api_used and not snapshot_authorization.allow_external_api:
+        raise state_error(
+            "EXTERNAL_API_NOT_AUTHORIZED",
+            "audit response used an external API without authorization",
+        )
+    response_fingerprint = fingerprint(response)
+    audit_path = workspace.safe_path(
+        f"manifests/authoring/audit-{draft.manifest.draft_version}.json"
+    )
+    if completed_existing is not None:
+        if (
+            completed_existing.manifest.response_fingerprint != response_fingerprint
+            or completed_existing.response != response
+        ):
+            raise integrity_error("AUDIT_FINGERPRINT_MISMATCH", "audit uses another response")
+        human = None
+        if snapshot_state is JobState.HUMAN_REVIEW_READY:
+            human = load_human_review(workspace, job, fixed, draft, completed_existing, history)
+        return _audit_with_human_review(completed_existing, human)
+
+    attempt = create_authoring_attempt_directory(workspace)
+    operation_failed = False
+    try:
+        recovered_orphan = False
+        if audit_path.exists():
+            pending_history = (*history[:-1], (draft, None))
+            staged = load_audit(workspace, job, draft, fixed, pending_history)
+            if staged.manifest.response_fingerprint != response_fingerprint:
+                raise integrity_error(
+                    "AUDIT_FINGERPRINT_MISMATCH", "recoverable audit uses another response"
+                )
+        else:
+            staged = recover_audit(
+                workspace,
+                job,
+                request,
+                response,
+                draft,
+                (*history[:-1], (draft, None)),
+            )
+            if staged is None:
+                staged = stage_audit(
+                    workspace,
+                    job,
+                    request,
+                    response,
+                    draft,
+                    (*history[:-1], (draft, None)),
+                    attempt,
+                )
+            else:
+                recovered_orphan = True
+        staged_history = (*history[:-1], (draft, staged))
+        human_staged = None
+        human_recovered_orphan = False
+        if staged.manifest.disposition.value == "human_review_ready":
+            if workspace.human_review_manifest_json.exists():
+                human_staged = load_human_review(
+                    workspace,
+                    job,
+                    fixed,
+                    draft,
+                    staged,
+                    staged_history,
+                )
+            else:
+                human_staged = recover_human_review(
+                    workspace,
+                    job,
+                    fixed,
+                    draft,
+                    staged,
+                    staged_history,
+                )
+                if human_staged is None:
+                    human_staged = stage_human_review(
+                        workspace,
+                        job,
+                        fixed,
+                        draft,
+                        staged,
+                        staged_history,
+                        attempt,
+                    )
+                else:
+                    human_recovered_orphan = True
+        with exclusive_append_lock(workspace.transitions_jsonl):
+            workspace, current_job, transitions, current_state = _load_context(path)
+            current_authorization = _authorization(workspace)
+            if (
+                current_state is not snapshot_state
+                or transitions[-1].sequence != snapshot_sequence
+                or current_job != snapshot_job
+                or current_authorization != snapshot_authorization
+            ):
+                raise state_error("AUDIT_SNAPSHOT_STALE", "job changed during audit")
+            current_fixed = _load_fixed_evidence(workspace, current_job)
+            current_history = _load_authoring_history(workspace, current_job, current_fixed)
+            current_draft = current_history[-1][0]
+            current_request = load_audit_request(
+                workspace, current_job, current_fixed, current_draft
+            )
+            if (
+                current_fixed != fixed
+                or current_draft.manifest != draft.manifest
+                or current_request != request
+                or _audit_forbidden_context_ids(current_history) != context_ids
+            ):
+                raise state_error("AUDIT_SNAPSHOT_STALE", "audit inputs changed")
+            if not staged.reused:
+                staged = commit_audit(
+                    workspace,
+                    staged,
+                    attempt=None if recovered_orphan else attempt,
+                )
+            else:
+                pending_history = (*current_history[:-1], (current_draft, None))
+                staged = load_audit(
+                    workspace,
+                    current_job,
+                    current_draft,
+                    current_fixed,
+                    pending_history,
+                )
+            if current_state is JobState.DRAFTED:
+                _append_transition_locked(
+                    workspace,
+                    current_job,
+                    from_state=JobState.DRAFTED,
+                    to_state=JobState.AUDITED,
+                    trigger="audit.import",
+                )
+                current_state = JobState.AUDITED
+            disposition = staged.manifest.disposition
+            if disposition.value == "human_review_ready":
+                if human_staged is None:
+                    raise integrity_error(
+                        "HUMAN_REVIEW_BUNDLE_INVALID", "human review staging is absent"
+                    )
+                if not human_staged.reused:
+                    human_staged = commit_human_review(
+                        workspace,
+                        human_staged,
+                        attempt=None if human_recovered_orphan else attempt,
+                    )
+                else:
+                    human_staged = load_human_review(
+                        workspace,
+                        current_job,
+                        current_fixed,
+                        current_draft,
+                        staged,
+                        (*current_history[:-1], (current_draft, staged)),
+                    )
+                _append_transition_locked(
+                    workspace,
+                    current_job,
+                    from_state=JobState.AUDITED,
+                    to_state=JobState.HUMAN_REVIEW_READY,
+                    trigger="audit.decision",
+                )
+                return _audit_with_human_review(staged, human_staged)
+            target = (
+                JobState.REVISION_REQUIRED
+                if disposition.value == "revision_required"
+                else JobState.BLOCKED
+            )
+            _append_transition_locked(
+                workspace,
+                current_job,
+                from_state=JobState.AUDITED,
+                to_state=target,
+                trigger="audit.decision",
+            )
+            return staged
+    except Exception:
+        operation_failed = True
+        raise
+    finally:
+        try:
+            cleanup_authoring_attempt(workspace, attempt)
+        except VepError:
+            if not operation_failed:
+                raise
+
+
+def prepare_revision_job(path: Path, skill_id: str) -> RevisionPrepareResult:
+    workspace = JobWorkspace.open(path)
+    with (
+        exclusive_file_lock(
+            workspace.semantic_lock_path,
+            busy_code="SEMANTIC_STAGE_BUSY",
+            busy_message="authoring, audit, or revision is already running",
+            failure_code="SEMANTIC_STAGE_LOCK_FAILED",
+            failure_message="semantic stage could not be locked",
+        ),
+        exclusive_append_lock(workspace.transitions_jsonl),
+    ):
+        workspace, job, transitions, state = _load_context(path)
+        if state is not JobState.REVISION_REQUIRED:
+            raise state_error("STATE_GATE_FAILED", "job must be REVISION_REQUIRED")
+        authorization = _authorization(workspace)
+        _require_current_authorization(job, transitions, authorization)
+        fixed = _load_fixed_evidence(workspace, job)
+        history = _load_authoring_history(workspace, job, fixed)
+        if not history:
+            raise integrity_error("DRAFT_HISTORY_INVALID", "draft history is absent")
+        target = history[-1]
+        if target[1] is None and target[0].manifest.revision_count > 0 and len(history) > 1:
+            target = history[-2]
+        draft, audit = target
+        if audit is None:
+            raise integrity_error("AUDIT_BUNDLE_INVALID", "revision audit is absent")
+        return prepare_revision_request(workspace, job, fixed, draft, audit, skill_id)
+
+
+def import_revision_job(
+    path: Path,
+    response_path: Path,
+    *,
+    _allow_fixture: bool = False,
+) -> RevisionResult:
+    workspace = JobWorkspace.open(path)
+    with exclusive_file_lock(
+        workspace.semantic_lock_path,
+        busy_code="SEMANTIC_STAGE_BUSY",
+        busy_message="authoring, audit, or revision is already running",
+        failure_code="SEMANTIC_STAGE_LOCK_FAILED",
+        failure_message="semantic stage could not be locked",
+    ):
+        cleanup_stale_authoring_attempts(workspace)
+        return _import_revision_job_locked(path, response_path, allow_fixture=_allow_fixture)
+
+
+def _import_revision_fixture(path: Path, response_path: Path) -> RevisionResult:
+    return import_revision_job(path, response_path, _allow_fixture=True)
+
+
+def _import_revision_job_locked(
+    path: Path,
+    response_path: Path,
+    *,
+    allow_fixture: bool,
+) -> RevisionResult:
+    workspace = JobWorkspace.open(path)
+    with exclusive_append_lock(workspace.transitions_jsonl):
+        workspace, job, transitions, state = _load_context(path)
+        if state not in {JobState.REVISION_REQUIRED, JobState.DRAFTED}:
+            raise state_error("STATE_GATE_FAILED", "job must be REVISION_REQUIRED")
+        authorization = _authorization(workspace)
+        _require_current_authorization(job, transitions, authorization)
+        fixed = _load_fixed_evidence(workspace, job)
+        history = _load_authoring_history(workspace, job, fixed)
+        if not history:
+            raise integrity_error("DRAFT_HISTORY_INVALID", "draft history is absent")
+        published_revision = history[-1][1] is None and history[-1][0].manifest.revision_count > 0
+        if state is JobState.DRAFTED or published_revision:
+            latest = history[-1][0]
+            if latest.manifest.revision_count == 0:
+                raise state_error("STATE_GATE_FAILED", "no completed revision exists")
+            previous_draft, previous_audit = history[-2]
+            if previous_audit is None:
+                raise integrity_error("AUDIT_BUNDLE_INVALID", "revision audit is absent")
+            request = load_revision_request(workspace, job, fixed, previous_draft, previous_audit)
+            existing = load_revision(
+                workspace,
+                job,
+                latest.manifest.draft_version,
+                fixed,
+                previous_draft,
+                previous_audit,
+                request,
+                history[:-1],
+            )
+            response = read_revision_response(
+                workspace,
+                response_path,
+                request,
+                forbidden_context_ids=_all_agent_context_ids(history[:-1]),
+                allow_fixture=allow_fixture,
+                enforce_current_skill=False,
+            )
+            if (
+                existing.manifest.response_fingerprint != fingerprint(response)
+                or existing.draft.response != response
+            ):
+                raise integrity_error(
+                    "REVISION_FINGERPRINT_MISMATCH", "revision uses another response"
+                )
+            if response.reviser.external_api_used and not authorization.allow_external_api:
+                raise state_error(
+                    "EXTERNAL_API_NOT_AUTHORIZED",
+                    "revision response used an external API without authorization",
+                )
+            if state is JobState.REVISION_REQUIRED:
+                _append_transition_locked(
+                    workspace,
+                    job,
+                    from_state=JobState.REVISION_REQUIRED,
+                    to_state=JobState.DRAFTED,
+                    trigger="revision.import",
+                )
+            return existing
+        draft, audit = history[-1]
+        if audit is None:
+            raise integrity_error("AUDIT_BUNDLE_INVALID", "revision audit is absent")
+        request = load_revision_request(workspace, job, fixed, draft, audit)
+        forbidden_contexts = _all_agent_context_ids(history)
+        snapshot_sequence = transitions[-1].sequence
+        snapshot_job = job
+        snapshot_authorization = authorization
+    response = read_revision_response(
+        workspace,
+        response_path,
+        request,
+        forbidden_context_ids=forbidden_contexts,
+        allow_fixture=allow_fixture,
+    )
+    if response.reviser.external_api_used and not snapshot_authorization.allow_external_api:
+        raise state_error(
+            "EXTERNAL_API_NOT_AUTHORIZED",
+            "revision response used an external API without authorization",
+        )
+    response_fingerprint = fingerprint(response)
+    next_version = request.next_draft_version
+    attempt = create_authoring_attempt_directory(workspace)
+    operation_failed = False
+    try:
+        revision_path = workspace.safe_path(f"manifests/authoring/revision-{next_version}.json")
+        draft_path = workspace.safe_path(f"manifests/authoring/draft-{next_version}.json")
+        recovered_orphan = False
+        if revision_path.exists() and draft_path.exists():
+            staged = load_revision(
+                workspace,
+                job,
+                next_version,
+                fixed,
+                draft,
+                audit,
+                request,
+                history,
+            )
+            if staged.manifest.response_fingerprint != response_fingerprint:
+                raise integrity_error(
+                    "REVISION_FINGERPRINT_MISMATCH",
+                    "recoverable revision uses another response",
+                )
+        else:
+            staged = recover_revision(
+                workspace,
+                job,
+                request,
+                response,
+                draft,
+                audit,
+                history,
+            )
+            if staged is None:
+                if revision_path.exists() or draft_path.exists():
+                    raise integrity_error(
+                        "REVISION_ORPHAN_INVALID",
+                        "revision manifest or draft exists without a recoverable agent run",
+                    )
+                staged = stage_revision(
+                    workspace,
+                    job,
+                    request,
+                    response,
+                    draft,
+                    audit,
+                    history,
+                    attempt,
+                )
+            else:
+                recovered_orphan = True
+        with exclusive_append_lock(workspace.transitions_jsonl):
+            workspace, current_job, transitions, current_state = _load_context(path)
+            current_authorization = _authorization(workspace)
+            if (
+                current_state is not JobState.REVISION_REQUIRED
+                or transitions[-1].sequence != snapshot_sequence
+                or current_job != snapshot_job
+                or current_authorization != snapshot_authorization
+            ):
+                raise state_error("REVISION_SNAPSHOT_STALE", "job changed during revision")
+            current_fixed = _load_fixed_evidence(workspace, current_job)
+            current_history = _load_authoring_history(workspace, current_job, current_fixed)
+            current_draft, current_audit = current_history[-1]
+            if current_audit is None:
+                raise integrity_error("AUDIT_BUNDLE_INVALID", "revision audit is absent")
+            current_request = load_revision_request(
+                workspace,
+                current_job,
+                current_fixed,
+                current_draft,
+                current_audit,
+            )
+            if (
+                current_fixed != fixed
+                or current_draft.manifest != draft.manifest
+                or current_audit.manifest != audit.manifest
+                or current_request != request
+            ):
+                raise state_error("REVISION_SNAPSHOT_STALE", "revision inputs changed")
+            if not staged.reused:
+                staged = commit_revision(
+                    workspace,
+                    staged,
+                    attempt=None if recovered_orphan else attempt,
+                )
+            else:
+                staged = load_revision(
+                    workspace,
+                    current_job,
+                    next_version,
+                    current_fixed,
+                    current_draft,
+                    current_audit,
+                    current_request,
+                    current_history,
+                )
+            _append_transition_locked(
+                workspace,
+                current_job,
+                from_state=JobState.REVISION_REQUIRED,
+                to_state=JobState.DRAFTED,
+                trigger="revision.import",
+            )
+            return staged
+    except Exception:
+        operation_failed = True
+        raise
+    finally:
+        try:
+            cleanup_authoring_attempt(workspace, attempt)
+        except VepError:
+            if not operation_failed:
+                raise
+
+
 def _append_transition_locked(
     workspace: JobWorkspace,
     job: JobSpec,
@@ -945,8 +1899,15 @@ def _load_search_inputs(
     EvidenceImportResult,
 ]:
     workspace, job, transitions, state = _load_context(path)
-    if state is not JobState.EVIDENCE_READY:
-        raise state_error("STATE_GATE_FAILED", "job must be EVIDENCE_READY before search")
+    if state not in {
+        JobState.EVIDENCE_READY,
+        JobState.DRAFTED,
+        JobState.AUDITED,
+        JobState.REVISION_REQUIRED,
+        JobState.HUMAN_REVIEW_READY,
+        JobState.BLOCKED,
+    }:
+        raise state_error("STATE_GATE_FAILED", "job must have verified evidence before search")
     authorization = _authorization(workspace)
     _require_current_authorization(job, transitions, authorization)
     raw_artifact = verify_acquired_bundle(workspace, job)
@@ -1024,16 +1985,25 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
             exit_code = int(exc.exit_code)
 
     artifact_status: dict[str, Any] = {"status": "not-applicable"}
+    authoring_states = {
+        JobState.DRAFTED,
+        JobState.AUDITED,
+        JobState.REVISION_REQUIRED,
+        JobState.HUMAN_REVIEW_READY,
+        JobState.BLOCKED,
+    }
     downstream_acquired_states = {
         JobState.ACQUIRED,
         JobState.NORMALIZED,
         JobState.TRANSCRIBED,
         JobState.EVIDENCE_READY,
+        *authoring_states,
     }
     downstream_normalized_states = {
         JobState.NORMALIZED,
         JobState.TRANSCRIBED,
         JobState.EVIDENCE_READY,
+        *authoring_states,
     }
     if state in downstream_acquired_states:
         try:
@@ -1065,7 +2035,7 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
     transcription_status: dict[str, Any] = {"status": "not-applicable"}
     transcription = None
     if (
-        state in {JobState.TRANSCRIBED, JobState.EVIDENCE_READY}
+        state in {JobState.TRANSCRIBED, JobState.EVIDENCE_READY, *authoring_states}
         and normalization_status.get("status") == "valid"
         and media_manifest is not None
     ):
@@ -1083,7 +2053,7 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
             exit_code = int(exc.exit_code)
     evidence_status: dict[str, Any] = {"status": "not-applicable"}
     if (
-        state is JobState.EVIDENCE_READY
+        state in {JobState.EVIDENCE_READY, *authoring_states}
         and transcription_status.get("status") == "valid"
         and media_manifest is not None
         and transcription is not None
@@ -1108,6 +2078,34 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
         except VepError as exc:
             evidence_status = {"status": "invalid", "error_code": exc.code}
             exit_code = int(exc.exit_code)
+    authoring_status: dict[str, Any] = {"status": "not-applicable"}
+    if state in authoring_states and evidence_status.get("status") == "valid":
+        try:
+            _fixed, history, human_review = _load_authoring_state_integrity(
+                workspace,
+                job,
+                state,
+            )
+            latest_draft, latest_audit = history[-1]
+            authoring_status = {
+                "status": "valid",
+                "draft_version": latest_draft.manifest.draft_version,
+                "draft_sha256": latest_draft.manifest.draft_artifact.content_sha256,
+                "revision_count": latest_draft.manifest.revision_count,
+                "draft_bundle_fingerprint": latest_draft.manifest.bundle_fingerprint,
+                "audit_bundle_fingerprint": (
+                    latest_audit.manifest.bundle_fingerprint if latest_audit is not None else None
+                ),
+                "audit_disposition": (
+                    latest_audit.manifest.disposition.value if latest_audit is not None else None
+                ),
+                "human_review_bundle_fingerprint": (
+                    human_review.manifest.bundle_fingerprint if human_review is not None else None
+                ),
+            }
+        except VepError as exc:
+            authoring_status = {"status": "invalid", "error_code": exc.code}
+            exit_code = int(exc.exit_code)
     return (
         {
             "job_id": job.job_id,
@@ -1118,6 +2116,7 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
             "normalization_integrity": normalization_status,
             "transcription_integrity": transcription_status,
             "evidence_integrity": evidence_status,
+            "authoring_integrity": authoring_status,
         },
         exit_code,
     )

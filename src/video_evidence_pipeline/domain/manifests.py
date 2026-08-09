@@ -86,7 +86,7 @@ class StageManifest(StrictModel):
     stage: str = Field(min_length=1, max_length=128)
     status: StageStatus
     state_transition: JobState
-    input_artifacts: list[ArtifactRef] = Field(default_factory=list)
+    input_artifacts: list[EvidenceLedgerArtifactRef | ArtifactRef] = Field(default_factory=list)
     output_artifacts: list[EvidenceLedgerArtifactRef | ArtifactRef] = Field(default_factory=list)
     producer: ProducerIdentity
     configuration_sha256: Sha256

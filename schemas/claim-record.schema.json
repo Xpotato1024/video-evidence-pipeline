@@ -1,0 +1,117 @@
+{
+  "$defs": {
+    "ClaimConfidence": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "ClaimConfidence",
+      "type": "string"
+    },
+    "ClaimType": {
+      "enum": [
+        "video_fact",
+        "visual_fact",
+        "inference",
+        "user_opinion",
+        "external_fact",
+        "transition_or_rhetoric"
+      ],
+      "title": "ClaimType",
+      "type": "string"
+    },
+    "DraftSpan": {
+      "additionalProperties": false,
+      "properties": {
+        "end": {
+          "description": "Exclusive Python Unicode code-point offset",
+          "exclusiveMinimum": 0,
+          "title": "End",
+          "type": "integer"
+        },
+        "start": {
+          "description": "Inclusive Python Unicode code-point offset",
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        },
+        "text": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "text"
+      ],
+      "title": "DraftSpan",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/claim-record.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "author_confidence": {
+      "$ref": "#/$defs/ClaimConfidence"
+    },
+    "claim_id": {
+      "pattern": "^C[0-9]{6}$",
+      "title": "Claim Id",
+      "type": "string"
+    },
+    "claim_type": {
+      "$ref": "#/$defs/ClaimType"
+    },
+    "draft_span": {
+      "$ref": "#/$defs/DraftSpan"
+    },
+    "evidence_ids": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 256,
+      "title": "Evidence Ids",
+      "type": "array"
+    },
+    "requirement_ids": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100,
+      "title": "Requirement Ids",
+      "type": "array"
+    },
+    "requires_user_confirmation": {
+      "default": false,
+      "title": "Requires User Confirmation",
+      "type": "boolean"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "text": {
+      "maxLength": 65536,
+      "minLength": 1,
+      "title": "Text",
+      "type": "string"
+    }
+  },
+  "required": [
+    "claim_id",
+    "draft_span",
+    "text",
+    "claim_type",
+    "author_confidence"
+  ],
+  "title": "ClaimRecord",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

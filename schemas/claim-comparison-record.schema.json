@@ -1,0 +1,113 @@
+{
+  "$defs": {
+    "ClaimComparisonStatus": {
+      "enum": [
+        "matched",
+        "changed",
+        "author_only",
+        "audit_only"
+      ],
+      "title": "ClaimComparisonStatus",
+      "type": "string"
+    },
+    "DraftSpan": {
+      "additionalProperties": false,
+      "properties": {
+        "end": {
+          "description": "Exclusive Python Unicode code-point offset",
+          "exclusiveMinimum": 0,
+          "title": "End",
+          "type": "integer"
+        },
+        "start": {
+          "description": "Inclusive Python Unicode code-point offset",
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        },
+        "text": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "text"
+      ],
+      "title": "DraftSpan",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/claim-comparison-record.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Deterministic post-import comparison; never part of an audit request.",
+  "properties": {
+    "audit_claim_id": {
+      "anyOf": [
+        {
+          "pattern": "^AC[0-9]{6}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Audit Claim Id"
+    },
+    "author_claim_id": {
+      "anyOf": [
+        {
+          "pattern": "^C[0-9]{6}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Author Claim Id"
+    },
+    "comparison_id": {
+      "pattern": "^CP[0-9]{6}$",
+      "title": "Comparison Id",
+      "type": "string"
+    },
+    "differences": {
+      "items": {
+        "enum": [
+          "claim_type",
+          "evidence_ids"
+        ],
+        "type": "string"
+      },
+      "maxItems": 2,
+      "title": "Differences",
+      "type": "array"
+    },
+    "draft_span": {
+      "$ref": "#/$defs/DraftSpan"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/ClaimComparisonStatus"
+    }
+  },
+  "required": [
+    "comparison_id",
+    "status",
+    "draft_span"
+  ],
+  "title": "ClaimComparisonRecord",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

@@ -1,0 +1,245 @@
+{
+  "$defs": {
+    "AgentExecutionMode": {
+      "enum": [
+        "external_exchange",
+        "test_fixture"
+      ],
+      "title": "AgentExecutionMode",
+      "type": "string"
+    },
+    "AgentIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "context_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "title": "Context Id",
+          "type": "string"
+        },
+        "execution_mode": {
+          "$ref": "#/$defs/AgentExecutionMode"
+        },
+        "executor": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Executor",
+          "type": "string"
+        },
+        "external_api_used": {
+          "title": "External Api Used",
+          "type": "boolean"
+        },
+        "model": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Model",
+          "type": "string"
+        },
+        "provider": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Provider",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/AgentRole"
+        },
+        "version": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "provider",
+        "model",
+        "version",
+        "executor",
+        "context_id",
+        "execution_mode",
+        "external_api_used"
+      ],
+      "title": "AgentIdentity",
+      "type": "object"
+    },
+    "AgentRole": {
+      "enum": [
+        "author",
+        "auditor",
+        "reviser"
+      ],
+      "title": "AgentRole",
+      "type": "string"
+    },
+    "ArtifactRef": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "artifact_type": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Artifact Type",
+          "type": "string"
+        },
+        "content_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "relative_storage_path": {
+          "title": "Relative Storage Path",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "artifact_type",
+        "content_sha256",
+        "size_bytes",
+        "relative_storage_path"
+      ],
+      "title": "ArtifactRef",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/draft-manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "agent_run_artifact": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "bundle_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Bundle Fingerprint",
+      "type": "string"
+    },
+    "claims_artifact": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "draft_artifact": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "draft_version": {
+      "pattern": "^v00[1-3]$",
+      "title": "Draft Version",
+      "type": "string"
+    },
+    "fixed_evidence_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Fixed Evidence Fingerprint",
+      "type": "string"
+    },
+    "job_id": {
+      "maxLength": 63,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+      "title": "Job Id",
+      "type": "string"
+    },
+    "predecessor_draft_sha256": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Predecessor Draft Sha256"
+    },
+    "producer": {
+      "$ref": "#/$defs/AgentIdentity"
+    },
+    "request_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Request Fingerprint",
+      "type": "string"
+    },
+    "requirement_map_artifact": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "resolution_artifact": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "response_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Response Fingerprint",
+      "type": "string"
+    },
+    "revision_count": {
+      "maximum": 2,
+      "minimum": 0,
+      "title": "Revision Count",
+      "type": "integer"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "job_id",
+    "draft_version",
+    "revision_count",
+    "fixed_evidence_fingerprint",
+    "request_fingerprint",
+    "response_fingerprint",
+    "bundle_fingerprint",
+    "producer",
+    "draft_artifact",
+    "claims_artifact",
+    "requirement_map_artifact",
+    "agent_run_artifact",
+    "created_at"
+  ],
+  "title": "DraftManifest",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

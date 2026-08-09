@@ -1,0 +1,88 @@
+{
+  "$defs": {
+    "RequirementCoverage": {
+      "enum": [
+        "satisfied",
+        "partial",
+        "unmet"
+      ],
+      "title": "RequirementCoverage",
+      "type": "string"
+    },
+    "RequirementMapEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10000,
+          "title": "Claim Ids",
+          "type": "array"
+        },
+        "coverage": {
+          "$ref": "#/$defs/RequirementCoverage"
+        },
+        "evidence_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10000,
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "explanation": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Explanation",
+          "type": "string"
+        },
+        "requirement_id": {
+          "pattern": "^R[0-9]{6}$",
+          "title": "Requirement Id",
+          "type": "string"
+        },
+        "requirement_text": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Requirement Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "requirement_id",
+        "requirement_text",
+        "coverage",
+        "explanation"
+      ],
+      "title": "RequirementMapEntry",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/requirement-map.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "entries": {
+      "items": {
+        "$ref": "#/$defs/RequirementMapEntry"
+      },
+      "maxItems": 100,
+      "title": "Entries",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "entries"
+  ],
+  "title": "RequirementMap",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

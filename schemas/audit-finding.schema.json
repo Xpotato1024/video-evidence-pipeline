@@ -1,0 +1,205 @@
+{
+  "$defs": {
+    "AuditSeverity": {
+      "enum": [
+        "P0",
+        "P1",
+        "P2"
+      ],
+      "title": "AuditSeverity",
+      "type": "string"
+    },
+    "ClaimConfidence": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "ClaimConfidence",
+      "type": "string"
+    },
+    "DraftSpan": {
+      "additionalProperties": false,
+      "properties": {
+        "end": {
+          "description": "Exclusive Python Unicode code-point offset",
+          "exclusiveMinimum": 0,
+          "title": "End",
+          "type": "integer"
+        },
+        "start": {
+          "description": "Inclusive Python Unicode code-point offset",
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        },
+        "text": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "text"
+      ],
+      "title": "DraftSpan",
+      "type": "object"
+    },
+    "SourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "content_sha256": {
+          "description": "Transcript-record semantic fingerprint or canonical frame artifact SHA-256",
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "end_ms": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Ms"
+        },
+        "kind": {
+          "$ref": "#/$defs/SourceRefKind"
+        },
+        "ref_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Ref Id",
+          "type": "string"
+        },
+        "start_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Ms"
+        }
+      },
+      "required": [
+        "kind",
+        "ref_id",
+        "content_sha256"
+      ],
+      "title": "SourceRef",
+      "type": "object"
+    },
+    "SourceRefKind": {
+      "enum": [
+        "transcript_segment",
+        "frame",
+        "approved_artifact"
+      ],
+      "title": "SourceRefKind",
+      "type": "string"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/audit-finding.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "audit_claim_ids": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 10000,
+      "title": "Audit Claim Ids",
+      "type": "array"
+    },
+    "category": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": ".*\\S.*",
+      "title": "Category",
+      "type": "string"
+    },
+    "confidence": {
+      "$ref": "#/$defs/ClaimConfidence"
+    },
+    "draft_span": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DraftSpan"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "evidence_ids": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 10000,
+      "title": "Evidence Ids",
+      "type": "array"
+    },
+    "finding_id": {
+      "pattern": "^AF[0-9]{6}$",
+      "title": "Finding Id",
+      "type": "string"
+    },
+    "rationale": {
+      "maxLength": 65536,
+      "minLength": 1,
+      "pattern": ".*\\S.*",
+      "title": "Rationale",
+      "type": "string"
+    },
+    "requirement_ids": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100,
+      "title": "Requirement Ids",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "severity": {
+      "$ref": "#/$defs/AuditSeverity"
+    },
+    "source_refs": {
+      "items": {
+        "$ref": "#/$defs/SourceRef"
+      },
+      "maxItems": 10000,
+      "title": "Source Refs",
+      "type": "array"
+    }
+  },
+  "required": [
+    "finding_id",
+    "severity",
+    "category",
+    "rationale",
+    "confidence"
+  ],
+  "title": "AuditFinding",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

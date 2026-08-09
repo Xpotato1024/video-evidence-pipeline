@@ -21,11 +21,17 @@ from video_evidence_pipeline.application import (
     acquire_job,
     authorize_job,
     build_search_index_job,
+    import_audit_job,
+    import_authoring_job,
     import_evidence_job,
+    import_revision_job,
     initialize_job,
     job_status,
     normalize_job,
+    prepare_audit_job,
+    prepare_authoring_job,
     prepare_evidence_job,
+    prepare_revision_job,
     search_job,
     transcribe_job,
     validate_job,
@@ -76,10 +82,16 @@ job_app = typer.Typer(no_args_is_help=True)
 schema_app = typer.Typer(no_args_is_help=True)
 evidence_app = typer.Typer(no_args_is_help=True)
 index_app = typer.Typer(no_args_is_help=True)
+author_app = typer.Typer(no_args_is_help=True)
+audit_app = typer.Typer(no_args_is_help=True)
+revision_app = typer.Typer(no_args_is_help=True)
 app.add_typer(job_app, name="job")
 app.add_typer(schema_app, name="schema")
 app.add_typer(evidence_app, name="evidence")
 app.add_typer(index_app, name="index")
+app.add_typer(author_app, name="author")
+app.add_typer(audit_app, name="audit")
+app.add_typer(revision_app, name="revision")
 
 
 def _emit(value: Any, *, json_output: bool) -> None:
@@ -396,6 +408,171 @@ def evidence_import(
             "evidence_bundle_fingerprint": manifest.evidence_bundle_fingerprint,
             "evidence_count": manifest.evidence_count,
             "ambiguity_count": manifest.ambiguity_count,
+            "reused": result.reused,
+        },
+        json_output=json_output,
+    )
+
+
+@author_app.command("prepare")
+def author_prepare(
+    workspace: Path,
+    skill: Annotated[str, typer.Option("--skill")],
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    result = _run(
+        lambda: prepare_authoring_job(workspace, skill),
+        json_output=json_output,
+    )
+    request = result.request
+    _emit(
+        {
+            "ok": True,
+            "job_id": request.job_id,
+            "draft_version": request.draft_version,
+            "request_fingerprint": request.request_fingerprint,
+            "skill_id": request.skill.skill_id,
+            "reused": result.reused,
+        },
+        json_output=json_output,
+    )
+
+
+@author_app.command("import")
+def author_import(
+    workspace: Path,
+    response: Annotated[Path, typer.Option("--response")],
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    result = _run(
+        lambda: import_authoring_job(workspace, response),
+        json_output=json_output,
+    )
+    manifest = result.manifest
+    status, _status_exit_code = job_status(workspace)
+    authoring_status = status.get("authoring_integrity", {})
+    _emit(
+        {
+            "ok": True,
+            "job_id": manifest.job_id,
+            "state": status["stored_state"],
+            "draft_version": authoring_status.get("draft_version", manifest.draft_version),
+            "draft_sha256": authoring_status.get(
+                "draft_sha256", manifest.draft_artifact.content_sha256
+            ),
+            "draft_bundle_fingerprint": authoring_status.get(
+                "draft_bundle_fingerprint", manifest.bundle_fingerprint
+            ),
+            "imported_draft_version": manifest.draft_version,
+            "imported_draft_sha256": manifest.draft_artifact.content_sha256,
+            "reused": result.reused,
+        },
+        json_output=json_output,
+    )
+
+
+@audit_app.command("prepare")
+def audit_prepare(
+    workspace: Path,
+    skill: Annotated[str, typer.Option("--skill")],
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    result = _run(
+        lambda: prepare_audit_job(workspace, skill),
+        json_output=json_output,
+    )
+    request = result.request
+    _emit(
+        {
+            "ok": True,
+            "job_id": request.job_id,
+            "target_draft_version": request.target_draft_version,
+            "request_fingerprint": request.request_fingerprint,
+            "skill_id": request.skill.skill_id,
+            "reused": result.reused,
+        },
+        json_output=json_output,
+    )
+
+
+@audit_app.command("import")
+def audit_import(
+    workspace: Path,
+    response: Annotated[Path, typer.Option("--response")],
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    result = _run(
+        lambda: import_audit_job(workspace, response),
+        json_output=json_output,
+    )
+    manifest = result.manifest
+    states = {
+        "human_review_ready": "HUMAN_REVIEW_READY",
+        "revision_required": "REVISION_REQUIRED",
+        "blocked": "BLOCKED",
+    }
+    _emit(
+        {
+            "ok": True,
+            "job_id": manifest.job_id,
+            "state": states[manifest.disposition.value],
+            "target_draft_version": manifest.target_draft_version,
+            "audit_bundle_fingerprint": manifest.bundle_fingerprint,
+            "disposition": manifest.disposition.value,
+            "audit_claim_count": len(result.audit_claims),
+            "finding_count": len(result.findings),
+            "human_review_bundle": result.human_review is not None,
+            "reused": result.reused,
+        },
+        json_output=json_output,
+    )
+
+
+@revision_app.command("prepare")
+def revision_prepare(
+    workspace: Path,
+    skill: Annotated[str, typer.Option("--skill")],
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    result = _run(
+        lambda: prepare_revision_job(workspace, skill),
+        json_output=json_output,
+    )
+    request = result.request
+    _emit(
+        {
+            "ok": True,
+            "job_id": request.job_id,
+            "target_draft_version": request.target_draft_version,
+            "next_draft_version": request.next_draft_version,
+            "request_fingerprint": request.request_fingerprint,
+            "skill_id": request.skill.skill_id,
+            "reused": result.reused,
+        },
+        json_output=json_output,
+    )
+
+
+@revision_app.command("import")
+def revision_import(
+    workspace: Path,
+    response: Annotated[Path, typer.Option("--response")],
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    result = _run(
+        lambda: import_revision_job(workspace, response),
+        json_output=json_output,
+    )
+    draft = result.draft.manifest
+    manifest = result.manifest
+    _emit(
+        {
+            "ok": True,
+            "job_id": manifest.job_id,
+            "state": "DRAFTED",
+            "draft_version": manifest.revised_draft_version,
+            "draft_sha256": draft.draft_artifact.content_sha256,
+            "revision_bundle_fingerprint": manifest.bundle_fingerprint,
             "reused": result.reused,
         },
         json_output=json_output,

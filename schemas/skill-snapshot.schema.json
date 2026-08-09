@@ -1,0 +1,75 @@
+{
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/skill-snapshot.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "automatic_trigger": {
+      "const": false,
+      "default": false,
+      "title": "Automatic Trigger",
+      "type": "boolean"
+    },
+    "content_sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Content Sha256",
+      "type": "string"
+    },
+    "eval_sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Eval Sha256",
+      "type": "string"
+    },
+    "explicit_selection": {
+      "const": true,
+      "default": true,
+      "title": "Explicit Selection",
+      "type": "boolean"
+    },
+    "lifecycle": {
+      "enum": [
+        "draft",
+        "active"
+      ],
+      "title": "Lifecycle",
+      "type": "string"
+    },
+    "owner": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": ".*\\S.*",
+      "title": "Owner",
+      "type": "string"
+    },
+    "relative_path": {
+      "pattern": "^\\.agents/skills/[a-z0-9-]+/SKILL\\.md$",
+      "title": "Relative Path",
+      "type": "string"
+    },
+    "side_effect_policy": {
+      "const": "instruction-only",
+      "default": "instruction-only",
+      "title": "Side Effect Policy",
+      "type": "string"
+    },
+    "skill_id": {
+      "pattern": "^[a-z0-9][a-z0-9-]{0,127}$",
+      "title": "Skill Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "skill_id",
+    "relative_path",
+    "content_sha256",
+    "eval_sha256",
+    "lifecycle",
+    "owner"
+  ],
+  "title": "SkillSnapshot",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

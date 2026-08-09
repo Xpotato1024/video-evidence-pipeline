@@ -77,7 +77,17 @@ class JobWorkspace:
             root / "evidence/staging",
             root / "search",
             root / "search/staging",
+            root / "semantic",
+            root / "semantic/staging",
+            root / "authoring",
+            root / "authoring/requests",
+            root / "authoring/responses",
+            root / "authoring/drafts",
+            root / "authoring/audits",
+            root / "authoring/revisions",
+            root / "human-review",
             root / "manifests",
+            root / "manifests/authoring",
             root / "manifests/stages",
             root / "logs",
         )
@@ -180,6 +190,14 @@ class JobWorkspace:
     @property
     def search_lock_path(self) -> Path:
         return self.safe_path("search/.search.lock")
+
+    @property
+    def semantic_lock_path(self) -> Path:
+        return self.safe_path("semantic/.semantic.lock")
+
+    @property
+    def human_review_manifest_json(self) -> Path:
+        return self.safe_path("manifests/authoring/human-review.json")
 
     @property
     def transitions_jsonl(self) -> Path:

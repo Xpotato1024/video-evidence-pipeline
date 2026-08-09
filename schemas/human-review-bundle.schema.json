@@ -1,0 +1,467 @@
+{
+  "$defs": {
+    "ArtifactRef": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "artifact_type": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Artifact Type",
+          "type": "string"
+        },
+        "content_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "relative_storage_path": {
+          "title": "Relative Storage Path",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "artifact_type",
+        "content_sha256",
+        "size_bytes",
+        "relative_storage_path"
+      ],
+      "title": "ArtifactRef",
+      "type": "object"
+    },
+    "DraftSpan": {
+      "additionalProperties": false,
+      "properties": {
+        "end": {
+          "description": "Exclusive Python Unicode code-point offset",
+          "exclusiveMinimum": 0,
+          "title": "End",
+          "type": "integer"
+        },
+        "start": {
+          "description": "Inclusive Python Unicode code-point offset",
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        },
+        "text": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "text"
+      ],
+      "title": "DraftSpan",
+      "type": "object"
+    },
+    "FormatCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "check_id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$",
+          "title": "Check Id",
+          "type": "string"
+        },
+        "detail": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Detail",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "check_id",
+        "passed",
+        "detail"
+      ],
+      "title": "FormatCheck",
+      "type": "object"
+    },
+    "RequirementCoverage": {
+      "enum": [
+        "satisfied",
+        "partial",
+        "unmet"
+      ],
+      "title": "RequirementCoverage",
+      "type": "string"
+    },
+    "RequirementMap": {
+      "additionalProperties": false,
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/RequirementMapEntry"
+          },
+          "maxItems": 100,
+          "title": "Entries",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "title": "RequirementMap",
+      "type": "object"
+    },
+    "RequirementMapEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10000,
+          "title": "Claim Ids",
+          "type": "array"
+        },
+        "coverage": {
+          "$ref": "#/$defs/RequirementCoverage"
+        },
+        "evidence_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10000,
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "explanation": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Explanation",
+          "type": "string"
+        },
+        "requirement_id": {
+          "pattern": "^R[0-9]{6}$",
+          "title": "Requirement Id",
+          "type": "string"
+        },
+        "requirement_text": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Requirement Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "requirement_id",
+        "requirement_text",
+        "coverage",
+        "explanation"
+      ],
+      "title": "RequirementMapEntry",
+      "type": "object"
+    },
+    "RevisionHistoryEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "audit_bundle_fingerprint": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Audit Bundle Fingerprint"
+        },
+        "draft_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Draft Sha256",
+          "type": "string"
+        },
+        "draft_version": {
+          "pattern": "^v00[1-3]$",
+          "title": "Draft Version",
+          "type": "string"
+        },
+        "resolution_artifact": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArtifactRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "draft_version",
+        "draft_sha256"
+      ],
+      "title": "RevisionHistoryEntry",
+      "type": "object"
+    },
+    "SourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "content_sha256": {
+          "description": "Transcript-record semantic fingerprint or canonical frame artifact SHA-256",
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "end_ms": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Ms"
+        },
+        "kind": {
+          "$ref": "#/$defs/SourceRefKind"
+        },
+        "ref_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Ref Id",
+          "type": "string"
+        },
+        "start_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Ms"
+        }
+      },
+      "required": [
+        "kind",
+        "ref_id",
+        "content_sha256"
+      ],
+      "title": "SourceRef",
+      "type": "object"
+    },
+    "SourceRefKind": {
+      "enum": [
+        "transcript_segment",
+        "frame",
+        "approved_artifact"
+      ],
+      "title": "SourceRefKind",
+      "type": "string"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/human-review-bundle.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "approval_target_sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Approval Target Sha256",
+      "type": "string"
+    },
+    "audit_bundle_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Audit Bundle Fingerprint",
+      "type": "string"
+    },
+    "audit_findings_artifact": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "claim_comparison_artifact": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "confirmation_spans": {
+      "items": {
+        "$ref": "#/$defs/DraftSpan"
+      },
+      "maxItems": 100000,
+      "title": "Confirmation Spans",
+      "type": "array"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "current_draft_artifact": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "current_draft_sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Current Draft Sha256",
+      "type": "string"
+    },
+    "current_draft_version": {
+      "pattern": "^v00[1-3]$",
+      "title": "Current Draft Version",
+      "type": "string"
+    },
+    "external_fact_claim_ids": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100000,
+      "title": "External Fact Claim Ids",
+      "type": "array"
+    },
+    "fixed_evidence_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Fixed Evidence Fingerprint",
+      "type": "string"
+    },
+    "format_checks": {
+      "items": {
+        "$ref": "#/$defs/FormatCheck"
+      },
+      "maxItems": 1000,
+      "minItems": 1,
+      "title": "Format Checks",
+      "type": "array"
+    },
+    "is_approval": {
+      "const": false,
+      "default": false,
+      "title": "Is Approval",
+      "type": "boolean"
+    },
+    "job_id": {
+      "maxLength": 63,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+      "title": "Job Id",
+      "type": "string"
+    },
+    "p0_count": {
+      "const": 0,
+      "default": 0,
+      "title": "P0 Count",
+      "type": "integer"
+    },
+    "p1_count": {
+      "const": 0,
+      "default": 0,
+      "title": "P1 Count",
+      "type": "integer"
+    },
+    "p2_count": {
+      "minimum": 0,
+      "title": "P2 Count",
+      "type": "integer"
+    },
+    "replay_source_refs": {
+      "items": {
+        "$ref": "#/$defs/SourceRef"
+      },
+      "maxItems": 100000,
+      "title": "Replay Source Refs",
+      "type": "array"
+    },
+    "requirement_map": {
+      "$ref": "#/$defs/RequirementMap"
+    },
+    "revision_history": {
+      "items": {
+        "$ref": "#/$defs/RevisionHistoryEntry"
+      },
+      "maxItems": 3,
+      "minItems": 1,
+      "title": "Revision History",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "unresolved_ambiguity_ids": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100000,
+      "title": "Unresolved Ambiguity Ids",
+      "type": "array"
+    },
+    "user_opinion_claim_ids": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100000,
+      "title": "User Opinion Claim Ids",
+      "type": "array"
+    }
+  },
+  "required": [
+    "job_id",
+    "fixed_evidence_fingerprint",
+    "current_draft_version",
+    "current_draft_artifact",
+    "current_draft_sha256",
+    "audit_bundle_fingerprint",
+    "audit_findings_artifact",
+    "claim_comparison_artifact",
+    "p2_count",
+    "requirement_map",
+    "format_checks",
+    "revision_history",
+    "approval_target_sha256",
+    "created_at"
+  ],
+  "title": "HumanReviewBundle",
+  "type": "object",
+  "x-schema-version": "1.0"
+}
