@@ -15,7 +15,7 @@ source_issue: 3
 change_control: pull-request
 supersedes: []
 superseded_by: null
-related_documents: ["VEP-ARCH-TECH", "VEP-AGENT-GOV", "VEP-CONTRIBUTING", "VEP-SECURITY"]
+related_documents: ["VEP-ARCH-TECH", "VEP-AGENT-GOV", "VEP-CONTRIBUTING", "VEP-SECURITY", "VEP-OPS-NETWORK"]
 ---
 # CI・品質ゲート運用
 
@@ -65,6 +65,10 @@ GitHubプランが要件を満たした時点で、`lint`、`tests`、`repositor
 
 CIはGitHub-hosted runnerで合成・公開可能なfixtureのみを扱います。Panopto、Box、ブラウザ
 Cookie、OpenAI等のcredentialをActions secretsへ登録しません。
+
+network acquisition testはHTTPX MockTransport、fake DNS resolver、fake subprocess runnerを使用し、
+real networkへ接続しません。synthetic token／Cookie／signed URL markerがmanifest、CLI JSON、transition、
+log、safe exceptionへ残らないことも検査します。manual live integrationは通常CIの成功条件にしません。
 
 ActionsはNode 24対応版を完全commit SHAでpinし、Dependabotが更新候補を作成します。
 

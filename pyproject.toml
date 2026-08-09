@@ -4,9 +4,12 @@ version = "0.1.0"
 description = "Auditable local pipeline contracts for authorized video evidence processing"
 requires-python = ">=3.12,<3.14"
 dependencies = [
+  "httpcore==1.0.9",
+  "httpx==0.28.1",
   "pydantic>=2.11,<3",
   "PyYAML>=6.0.2,<7",
   "typer>=0.16,<1",
+  "yt-dlp==2026.6.9",
 ]
 
 [build-system]

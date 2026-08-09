@@ -18,7 +18,7 @@ source_issue: 1
 change_control: pull-request
 supersedes: []
 superseded_by: null
-related_documents: ["VEP-ARCH-CONTEXT", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-STATE", "VEP-ARCH-AGENTS", "VEP-ARCH-TECH"]
+related_documents: ["VEP-ARCH-CONTEXT", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-STATE", "VEP-ARCH-AGENTS", "VEP-ARCH-TECH", "VEP-OPS-NETWORK"]
 ---
 # パイプラインアーキテクチャ
 
@@ -26,9 +26,9 @@ related_documents: ["VEP-ARCH-CONTEXT", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-STATE", 
 
 中核は「動画からレポートを生成すること」ではなく、「動画から検証可能な証拠パッケージを構築し、その証拠から任意の成果物を生成すること」です。
 
-現在、Intake / Authorizationのcore contractと、Acquisitionの`local_file`経路だけが実装済みです。
-実動作するstate pathは`CREATED → AUTHORIZED → ACQUIRED`です。その他のsource adapterと後続層は
-設計済みですが未実装です。
+現在、Intake / Authorizationのcore contractと、Acquisitionの`local_file`、`direct_http`、
+`generic_ytdlp`、`panopto`、`box`経路が実装済みです。実動作するstate pathは
+`CREATED → AUTHORIZED → ACQUIRED`です。media normalization以降の層は設計済みですが未実装です。
 
 ## 2. 層
 
@@ -193,7 +193,7 @@ authorization、要件確定、自分の考察、曖昧箇所確認、最終承�
 
 初期adapter category:
 
-- `source`: `local_file`のみ実装済み。`direct_http`、`panopto`、`box`、`generic_ytdlp`は未実装
+- `source`: `local_file`、`direct_http`、`panopto`、`box`、`generic_ytdlp`を実装済み
 - `transcription`: captions, faster_whisper, optional_cloud
 - `vision`: contact_sheet/manual selection, optional model
 - `authoring`: report, summary
@@ -211,6 +211,8 @@ domain modelは特定backendの引数やレスポンスを直接保持せず、a
 - stage implementation version
 
 fingerprintが一致し、出力検証が成功する場合は再利用できます。raw sourceの再取得、AI出力の暗黙な再生成は行いません。
+network sourceは有効な`ACQUIRED` bundleをlocal検証して再利用し、通常の再実行でnetworkへ接続しません。
+`local_file`は再probeしてcontent changeを検出します。
 
 ## 6. Failure behavior
 

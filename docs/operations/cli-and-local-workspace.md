@@ -17,12 +17,13 @@ related_documents:
   - VEP-ARCH-TECH
   - VEP-ARCH-TRUST
   - VEP-OPS-CI
+  - VEP-OPS-NETWORK
 ---
 # CLI・local workspace運用
 
 ## 実装範囲
 
-`vep`は現在、job作成、validation、明示authorization、`local_file` acquisition、status／integrity
+`vep`は現在、job作成、validation、明示authorization、local／network acquisition、status／integrity
 確認、JSON Schema生成／drift確認を実装しています。実行可能なstate pathは
 `CREATED → AUTHORIZED → ACQUIRED`です。
 
@@ -60,8 +61,8 @@ vep job init demo-report \
 ## Authorization flow
 
 `job init`は`CREATED`を記録するだけで、sourceを読みません。`job authorize`は`--confirm`を必須とし、
-authorization basis、local processing可否、external API可否、確認時刻、確認者identity、normalized
-job fingerprintを保存します。external APIは既定denyです。
+authorization basis、local processing可否、network acquisition可否、external API可否、確認時刻、確認者identity、
+normalized job fingerprintを保存します。network acquisitionとexternal APIは別permissionで、どちらも既定denyです。
 同一jobへのauthorizationはacquisitionと同じjob-level OS file lockで直列化します。stateをlock取得後に
 再読込し、authorization recordのatomic writeと`CREATED → AUTHORIZED` transitionを同じ排他境界内で
 実行します。競合callerは`TRANSITION_LOG_BUSY`またはstate gateでfail closedし、loserのrecordを残しません。
@@ -115,6 +116,15 @@ contentの再実行は既存raw artifactとmanifestを検証して再利用し�
 source manifestと通常出力にはlocal absolute path、URL query、Cookie、token、Authorization headerを
 記録しません。local pathはGit管理外の`job.yaml`だけに保持できます。
 
+## Network source
+
+network jobは`job authorize --allow-network-acquisition`を明示します。tokenは`vep acquire`の
+`--box-token-env`／`--panopto-token-env`で環境変数名だけを指定します。Panopto tokenにはさらに
+`--panopto-tenant-host`で送信先tenantを拘束します。browser cookieは
+`--cookies-from-browser`で明示します。timeoutとmaximum bytesは`--network-timeout`、
+`--maximum-download-bytes`、`--maximum-download-seconds`でboundedに設定できます。詳細なlocator、redirect、SSRF、provider、idempotencyの
+契約は[`network-acquisition.md`](network-acquisition.md)を参照してください。
+
 ## Exit code
 
 | Code | Category |
@@ -131,6 +141,8 @@ source manifestと通常出力にはlocal absolute path、URL query、Cookie、t
 - `AUTHORIZATION_STALE`: current `job.yaml`を認可時の内容へ戻すか、新しいjobを作成する。
 - `SOURCE_CONTENT_CHANGED`: 既存jobを変更せず、新しいjobを作る。
 - `ARTIFACT_INTEGRITY_FAILED`: raw artifactを成功扱いせず、workspaceを保全して原因を調査する。
-- `SOURCE_KIND_NOT_IMPLEMENTED`: `local_file`以外は後続Issueの実装を待つ。
+- `NETWORK_ACQUISITION_NOT_AUTHORIZED`: network取得を明示許可した新jobを用意する。
+- `YTDLP_NOT_AVAILABLE`: lock済みdependencyを再同期する。
+- `PANOPTO_CREDENTIAL_REQUIRED`／`BOX_CREDENTIAL_REQUIRED`: token valueではなく環境変数名を指定する。
 
 FFmpeg、subtitle、frame、ASR、evidence、authoring、independent audit、approval、exportは本運用範囲外です。

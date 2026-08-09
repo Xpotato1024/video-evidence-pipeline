@@ -11,7 +11,12 @@ from video_evidence_pipeline.domain.artifacts import ArtifactRef
 from video_evidence_pipeline.domain.authorization import AuthorizationRecord
 from video_evidence_pipeline.domain.hashing import sha256_bytes, sha256_file
 from video_evidence_pipeline.domain.identifiers import sanitize_filename
-from video_evidence_pipeline.domain.job import AssignmentSpec, JobSpec, job_fingerprint
+from video_evidence_pipeline.domain.job import (
+    AssignmentSpec,
+    JobSpec,
+    job_fingerprint,
+    parse_job_data,
+)
 from video_evidence_pipeline.domain.state import JobState
 from video_evidence_pipeline.domain.transitions import TransitionRecord, validate_transition_records
 from video_evidence_pipeline.errors import VepError
@@ -165,6 +170,23 @@ def test_sensitive_url_query_is_rejected() -> None:
         )
 
 
+def test_invalid_job_error_does_not_retain_sensitive_locator() -> None:
+    secret = "synthetic-super-secret"
+    with pytest.raises(VepError) as captured:
+        parse_job_data(
+            job_data(
+                source={
+                    "kind": "direct_http",
+                    "locator": f"https://example.invalid/video?token={secret}",
+                }
+            )
+        )
+    assert captured.value.code == "JOB_INVALID"
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    assert secret not in repr(captured.value)
+
+
 @pytest.mark.parametrize(
     "locator",
     [
@@ -187,6 +209,7 @@ def authorization_data(**overrides: object) -> dict[str, object]:
         "confirmed_by_user": True,
         "authorization_basis": "authorized synthetic fixture",
         "allow_local_processing": True,
+        "allow_network_acquisition": False,
         "allow_external_api": False,
         "confirmed_at": "2026-08-07T00:00:00Z",
         "confirmer_identity": "test-user",
@@ -201,6 +224,7 @@ def authorization_data(**overrides: object) -> dict[str, object]:
         {"confirmed_by_user": 1},
         {"confirmed_by_user": False},
         {"allow_local_processing": "yes"},
+        {"allow_network_acquisition": 1},
         {"allow_external_api": 0},
         {"authorization_basis": "   "},
         {"confirmer_identity": "\t"},

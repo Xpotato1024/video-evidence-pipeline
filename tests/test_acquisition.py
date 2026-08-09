@@ -540,6 +540,37 @@ def test_future_partial_source_manifest_is_rejected_before_stage_persistence(
     assert not workspace.acquisition_manifest_json.exists()
 
 
+def test_local_source_manifest_rejects_network_acquisition_evidence(tmp_path: Path) -> None:
+    source = tmp_path / "synthetic.bin"
+    source.write_bytes(b"content")
+    job_path = initialized_job(tmp_path, source)
+    authorize(job_path)
+    acquire_job(job_path)
+    workspace = JobWorkspace.open(job_path)
+    payload = json.loads(workspace.source_manifest_json.read_text(encoding="utf-8"))
+    payload["acquisition_evidence"] = {
+        "adapter_kind": "direct_http",
+        "transport": "https",
+        "backend": "synthetic",
+        "backend_version": "1",
+        "obtained_at": payload["created_at"],
+        "requested_host": "example.invalid",
+        "final_host": "example.invalid",
+        "redirect_count": 0,
+        "http_status_category": "2xx",
+        "response_content_type": "video/mp4",
+        "declared_content_length": 7,
+        "actual_acquired_size": 7,
+        "credential_mode": "none",
+        "warnings": [],
+    }
+    workspace.source_manifest_json.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(VepError) as captured:
+        LocalFileAdapter().acquire(load_job_yaml(workspace.job_yaml), workspace)
+    assert captured.value.code == "SOURCE_MANIFEST_INVALID"
+
+
 def test_validate_does_not_treat_denied_local_processing_as_spec_corruption(
     tmp_path: Path,
 ) -> None:
@@ -734,13 +765,13 @@ def test_initial_transition_binding_is_checked_before_authorization(
     assert not (job_path / "authorization/authorization.json").exists()
 
 
-def test_nonimplemented_source_kind_fails_explicitly(tmp_path: Path) -> None:
+def test_network_source_requires_dedicated_authorization(tmp_path: Path) -> None:
     locator = "https://example.invalid/video"
     job_path = initialized_job(tmp_path, locator, source_kind=SourceKind.DIRECT_HTTP)
     authorize(job_path)
     with pytest.raises(VepError) as captured:
         acquire_job(job_path)
-    assert captured.value.code == "SOURCE_KIND_NOT_IMPLEMENTED"
+    assert captured.value.code == "NETWORK_ACQUISITION_NOT_AUTHORIZED"
     assert "do-not-log" not in captured.value.safe_message
 
 

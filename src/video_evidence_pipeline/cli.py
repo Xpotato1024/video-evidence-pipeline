@@ -13,6 +13,10 @@ from pydantic import ValidationError
 from typer.core import _click as click
 
 from video_evidence_pipeline import __version__
+from video_evidence_pipeline.acquisition.runtime import (
+    AcquisitionRuntimeConfig,
+    BrowserCookieSource,
+)
 from video_evidence_pipeline.application import (
     acquire_job,
     authorize_job,
@@ -29,11 +33,17 @@ class StructuredTyper(typer.Typer):
     """Normalize Click/Typer parser failures for machine callers."""
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        exit_code = None
+        parser_error = None
         try:
             return super().__call__(*args, standalone_mode=False, **kwargs)
         except click.exceptions.Exit as exc:
-            raise SystemExit(exc.exit_code) from None
+            exit_code = exc.exit_code
         except (click.ClickException, click.exceptions.Abort) as exc:
+            parser_error = exc
+        if exit_code is not None:
+            raise SystemExit(exit_code)
+        if parser_error is not None:
             if "--json" in sys.argv:
                 payload = {
                     "ok": False,
@@ -43,11 +53,11 @@ class StructuredTyper(typer.Typer):
                     },
                 }
                 typer.echo(json.dumps(payload, ensure_ascii=False, sort_keys=True))
-            elif isinstance(exc, click.ClickException):
-                exc.show()
+            elif isinstance(parser_error, click.ClickException):
+                parser_error.show()
             else:
                 typer.echo("Aborted!", err=True)
-            raise SystemExit(2) from None
+            raise SystemExit(2)
 
 
 app = StructuredTyper(name="vep", no_args_is_help=True, pretty_exceptions_enable=False)
@@ -68,17 +78,18 @@ def _emit(value: Any, *, json_output: bool) -> None:
 
 
 def _run[T](action: Callable[[], T], *, json_output: bool) -> T:
+    error = None
     try:
-        return action()
+        result = action()
     except VepError as exc:
-        payload = {"ok": False, "error": {"code": exc.code, "message": exc.safe_message}}
-        _emit(payload, json_output=json_output)
-        raise typer.Exit(code=int(exc.exit_code)) from None
-    except ValidationError as exc:
+        error = exc
+    except ValidationError:
         error = configuration_error("CONFIG_INVALID", "configuration is invalid")
+    if error is not None:
         payload = {"ok": False, "error": {"code": error.code, "message": error.safe_message}}
         _emit(payload, json_output=json_output)
-        raise typer.Exit(code=int(error.exit_code)) from exc
+        raise typer.Exit(code=int(error.exit_code))
+    return result
 
 
 def _version_callback(value: bool) -> None:
@@ -151,6 +162,10 @@ def job_authorize(
     basis: Annotated[str, typer.Option("--basis")],
     confirm: Annotated[bool, typer.Option("--confirm")] = False,
     allow_local_processing: Annotated[bool, typer.Option("--allow-local-processing")] = False,
+    allow_network_acquisition: Annotated[
+        bool,
+        typer.Option("--allow-network-acquisition/--deny-network-acquisition"),
+    ] = False,
     allow_external_api: Annotated[
         bool,
         typer.Option("--allow-external-api/--deny-external-api"),
@@ -164,6 +179,7 @@ def job_authorize(
             confirm=confirm,
             basis=basis,
             allow_local_processing=allow_local_processing,
+            allow_network_acquisition=allow_network_acquisition,
             allow_external_api=allow_external_api,
             confirmer_identity=confirmer,
         ),
@@ -175,6 +191,7 @@ def job_authorize(
             "job_id": record.job_id,
             "state": "AUTHORIZED",
             "allow_local_processing": record.allow_local_processing,
+            "allow_network_acquisition": record.allow_network_acquisition,
             "allow_external_api": record.allow_external_api,
         },
         json_output=json_output,
@@ -195,9 +212,39 @@ def status(
 @app.command("acquire")
 def acquire(
     workspace: Path,
+    cookies_from_browser: Annotated[
+        BrowserCookieSource | None,
+        typer.Option("--cookies-from-browser"),
+    ] = None,
+    box_token_env: Annotated[str | None, typer.Option("--box-token-env")] = None,
+    panopto_token_env: Annotated[str | None, typer.Option("--panopto-token-env")] = None,
+    panopto_tenant_host: Annotated[str | None, typer.Option("--panopto-tenant-host")] = None,
+    panopto_ytdlp_fallback: Annotated[
+        bool,
+        typer.Option("--panopto-ytdlp-fallback"),
+    ] = False,
+    network_timeout: Annotated[float, typer.Option("--network-timeout")] = 30.0,
+    maximum_download_seconds: Annotated[float, typer.Option("--maximum-download-seconds")] = 3600.0,
+    maximum_download_bytes: Annotated[
+        int,
+        typer.Option("--maximum-download-bytes"),
+    ] = 2 * 1024 * 1024 * 1024,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    result = _run(lambda: acquire_job(workspace), json_output=json_output)
+    def acquire_with_runtime_config():
+        runtime = AcquisitionRuntimeConfig(
+            cookies_from_browser=cookies_from_browser,
+            box_token_env=box_token_env,
+            panopto_token_env=panopto_token_env,
+            panopto_tenant_host=panopto_tenant_host,
+            panopto_ytdlp_fallback=panopto_ytdlp_fallback,
+            network_timeout_seconds=network_timeout,
+            maximum_download_seconds=maximum_download_seconds,
+            maximum_download_bytes=maximum_download_bytes,
+        )
+        return acquire_job(workspace, runtime)
+
+    result = _run(acquire_with_runtime_config, json_output=json_output)
     artifact = result.source_manifest.artifact_record.artifact
     _emit(
         {

@@ -1,5 +1,132 @@
 {
   "$defs": {
+    "AcquisitionEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "actual_acquired_size": {
+          "minimum": 1,
+          "title": "Actual Acquired Size",
+          "type": "integer"
+        },
+        "adapter_kind": {
+          "$ref": "#/$defs/SourceKind"
+        },
+        "backend": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Backend",
+          "type": "string"
+        },
+        "backend_version": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Backend Version",
+          "type": "string"
+        },
+        "credential_mode": {
+          "$ref": "#/$defs/CredentialMode"
+        },
+        "declared_content_length": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Declared Content Length"
+        },
+        "final_host": {
+          "anyOf": [
+            {
+              "maxLength": 253,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9.:-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Final Host"
+        },
+        "http_status_category": {
+          "$ref": "#/$defs/HttpStatusCategory"
+        },
+        "obtained_at": {
+          "format": "date-time",
+          "title": "Obtained At",
+          "type": "string"
+        },
+        "redirect_count": {
+          "anyOf": [
+            {
+              "maximum": 20,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Redirect Count"
+        },
+        "requested_host": {
+          "maxLength": 253,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9.:-]+$",
+          "title": "Requested Host",
+          "type": "string"
+        },
+        "response_content_type": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Response Content Type"
+        },
+        "transport": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Transport",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "adapter_kind",
+        "transport",
+        "backend",
+        "backend_version",
+        "obtained_at",
+        "requested_host",
+        "final_host",
+        "redirect_count",
+        "http_status_category",
+        "actual_acquired_size",
+        "credential_mode"
+      ],
+      "title": "AcquisitionEvidence",
+      "type": "object"
+    },
     "ArtifactRecord": {
       "additionalProperties": false,
       "properties": {
@@ -105,6 +232,23 @@
       "title": "ArtifactRef",
       "type": "object"
     },
+    "CredentialMode": {
+      "enum": [
+        "none",
+        "environment-token",
+        "browser-cookie"
+      ],
+      "title": "CredentialMode",
+      "type": "string"
+    },
+    "HttpStatusCategory": {
+      "enum": [
+        "2xx",
+        "not-observed"
+      ],
+      "title": "HttpStatusCategory",
+      "type": "string"
+    },
     "ProducerIdentity": {
       "additionalProperties": false,
       "properties": {
@@ -156,6 +300,17 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "acquisition_evidence": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AcquisitionEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "artifact_record": {
       "$ref": "#/$defs/ArtifactRecord"
     },

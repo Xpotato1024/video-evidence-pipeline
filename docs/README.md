@@ -16,6 +16,7 @@ related_documents:
   - VEP-README
   - VEP-AGENT-INDEX
   - VEP-OPS-CI
+  - VEP-OPS-NETWORK
 ---
 # 設計ドキュメント索引
 
@@ -46,6 +47,7 @@ related_documents:
 
 - [`operations/ci-quality-gates.md`](operations/ci-quality-gates.md)
 - [`operations/cli-and-local-workspace.md`](operations/cli-and-local-workspace.md)
+- [`operations/network-acquisition.md`](operations/network-acquisition.md)
 
 ## Agent system
 
@@ -58,6 +60,7 @@ related_documents:
 
 - [`decisions/README.md`](decisions/README.md)
 - [`decisions/0000-template.md`](decisions/0000-template.md)
+- [`decisions/0001-network-acquisition-credential-and-ephemeral-locator-boundary.md`](decisions/0001-network-acquisition-credential-and-ephemeral-locator-boundary.md)
 - [`historical/README.md`](historical/README.md)
 
 ## Templates

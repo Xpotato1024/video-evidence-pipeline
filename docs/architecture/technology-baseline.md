@@ -51,9 +51,10 @@ related_documents: ["VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-TRUST",
 | Local search | SQLite FTS5 | preferred |
 | Hash | streaming SHA-256 | required／implemented |
 | local source | `local_file` adapter | required／implemented |
-| direct HTTP | httpx | preferred |
-| generic/Panopto backend | yt-dlp adapter | preferred |
-| Box API | official API adapter | optional |
+| direct HTTP | httpx 0.28.1 + httpcore 1.0.9 | required／implemented |
+| generic/Panopto backend | pinned yt-dlp adapter | preferred／implemented |
+| Panopto API | official REST v1 contract | preferred／implemented |
+| Box API | official API adapter | optional／implemented |
 | media | FFmpeg／ffprobe | required |
 | scene candidate | PySceneDetect AdaptiveDetector | preferred |
 | local ASR | faster-whisper | preferred |
@@ -61,7 +62,10 @@ related_documents: ["VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-TRUST",
 | canonical draft | Markdown | required |
 | DOCX／Typst／Pandoc／HTML | export adapters | optional |
 
-`direct_http`、`generic_ytdlp`、`panopto`、`box`と、media以降のbackendは未実装です。
+network acquisitionは実装済みです。media以降のbackendは未実装です。具体dependency versionは
+`pyproject.toml`と`uv.lock`を正本とし、yt-dlpのruntime self-updateは許可しません。SSRF防御の接続先IP pinningは
+HTTPX/httpcoreのtransport contractへ依存するため、監査済みのexact versionをdirect dependencyとして固定します。
+更新は別PRでcompatibility testとsecurity auditを通します。
 
 ## 4. Deferred／rejected
 

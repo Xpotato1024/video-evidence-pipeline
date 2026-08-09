@@ -12,6 +12,11 @@
       "title": "Allow Local Processing",
       "type": "boolean"
     },
+    "allow_network_acquisition": {
+      "default": false,
+      "title": "Allow Network Acquisition",
+      "type": "boolean"
+    },
     "authorization_basis": {
       "maxLength": 1024,
       "minLength": 1,

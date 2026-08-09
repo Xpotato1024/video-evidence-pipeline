@@ -18,7 +18,7 @@ source_issue: 1
 change_control: pull-request
 supersedes: []
 superseded_by: null
-related_documents: ["VEP-GOV-CHANGE", "VEP-ADR-TEMPLATE", "VEP-ARCH-TECH"]
+related_documents: ["VEP-GOV-CHANGE", "VEP-ADR-TEMPLATE", "VEP-ARCH-TECH", "VEP-ADR-0001"]
 ---
 # Architecture Decision Records
 
@@ -54,7 +54,7 @@ NNNN-short-kebab-title.md
 
 ## 5. 一覧
 
-現時点でaccepted ADRはありません。初期設計はcanonical文書へ整理され、後続実装で重要な選択をADR化します。
+- [`0001-network-acquisition-credential-and-ephemeral-locator-boundary.md`](0001-network-acquisition-credential-and-ephemeral-locator-boundary.md): accepted
 
 ## 6. テンプレート
 
