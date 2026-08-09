@@ -715,7 +715,11 @@ def test_actual_synthetic_normalization_publish_recovery_reuse_and_tamper(
     assert cues_artifact is not None
     cues = read_jsonl(workspace.safe_path(cues_artifact.relative_storage_path), SubtitleCue)
     assert [cue.text for cue in cues] == ["synthetic subtitle text"]
-    assert cues[0].start_ms == 250
+    # FFmpeg 6.1 and 9.0 choose slightly different Matroska time-base offsets
+    # for this synthetic subtitle. The tool identity is fingerprinted, while
+    # the normalized cue must preserve duration and remain tightly bounded.
+    assert abs(cues[0].start_ms - 250) <= 50
+    assert cues[0].end_ms - cues[0].start_ms == 1250
     oversized_subtitle_payload = manifest.model_dump(mode="json")
     oversized_subtitle_payload["subtitles"][0]["cues_artifact"]["size_bytes"] = (
         config.maximum_subtitle_bytes + 1
