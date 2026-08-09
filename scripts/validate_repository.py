@@ -100,8 +100,13 @@ FORBIDDEN_PREFIXES = (
     "jobs/",
     "work/",
     "artifacts/",
+    "approval/",
+    "authoring/",
     "data/raw/",
     "data/derived/",
+    "exports/",
+    "human-review/",
+    "manifests/",
     "output/",
 )
 SECRET_PATTERNS = {
@@ -131,6 +136,7 @@ RUNTIME_REQUIRED_PATHS = {
 CI_REQUIRED_COMMANDS = {
     "uv run ruff check src scripts tests",
     "uv run ruff format --check src scripts tests",
+    "uv run pytest -q tests/test_full_e2e.py",
     "uv run pytest -q",
     "uv run vep schema check",
     "uv run python scripts/validate_repository.py --root .",

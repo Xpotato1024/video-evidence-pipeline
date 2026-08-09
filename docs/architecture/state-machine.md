@@ -43,9 +43,9 @@ related_documents: ["VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-AGENTS"
 | `CANCELLED` | ユーザーが処理を中止した |
 
 全stateは`JobState` enumとして実装されています。実行可能な直線経路は現在
-`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → EVIDENCE_READY → DRAFTED → AUDITED → HUMAN_REVIEW_READY`
+`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → EVIDENCE_READY → DRAFTED → AUDITED → HUMAN_REVIEW_READY → HUMAN_APPROVED → EXPORTED`
 です。P0／P1がある場合は`AUDITED → REVISION_REQUIRED → DRAFTED`を最大2回反復し、上限後も
-material findingが残れば`AUDITED → BLOCKED`へ進みます。`HUMAN_APPROVED`／`EXPORTED`は未実装です。
+material findingが残れば`AUDITED → BLOCKED`へ進みます。
 
 ## 2. 遷移
 
@@ -170,21 +170,23 @@ stateDiagram-v2
   human-review bundleへ固定
 - bundleは`is_approval: false`であり、人間承認recordを生成しない
 
-ここまでが実装済みgateです。以下は未実装stageの設計gateであり、現在のCLIでは実行できません。
-
 ### `HUMAN_REVIEW_READY → HUMAN_APPROVED`
 
-- 人間が対象draftを確認
-- approval record
-- draft SHA-256
-- 承認日時
+- 人間がhuman-review packageと対象draftを確認し、target SHA、reviewer identity、basis、`--confirm`をCLIへ明示
+- current draft、clean audit、fixed evidence、human-review bundle、approval target SHAをfull verify
+- self-hashとprevious hashを持つapproval recordをprivate append-only JSONLへ1行だけ追記
+- v1のreviewer identityはCLIでassertされたlineageであり、暗号学的本人確認ではない
+- approval record、stage／primary manifestを公開してからtransitionを最後にappend
+- record公開後の停止は同じrecordから決定的に復旧し、異なるintentの再実行は拒否
 
 ### `HUMAN_APPROVED → EXPORTED`
 
-- approval hashとcurrent draft hashが一致
-- export成功
-- final manifest作成
-- finalに禁止markerがない
+- approval record／manifest、human-review bundle、audit、current draftを再検証し、approval SHAとdraft SHAを一致させる
+- `job.output.format = markdown`だけを実装し、approved draft bytesをdecode／再encode／改行変換せずcopy
+- private content-addressed pathへ`final.md`、package manifest、stage／primary manifestの順に公開
+- export artifactのbytes、size、SHA-256をapproved draftと完全一致させ、transitionを最後にappend
+- package／primary manifest公開後の停止は同一artifactから決定的に復旧
+- unsupported format、stale approval、tamperはfail closed
 
 ## 4. Revision limit
 
@@ -192,7 +194,10 @@ stateDiagram-v2
 
 ## 5. 再実行
 
-同じstateへの再実行は、入力fingerprintが変わらない限り既存出力を再利用できます。fingerprintが変化した場合、依存する後続stateをstaleとして扱い、承認を無効化します。
+同じstateへの再実行は、入力fingerprintが変わらない限り既存出力を再利用できます。fingerprintが変化した場合、
+依存する後続stateをstaleとして扱い、承認を無効化します。v1はtransition logを逆向きに変更せず、stored stateが
+`HUMAN_APPROVED`でもapproval bindingが壊れていれば`APPROVAL_STALE`としてexportを拒否します。有効な別contentは
+新しいjobで承認します。
 
 ## 6. 失敗とblockedの区別
 

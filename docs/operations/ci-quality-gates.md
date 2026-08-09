@@ -78,6 +78,10 @@ manifest、transition、idempotent reuseを検証します。localでtoolがPATH
 同じsynthetic fixtureからcaption-only transcription、provider-neutral fixture responseの明示的test hook、
 `TRANSCRIBED → EVIDENCE_READY`、FTS5 trigramの日本語substring／rebuild／tamper／stale検出まで検証します。
 ASR package／model／network downloadはCIへ要求せず、ASR経路はinjected fake backendだけで検証します。
+`tests/test_full_e2e.py`は同じsynthetic dataからstraight pathと1回revision pathを`EXPORTED`まで実行し、
+明示的synthetic human action、approval SHA、byte-exact Markdown、全transition、idempotencyをrequired stepとして
+検証します。approval／exportのfocused testsはtamper、crash recovery、concurrencyを別に検証します。
+実provider、credential、実講義mediaは使用しません。
 
 ActionsはNode 24対応版を完全commit SHAでpinし、Dependabotが更新候補を作成します。
 

@@ -504,3 +504,14 @@ def test_synthetic_media_is_allowed_only_in_test_fixtures(tmp_path: Path) -> Non
     write(tmp_path, outside, "synthetic bytes only")
     tracked.add(outside)
     assert "FORBIDDEN_ARTIFACT" in finding_codes(tmp_path, tracked)
+
+
+def test_runtime_approval_and_export_outputs_are_forbidden_at_repository_root(
+    tmp_path: Path,
+) -> None:
+    tracked = make_valid_repo(tmp_path)
+    for relative in ("approval/records.jsonl", "exports/markdown/final.md"):
+        write(tmp_path, relative, "synthetic runtime output")
+        tracked.add(relative)
+
+    assert "FORBIDDEN_PATH" in finding_codes(tmp_path, tracked)

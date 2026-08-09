@@ -25,8 +25,9 @@ related_documents:
 
 `vep`は現在、job作成、validation、明示authorization、local／network acquisition、media normalization、
 transcription、semantic evidence／authoring／audit／revision prepare／import、private search cache、
-human-review package、status／integrity確認、JSON Schema生成／drift確認を実装しています。実行可能な直線経路は
-`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → EVIDENCE_READY → DRAFTED → AUDITED → HUMAN_REVIEW_READY`
+human-review package、明示的人間approval、byte-exact Markdown export、status／integrity確認、JSON Schema生成／drift確認を
+実装しています。実行可能な直線経路は
+`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → EVIDENCE_READY → DRAFTED → AUDITED → HUMAN_REVIEW_READY → HUMAN_APPROVED → EXPORTED`
 で、P0／P1が残る経路は最大2回のrevision後に`BLOCKED`です。
 
 ## Commands
@@ -48,6 +49,8 @@ vep audit prepare --skill SKILL
 vep audit import --response PATH
 vep revision prepare --skill SKILL
 vep revision import --response PATH
+vep approve JOB --approval-target-sha256 SHA --reviewer ID --basis TEXT --confirm
+vep export JOB
 vep index build
 vep search JOB QUERY --limit N
 vep schema export
@@ -127,19 +130,27 @@ CLIは再認可を推測しません。このMVPではin-place再認可も実装
 │  └─ revisions/vNNN/resolutions.jsonl
 ├─ human-review/
 │  └─ vNNN/bundle.json
+├─ approval/
+│  └─ records.jsonl
+├─ delivery/
+│  └─ staging/
+├─ exports/
+│  └─ markdown/<approval-record-sha256>/{final.md,package-manifest.json}
 ├─ manifests/
 │  ├─ source-manifest.json
 │  ├─ media-manifest.json
 │  ├─ transcript-manifest.json
 │  ├─ evidence-manifest.json
 │  ├─ authoring/{draft-vNNN,audit-vNNN,revision-vNNN,human-review}.json
+│  ├─ approval-manifest.json
+│  ├─ export-manifest.json
 │  ├─ transitions.jsonl
 │  └─ stages/
 │     ├─ acquisition.json
 │     ├─ normalization.json
 │     ├─ transcription.json
 │     ├─ evidence.json
-│     └─ {authoring,audit,revision,human-review}-vNNN.json
+│     └─ {authoring,audit,revision,human-review}-vNNN.json, approval.json, export.json
 └─ logs/
 ```
 
@@ -267,7 +278,7 @@ fingerprint、tokenizer、normalizer、query／builder／implementation version�
 stale／corrupt cacheは専用lock下のprivate stagingで再構築し、SQLiteとFTS integrity check後にatomic publishします。
 
 `job validate`と`job status`は`TRANSCRIBED`以降でも全upstream artifact、transcript／evidence／authoring／audit／
-revision／human-review manifest、ledger、lineageをfull verifyし、canonical JSON／JSONLからindexを再構築できることを
+revision／human-review／approval／export manifest、ledger、lineageをfull verifyし、canonical JSON／JSONLからindexを再構築できることを
 確認します。
 
 ## Authoring／audit／revision exchange
@@ -293,8 +304,21 @@ provider-neutralな`external_exchange` public author／audit／revision producti
 `instruction-only`です。`analyze-video-evidence`と`prepare-human-review`はdraftのままで、このproduction
 routeのallowlistには含めません。allowlist内のSkillがdraftなら`DRAFT_SKILL_FORBIDDEN`で停止します。
 fixture identityを許可する経路はrepository test内部だけです。human-review bundleは承認対象hashと監査／差分を整理する
-`is_approval: false`のpackageであり、human approval／exportは未実装です。
+`is_approval: false`のpackageです。
 requestへ保存したSkill snapshotはimmutableです。現在の同一content／eval／identityが`active`へ昇格した場合だけ
 pending production importを許可し、その他の変更は`SKILL_SNAPSHOT_STALE`で拒否します。completed historyの
 validate／statusはmutableな現在Skillへ再結合しません。完成済みのauthor／audit／revision importを同一responseで
 再実行する場合も、保存済みrequestとcanonical responseの完全一致を検証したうえで現在Skillの再適格性判定を行いません。
+
+## Human approval／Markdown export
+
+`vep approve JOB`はhuman-review packageに表示されたcurrent draft SHAを`--approval-target-sha256`へ再入力し、
+非空の`--reviewer`、`--basis`、`--confirm`を明示した場合だけ成功します。reviewer identityはlocal CLIのasserted
+lineageで、暗号学的本人確認ではありません。AI／Skill／fixture semantic executorからこの操作へ入る経路はありません。
+承認recordは`approval/records.jsonl`へprivate append-onlyで保存し、P0／P1、draft、audit、requirements、evidence、
+human-review bindingを再検証してから`HUMAN_APPROVED`へ進めます。
+
+`vep export JOB`はjobのoutput formatを使用し、v1ではexact lowercase `markdown`だけを実装します。approved draftを
+binary bytesのままcontent-addressed `final.md`へcopyし、package／primary manifestを公開してから`EXPORTED`へ進めます。
+承認後のdraft／audit／human-review／ledger改変は`APPROVAL_STALE`、unsupported formatはstructured errorで拒否します。
+同一承認の再実行は全artifactを検証して再利用し、ledger、artifact、transitionを重複させません。

@@ -86,6 +86,10 @@ provider-neutralな自己申告lineageであり、外部provider側のfreshness�
 clean auditではdraft、findings、claim comparison、requirement map、revision history、再生確認SourceRefを
 human-review packageへ整理します。このpackageは`is_approval: false`で、人間承認を代行しません。
 
+人間承認はsemantic roleではありません。`vep approve`で人間がtarget SHA、reviewer identity、basis、`--confirm`を
+明示するhuman laneの操作だけを許可し、Skill／AI executor／fixture responseにapproval capabilityを与えません。
+reviewer identityはCLIでassertされたlineageであり、外部identity providerによる本人確認を意味しません。
+
 ## 7. Auditability
 
 各AI実行はrole、Skill ID/version、provider/model、context ID、input/output hash、日時、

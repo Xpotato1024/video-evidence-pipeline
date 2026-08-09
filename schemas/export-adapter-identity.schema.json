@@ -1,0 +1,31 @@
+{
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/export-adapter-identity.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "const": "adapter",
+      "default": "adapter",
+      "title": "Kind",
+      "type": "string"
+    },
+    "name": {
+      "const": "markdown-byte-exact",
+      "default": "markdown-byte-exact",
+      "title": "Name",
+      "type": "string"
+    },
+    "version": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "version"
+  ],
+  "title": "ExportAdapterIdentity",
+  "type": "object",
+  "x-schema-version": "1.0"
+}
