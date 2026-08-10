@@ -7,9 +7,11 @@
 > 現在実装済みなのは、core domain contracts、local workspace、`vep` CLI、明示authorization、
 > `local_file`／`direct_http`／`generic_ytdlp`／`panopto`／`box`による
 > acquisition、system FFmpeg／ffprobeによるmedia normalization、caption-first transcription、
-> provider-neutralなevidence prepare／import、private SQLite FTS5 searchです。実動作するstate pathは
-> `CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → EVIDENCE_READY`です。
-> authoring／audit／approval／exportは未実装です。
+> provider-neutralなevidence／authoring／independent-audit／revision prepare／import、private SQLite FTS5
+> search、人間確認package作成です。直線経路は
+> `CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → EVIDENCE_READY → DRAFTED → AUDITED → HUMAN_REVIEW_READY`、
+> material findingがある経路は最大2回の`REVISION_REQUIRED → DRAFTED → AUDITED`を経て、未解消なら
+> `BLOCKED`です。human approval／exportは未実装です。
 
 ## Quickstart
 
@@ -35,7 +37,7 @@ uv run vep acquire .local/jobs/demo-report
 uv run vep normalize .local/jobs/demo-report
 uv run vep transcribe .local/jobs/demo-report --preferred-language ja
 uv run vep evidence prepare .local/jobs/demo-report
-# evidence/request.jsonを固定入力として外部analystがresponse.jsonを作成する
+# evidence/request.jsonを固定入力として、認可済みのprovider-neutralなresponse.jsonを別途用意する
 uv run vep evidence import .local/jobs/demo-report --response /path/to/response.json
 uv run vep index build .local/jobs/demo-report
 uv run vep search .local/jobs/demo-report "検索語" --limit 20
@@ -48,6 +50,12 @@ raw sourceは`.local/`配下へcontent-addressedに保存され、上書きさ�
 captionが十分ならASR package／modelは不要です。不足区間だけASRを使用する場合も、明示された完全な
 local model directoryをofflineで使用し、暗黙downloadやcloud送信を行いません。外部APIを使った
 evidence responseのimportにはjobの`allow_external_api`認可が必要です。
+authoring／audit／revisionの`external_exchange` public production importは、対応するrepository-local Skillが
+`active`になっている場合だけ利用できます。現行のactive Skillは`draft-video-report`、`draft-video-summary`、
+`independent-content-audit`、`revise-from-audit`で、いずれも明示選択専用（`automatic_trigger = false`）かつ
+`instruction-only`です。`analyze-video-evidence`と`prepare-human-review`はdraftのままで、このproduction
+routeには使用しません。allowlist内のSkillがdraftならimportは`DRAFT_SKILL_FORBIDDEN`でfail closedします。
+synthetic fixture実行は内部test routeだけです。
 
 ## Pipeline
 
@@ -109,6 +117,6 @@ CIは実データや実credentialを使用しません。
 
 ## Status
 
-- Implemented: core contracts、generated Schema、CLI、local workspace、local／network acquisition、media normalization、transcription、evidence ledger、private FTS5 cache
-- Current state path: `CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → EVIDENCE_READY`
-- Next: authoring／independent audit／human review（親ロードマップの後続Issue）
+- Implemented: core contracts、generated Schema、CLI、local workspace、local／network acquisition、media normalization、transcription、evidence ledger、private FTS5 cache、bounded authoring／independent audit／revision、人間確認package
+- Current state path: `… → EVIDENCE_READY → DRAFTED → AUDITED → HUMAN_REVIEW_READY`、または最大2回のrevision後に`BLOCKED`
+- Next: hash-bound human approval／export（親ロードマップの後続Issue）

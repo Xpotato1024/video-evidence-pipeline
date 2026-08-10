@@ -1,0 +1,84 @@
+{
+  "$defs": {
+    "AgentExecutionMode": {
+      "enum": [
+        "external_exchange",
+        "test_fixture"
+      ],
+      "title": "AgentExecutionMode",
+      "type": "string"
+    },
+    "AgentRole": {
+      "enum": [
+        "author",
+        "auditor",
+        "reviser"
+      ],
+      "title": "AgentRole",
+      "type": "string"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/agent-identity.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "context_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+      "title": "Context Id",
+      "type": "string"
+    },
+    "execution_mode": {
+      "$ref": "#/$defs/AgentExecutionMode"
+    },
+    "executor": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": ".*\\S.*",
+      "title": "Executor",
+      "type": "string"
+    },
+    "external_api_used": {
+      "title": "External Api Used",
+      "type": "boolean"
+    },
+    "model": {
+      "maxLength": 256,
+      "minLength": 1,
+      "pattern": ".*\\S.*",
+      "title": "Model",
+      "type": "string"
+    },
+    "provider": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": ".*\\S.*",
+      "title": "Provider",
+      "type": "string"
+    },
+    "role": {
+      "$ref": "#/$defs/AgentRole"
+    },
+    "version": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": ".*\\S.*",
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "role",
+    "provider",
+    "model",
+    "version",
+    "executor",
+    "context_id",
+    "execution_mode",
+    "external_api_used"
+  ],
+  "title": "AgentIdentity",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

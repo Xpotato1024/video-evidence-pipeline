@@ -1,0 +1,62 @@
+schema_version = "1.0"
+skill_id = "revise-from-audit"
+skill_path = ".agents/skills/revise-from-audit/SKILL.md"
+skill_content_sha256 = "99c666bae3542e5fc66ff530f3caea5c52319f21f2b88ae94fb81990251a0528"
+eval_definition_path = ".agents/skill-evals/revise-from-audit.toml"
+eval_definition_sha256 = "d385c53d91bbe3ed607a12f33b93ea6459461fb472213b01f8235a724541e7c2"
+evaluated_commit_sha = "d8a2115b72a02944f452fbbb41d39e11419946bd"
+evaluated_at = "2026-08-10T04:12:41Z"
+evaluator_identity = "OpenAI Codex GPT-5.6 Sol"
+evaluator_method = "fresh-context synthetic Skill run plus public production import validation"
+finding_summary = "P0=0; P1=0; bounded deletion and evidence-missing unresolved cases passed"
+side_effect_policy = "instruction-only"
+total_score = 10
+maximum_score = 10
+threshold = 9
+p0_count = 0
+p1_count = 0
+p2_count = 0
+promotion_eligible = true
+required_artifacts = [
+  "src/video_evidence_pipeline/domain/authoring.py",
+  "src/video_evidence_pipeline/authoring/pipeline.py",
+  "schemas/revision-request-manifest.schema.json",
+  "schemas/revision-response-manifest.schema.json",
+  "schemas/revision-manifest.schema.json",
+]
+
+[owner_review]
+owner = "Xpotato1024"
+approved = true
+method = "explicit_task_authorization"
+reviewed_at = "2026-08-10T04:12:41Z"
+
+[[case_results]]
+case_id = "bounded-revision"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["fresh synthetic revision case D", "tests/test_authoring_pipeline.py::test_public_production_revision_route_uses_distinct_external_contexts"]
+criteria = [
+  { id = "finding-resolution-binding", passed = true, evidence = "deletion was recorded against AF1" },
+  { id = "exact-evidence-binding", passed = true, evidence = "resolution retained AF1 exact evidence set" },
+  { id = "anchored-diff", passed = true, evidence = "only the anchored guarantee sentence was removed" },
+  { id = "no-broad-rewrite", passed = true, evidence = "supported overshoot sentence was unchanged" },
+  { id = "unresolved-retained", passed = true, evidence = "resolution ledger explicitly accounted for AF1" },
+]
+
+[[case_results]]
+case_id = "unsupported-fix"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["fresh synthetic revision case F"]
+criteria = [
+  { id = "unsupported-fix-detected", passed = true, evidence = "missing percentage evidence was detected" },
+  { id = "defer-or-escalate", passed = true, evidence = "AF2 was blocked pending evidence or requirement revision" },
+  { id = "finding-preserved", passed = true, evidence = "AF2 remained unresolved P1" },
+  { id = "no-invented-evidence", passed = true, evidence = "no percentage was invented" },
+  { id = "no-scope-expansion", passed = true, evidence = "other supported content was not changed" },
+]

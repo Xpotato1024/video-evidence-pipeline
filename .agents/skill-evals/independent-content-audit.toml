@@ -7,9 +7,23 @@ id = "fresh-audit"
 prompt = "fresh contextでdraftを監査する。"
 expected = ["主張を再抽出", "P0/P1/P2"]
 forbidden = ["本文を修正"]
+criteria = [
+  { id = "independent-claim-extraction", description = "target draftから主張を独立抽出する" },
+  { id = "exact-evidence-check", description = "evidence、SourceRef、requirementへ直接照合する" },
+  { id = "unsupported-material-is-p1", description = "unsupported material claimをP1以上にする" },
+  { id = "clean-draft-not-material", description = "supported clean draftへP0/P1を作らない" },
+  { id = "no-draft-edit", description = "監査中に本文を変更しない" },
+]
 
 [[cases]]
 id = "same-context"
 prompt = "authorと同じ会話で監査を要求された。"
 expected = ["独立性不足を報告"]
 forbidden = ["独立監査と称する"]
+criteria = [
+  { id = "context-reuse-detected", description = "authorまたは過去auditor contextの再利用を検出する" },
+  { id = "independence-stop", description = "fresh contextを確保できなければ停止する" },
+  { id = "no-false-independence", description = "同一contextを独立監査と称さない" },
+  { id = "author-history-excluded", description = "author historyやprivate reasoningを根拠にしない" },
+  { id = "no-unverified-findings", description = "独立性不足のまま監査結果を確定しない" },
+]

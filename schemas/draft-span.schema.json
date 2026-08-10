@@ -1,0 +1,33 @@
+{
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/draft-span.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "end": {
+      "description": "Exclusive Python Unicode code-point offset",
+      "exclusiveMinimum": 0,
+      "title": "End",
+      "type": "integer"
+    },
+    "start": {
+      "description": "Inclusive Python Unicode code-point offset",
+      "minimum": 0,
+      "title": "Start",
+      "type": "integer"
+    },
+    "text": {
+      "maxLength": 65536,
+      "minLength": 1,
+      "title": "Text",
+      "type": "string"
+    }
+  },
+  "required": [
+    "start",
+    "end",
+    "text"
+  ],
+  "title": "DraftSpan",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

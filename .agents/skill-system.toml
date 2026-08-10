@@ -14,6 +14,7 @@ lifecycle = "active"
 automatic_trigger = false
 side_effect_policy = "read-only"
 eval_path = ".agents/skill-evals/repository-sot-audit.toml"
+eval_result_path = ".agents/skill-eval-results/repository-sot-audit.toml"
 owner = "Xpotato1024"
 required_capabilities = ["filesystem-read", "command-execution"]
 
@@ -30,40 +31,44 @@ required_capabilities = ["evidence-bundle-read"]
 [[skills]]
 id = "draft-video-report"
 path = ".agents/skills/draft-video-report/SKILL.md"
-lifecycle = "draft"
+lifecycle = "active"
 automatic_trigger = false
 side_effect_policy = "instruction-only"
 eval_path = ".agents/skill-evals/draft-video-report.toml"
+eval_result_path = ".agents/skill-eval-results/draft-video-report.toml"
 owner = "Xpotato1024"
 required_capabilities = ["validated-evidence-read"]
 
 [[skills]]
 id = "draft-video-summary"
 path = ".agents/skills/draft-video-summary/SKILL.md"
-lifecycle = "draft"
+lifecycle = "active"
 automatic_trigger = false
 side_effect_policy = "instruction-only"
 eval_path = ".agents/skill-evals/draft-video-summary.toml"
+eval_result_path = ".agents/skill-eval-results/draft-video-summary.toml"
 owner = "Xpotato1024"
 required_capabilities = ["validated-evidence-read"]
 
 [[skills]]
 id = "independent-content-audit"
 path = ".agents/skills/independent-content-audit/SKILL.md"
-lifecycle = "draft"
+lifecycle = "active"
 automatic_trigger = false
 side_effect_policy = "instruction-only"
 eval_path = ".agents/skill-evals/independent-content-audit.toml"
+eval_result_path = ".agents/skill-eval-results/independent-content-audit.toml"
 owner = "Xpotato1024"
 required_capabilities = ["fresh-context", "audit-bundle-read"]
 
 [[skills]]
 id = "revise-from-audit"
 path = ".agents/skills/revise-from-audit/SKILL.md"
-lifecycle = "draft"
+lifecycle = "active"
 automatic_trigger = false
 side_effect_policy = "instruction-only"
 eval_path = ".agents/skill-evals/revise-from-audit.toml"
+eval_result_path = ".agents/skill-eval-results/revise-from-audit.toml"
 owner = "Xpotato1024"
 required_capabilities = ["validated-evidence-read", "audit-findings-read"]
 

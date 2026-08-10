@@ -5,27 +5,32 @@ description: 検証済み証拠から、論証レポートとは別契約の要�
 # draft-video-summary
 
 
-## Status guard
+## Execution boundary
 
-このSkillはdraftであり、evidence Schema実装前は実運用しない。
+このSkillは明示選択されたsemantic responseだけを生成するinstruction-only contractである。
+request検証、workspace書込み、artifact公開、state transitionはdeterministic executorだけが行う。
+外部API利用はjob authorizationが明示的に許可する場合に限る。
 
 ## Inputs
 
 - validated evidence bundle
-- summary purpose／length／audience
+- assignment requirements
+- summary purpose／length／audience and output constraints
 
 ## Outputs
 
-- summary draft
-- topic coverage map
-- omitted-topic rationale
+- provider-neutral summary draft
+- evidenceへ束縛したclaim records
+- requirement／topic coverage map
+- omitted-topic rationale and unresolved item list
 
 ## Procedure
 
 1. 目的に応じて中心命題と主要論点を選ぶ。
 2. 時系列ではなく情報構造を優先する。
-3. 重要な例外、条件、結論を保持する。
-4. 考察を要求されない限り新しい評価を加えない。
+3. 各claimを許可されたevidence IDとrequirement IDへ対応させる。
+4. 重要な例外、条件、結論を保持する。
+5. 考察を要求されない限り新しい評価を加えず、ユーザー意見を生成しない。
 
 ## Stop conditions
 
@@ -35,4 +40,6 @@ description: 検証済み証拠から、論証レポートとは別契約の要�
 ## Prohibited behavior
 
 - レポート用のユーザー意見を要約へ混入する
+- evidenceにない評価、事実、timestampを追加する
+- workspace、Git、GitHub、外部serviceへ書込む
 

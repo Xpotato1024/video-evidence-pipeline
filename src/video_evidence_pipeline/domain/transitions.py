@@ -52,6 +52,12 @@ IMPLEMENTED_TRANSITIONS = {
     (JobState.ACQUIRED, JobState.NORMALIZED),
     (JobState.NORMALIZED, JobState.TRANSCRIBED),
     (JobState.TRANSCRIBED, JobState.EVIDENCE_READY),
+    (JobState.EVIDENCE_READY, JobState.DRAFTED),
+    (JobState.DRAFTED, JobState.AUDITED),
+    (JobState.AUDITED, JobState.REVISION_REQUIRED),
+    (JobState.REVISION_REQUIRED, JobState.DRAFTED),
+    (JobState.AUDITED, JobState.HUMAN_REVIEW_READY),
+    (JobState.AUDITED, JobState.BLOCKED),
 }
 
 

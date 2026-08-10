@@ -165,7 +165,14 @@
     },
     "input_artifacts": {
       "items": {
-        "$ref": "#/$defs/ArtifactRef"
+        "anyOf": [
+          {
+            "$ref": "#/$defs/EvidenceLedgerArtifactRef"
+          },
+          {
+            "$ref": "#/$defs/ArtifactRef"
+          }
+        ]
       },
       "title": "Input Artifacts",
       "type": "array"

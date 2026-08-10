@@ -1,0 +1,1235 @@
+{
+  "$defs": {
+    "AmbiguityRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "ambiguity_id": {
+          "pattern": "^A[0-9]{6}$",
+          "title": "Ambiguity Id",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "end_ms": {
+          "exclusiveMinimum": 0,
+          "title": "End Ms",
+          "type": "integer"
+        },
+        "resolution": {
+          "anyOf": [
+            {
+              "maxLength": 65536,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolution"
+        },
+        "review_status": {
+          "$ref": "#/$defs/ReviewStatus",
+          "default": "needs_review"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source_refs": {
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "maxItems": 128,
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "start_ms": {
+          "minimum": 0,
+          "title": "Start Ms",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/AmbiguityStatus",
+          "default": "unresolved"
+        }
+      },
+      "required": [
+        "ambiguity_id",
+        "description",
+        "start_ms",
+        "end_ms"
+      ],
+      "title": "AmbiguityRecord",
+      "type": "object"
+    },
+    "AmbiguityStatus": {
+      "enum": [
+        "unresolved",
+        "resolved"
+      ],
+      "title": "AmbiguityStatus",
+      "type": "string"
+    },
+    "AnalyzerContract": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "const": "video-evidence-analyzer",
+          "default": "video-evidence-analyzer",
+          "title": "Name",
+          "type": "string"
+        },
+        "response_schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Response Schema Version",
+          "type": "string"
+        },
+        "version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "title": "AnalyzerContract",
+      "type": "object"
+    },
+    "AnalyzerExecutionMode": {
+      "enum": [
+        "external_exchange",
+        "test_fixture"
+      ],
+      "title": "AnalyzerExecutionMode",
+      "type": "string"
+    },
+    "AnalyzerIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_mode": {
+          "$ref": "#/$defs/AnalyzerExecutionMode"
+        },
+        "executor": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Executor",
+          "type": "string"
+        },
+        "external_api_used": {
+          "title": "External Api Used",
+          "type": "boolean"
+        },
+        "model": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "provider": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "model",
+        "version",
+        "executor",
+        "execution_mode",
+        "external_api_used"
+      ],
+      "title": "AnalyzerIdentity",
+      "type": "object"
+    },
+    "ArtifactRef": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "artifact_type": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Artifact Type",
+          "type": "string"
+        },
+        "content_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "relative_storage_path": {
+          "title": "Relative Storage Path",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "artifact_type",
+        "content_sha256",
+        "size_bytes",
+        "relative_storage_path"
+      ],
+      "title": "ArtifactRef",
+      "type": "object"
+    },
+    "AssignmentRequirement": {
+      "additionalProperties": false,
+      "properties": {
+        "requirement_id": {
+          "pattern": "^R[0-9]{6}$",
+          "title": "Requirement Id",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "requirement_id",
+        "text"
+      ],
+      "title": "AssignmentRequirement",
+      "type": "object"
+    },
+    "EvidenceAssignmentContext": {
+      "additionalProperties": false,
+      "properties": {
+        "language": {
+          "maxLength": 32,
+          "minLength": 2,
+          "title": "Language",
+          "type": "string"
+        },
+        "requirements": {
+          "items": {
+            "$ref": "#/$defs/AssignmentRequirement"
+          },
+          "maxItems": 100,
+          "title": "Requirements",
+          "type": "array"
+        },
+        "task_type": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Task Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_type",
+        "language"
+      ],
+      "title": "EvidenceAssignmentContext",
+      "type": "object"
+    },
+    "EvidenceConfidence": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "EvidenceConfidence",
+      "type": "string"
+    },
+    "EvidenceLedgerArtifactRef": {
+      "additionalProperties": false,
+      "description": "Artifact reference for canonical evidence JSONL, including a zero-line ledger.",
+      "properties": {
+        "artifact_id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "artifact_type": {
+          "const": "evidence_records",
+          "default": "evidence_records",
+          "title": "Artifact Type",
+          "type": "string"
+        },
+        "content_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "relative_storage_path": {
+          "title": "Relative Storage Path",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "content_sha256",
+        "size_bytes",
+        "relative_storage_path"
+      ],
+      "title": "EvidenceLedgerArtifactRef",
+      "type": "object"
+    },
+    "EvidenceManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "ambiguity_artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "ambiguity_count": {
+          "minimum": 0,
+          "title": "Ambiguity Count",
+          "type": "integer"
+        },
+        "analyzer": {
+          "$ref": "#/$defs/AnalyzerIdentity"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "evidence_artifact": {
+          "$ref": "#/$defs/EvidenceLedgerArtifactRef"
+        },
+        "evidence_bundle_fingerprint": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Evidence Bundle Fingerprint",
+          "type": "string"
+        },
+        "evidence_count": {
+          "minimum": 0,
+          "title": "Evidence Count",
+          "type": "integer"
+        },
+        "implementation_version": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Implementation Version",
+          "type": "string"
+        },
+        "job_id": {
+          "maxLength": 63,
+          "minLength": 1,
+          "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+          "title": "Job Id",
+          "type": "string"
+        },
+        "media_bundle_fingerprint": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Media Bundle Fingerprint",
+          "type": "string"
+        },
+        "request_fingerprint": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Request Fingerprint",
+          "type": "string"
+        },
+        "response_artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "response_created_at": {
+          "format": "date-time",
+          "title": "Response Created At",
+          "type": "string"
+        },
+        "response_fingerprint": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Response Fingerprint",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        },
+        "transcript_bundle_fingerprint": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Transcript Bundle Fingerprint",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "evidence_bundle_fingerprint",
+        "transcript_bundle_fingerprint",
+        "media_bundle_fingerprint",
+        "request_fingerprint",
+        "response_fingerprint",
+        "response_created_at",
+        "implementation_version",
+        "analyzer",
+        "response_artifact",
+        "evidence_artifact",
+        "ambiguity_artifact",
+        "evidence_count",
+        "ambiguity_count",
+        "started_at",
+        "created_at"
+      ],
+      "title": "EvidenceManifest",
+      "type": "object"
+    },
+    "EvidenceRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "asserted_as_video_fact": {
+          "default": false,
+          "title": "Asserted As Video Fact",
+          "type": "boolean"
+        },
+        "confidence": {
+          "$ref": "#/$defs/EvidenceConfidence"
+        },
+        "evidence_id": {
+          "pattern": "^E[0-9]{6}$",
+          "title": "Evidence Id",
+          "type": "string"
+        },
+        "flags": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Flags",
+          "type": "array"
+        },
+        "interpretation_level": {
+          "$ref": "#/$defs/InterpretationLevel"
+        },
+        "observation": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Observation",
+          "type": "string"
+        },
+        "review_status": {
+          "$ref": "#/$defs/ReviewStatus",
+          "default": "unreviewed"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source_refs": {
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Source Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "evidence_id",
+        "observation",
+        "interpretation_level",
+        "confidence",
+        "source_refs"
+      ],
+      "title": "EvidenceRecord",
+      "type": "object"
+    },
+    "EvidenceRequestManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "analyzer_contract": {
+          "$ref": "#/$defs/AnalyzerContract"
+        },
+        "approved_artifact_refs": {
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "maxItems": 1024,
+          "title": "Approved Artifact Refs",
+          "type": "array"
+        },
+        "approved_artifacts": {
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "maxItems": 1024,
+          "title": "Approved Artifacts",
+          "type": "array"
+        },
+        "assignment": {
+          "$ref": "#/$defs/EvidenceAssignmentContext"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "duration_ms": {
+          "exclusiveMinimum": 0,
+          "title": "Duration Ms",
+          "type": "integer"
+        },
+        "frame_records": {
+          "items": {
+            "$ref": "#/$defs/FrameRecord"
+          },
+          "maxItems": 100000,
+          "title": "Frame Records",
+          "type": "array"
+        },
+        "frame_refs": {
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "maxItems": 100000,
+          "title": "Frame Refs",
+          "type": "array"
+        },
+        "job_id": {
+          "maxLength": 63,
+          "minLength": 1,
+          "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+          "title": "Job Id",
+          "type": "string"
+        },
+        "media_bundle_fingerprint": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Media Bundle Fingerprint",
+          "type": "string"
+        },
+        "request_fingerprint": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Request Fingerprint",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "transcript_bundle_fingerprint": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Transcript Bundle Fingerprint",
+          "type": "string"
+        },
+        "transcript_refs": {
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "maxItems": 100000,
+          "minItems": 1,
+          "title": "Transcript Refs",
+          "type": "array"
+        },
+        "transcript_segments": {
+          "items": {
+            "$ref": "#/$defs/TranscriptSegment"
+          },
+          "maxItems": 100000,
+          "minItems": 1,
+          "title": "Transcript Segments",
+          "type": "array"
+        },
+        "unresolved_ambiguities": {
+          "items": {
+            "$ref": "#/$defs/AmbiguityRecord"
+          },
+          "maxItems": 100000,
+          "title": "Unresolved Ambiguities",
+          "type": "array"
+        }
+      },
+      "required": [
+        "job_id",
+        "request_fingerprint",
+        "transcript_bundle_fingerprint",
+        "media_bundle_fingerprint",
+        "duration_ms",
+        "assignment",
+        "analyzer_contract",
+        "transcript_segments",
+        "transcript_refs",
+        "created_at"
+      ],
+      "title": "EvidenceRequestManifest",
+      "type": "object"
+    },
+    "FixedEvidenceBundle": {
+      "additionalProperties": false,
+      "properties": {
+        "ambiguity_records": {
+          "items": {
+            "$ref": "#/$defs/AmbiguityRecord"
+          },
+          "maxItems": 100000,
+          "title": "Ambiguity Records",
+          "type": "array"
+        },
+        "evidence_manifest": {
+          "$ref": "#/$defs/EvidenceManifest"
+        },
+        "evidence_records": {
+          "items": {
+            "$ref": "#/$defs/EvidenceRecord"
+          },
+          "maxItems": 100000,
+          "title": "Evidence Records",
+          "type": "array"
+        },
+        "evidence_request": {
+          "$ref": "#/$defs/EvidenceRequestManifest"
+        },
+        "fixed_evidence_fingerprint": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Fixed Evidence Fingerprint",
+          "type": "string"
+        },
+        "job_id": {
+          "maxLength": 63,
+          "minLength": 1,
+          "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+          "title": "Job Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "fixed_evidence_fingerprint",
+        "evidence_request",
+        "evidence_manifest",
+        "evidence_records"
+      ],
+      "title": "FixedEvidenceBundle",
+      "type": "object"
+    },
+    "FrameReason": {
+      "enum": [
+        "periodic",
+        "scene-change"
+      ],
+      "title": "FrameReason",
+      "type": "string"
+    },
+    "FrameRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "candidate_timestamps_ms": {
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 1,
+          "title": "Candidate Timestamps Ms",
+          "type": "array"
+        },
+        "frame_id": {
+          "pattern": "^F[0-9]{6}$",
+          "title": "Frame Id",
+          "type": "string"
+        },
+        "perceptual_hash": {
+          "pattern": "^[0-9a-f]{16}$",
+          "title": "Perceptual Hash",
+          "type": "string"
+        },
+        "reasons": {
+          "items": {
+            "$ref": "#/$defs/FrameReason"
+          },
+          "maxItems": 2,
+          "minItems": 1,
+          "title": "Reasons",
+          "type": "array"
+        },
+        "timestamp_ms": {
+          "minimum": 0,
+          "title": "Timestamp Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "frame_id",
+        "timestamp_ms",
+        "artifact",
+        "perceptual_hash",
+        "reasons",
+        "candidate_timestamps_ms"
+      ],
+      "title": "FrameRecord",
+      "type": "object"
+    },
+    "InterpretationLevel": {
+      "enum": [
+        "verbatim",
+        "explicit_statement",
+        "visual_observation",
+        "reasonable_inference",
+        "speculation",
+        "user_opinion",
+        "external_fact"
+      ],
+      "title": "InterpretationLevel",
+      "type": "string"
+    },
+    "OutputConstraints": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Format",
+          "type": "string"
+        },
+        "language": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Language",
+          "type": "string"
+        },
+        "requirements": {
+          "items": {
+            "$ref": "#/$defs/AssignmentRequirement"
+          },
+          "maxItems": 100,
+          "title": "Requirements",
+          "type": "array"
+        },
+        "task_type": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Task Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "format",
+        "language",
+        "task_type",
+        "requirements"
+      ],
+      "title": "OutputConstraints",
+      "type": "object"
+    },
+    "ReviewStatus": {
+      "enum": [
+        "unreviewed",
+        "needs_review",
+        "accepted",
+        "rejected"
+      ],
+      "title": "ReviewStatus",
+      "type": "string"
+    },
+    "SegmentLineage": {
+      "additionalProperties": false,
+      "properties": {
+        "backend_identity_fingerprint": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Backend Identity Fingerprint",
+          "type": "string"
+        },
+        "source_artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "source_record_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Source Record Id",
+          "type": "string"
+        },
+        "source_stream_index": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Stream Index"
+        },
+        "subtitle_provenance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SubtitleProvenance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "source_artifact",
+        "source_record_id",
+        "backend_identity_fingerprint"
+      ],
+      "title": "SegmentLineage",
+      "type": "object"
+    },
+    "SkillSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "automatic_trigger": {
+          "const": false,
+          "default": false,
+          "title": "Automatic Trigger",
+          "type": "boolean"
+        },
+        "content_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "eval_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Eval Sha256",
+          "type": "string"
+        },
+        "explicit_selection": {
+          "const": true,
+          "default": true,
+          "title": "Explicit Selection",
+          "type": "boolean"
+        },
+        "lifecycle": {
+          "enum": [
+            "draft",
+            "active"
+          ],
+          "title": "Lifecycle",
+          "type": "string"
+        },
+        "owner": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Owner",
+          "type": "string"
+        },
+        "relative_path": {
+          "pattern": "^\\.agents/skills/[a-z0-9-]+/SKILL\\.md$",
+          "title": "Relative Path",
+          "type": "string"
+        },
+        "side_effect_policy": {
+          "const": "instruction-only",
+          "default": "instruction-only",
+          "title": "Side Effect Policy",
+          "type": "string"
+        },
+        "skill_id": {
+          "pattern": "^[a-z0-9][a-z0-9-]{0,127}$",
+          "title": "Skill Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "skill_id",
+        "relative_path",
+        "content_sha256",
+        "eval_sha256",
+        "lifecycle",
+        "owner"
+      ],
+      "title": "SkillSnapshot",
+      "type": "object"
+    },
+    "SourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "content_sha256": {
+          "description": "Transcript-record semantic fingerprint or canonical frame artifact SHA-256",
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "end_ms": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Ms"
+        },
+        "kind": {
+          "$ref": "#/$defs/SourceRefKind"
+        },
+        "ref_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Ref Id",
+          "type": "string"
+        },
+        "start_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Ms"
+        }
+      },
+      "required": [
+        "kind",
+        "ref_id",
+        "content_sha256"
+      ],
+      "title": "SourceRef",
+      "type": "object"
+    },
+    "SourceRefKind": {
+      "enum": [
+        "transcript_segment",
+        "frame",
+        "approved_artifact"
+      ],
+      "title": "SourceRefKind",
+      "type": "string"
+    },
+    "SubtitleProvenance": {
+      "enum": [
+        "embedded",
+        "official",
+        "sidecar"
+      ],
+      "title": "SubtitleProvenance",
+      "type": "string"
+    },
+    "TranscriptConfidence": {
+      "additionalProperties": false,
+      "description": "Raw confidence metadata, deliberately not a calibrated probability.",
+      "properties": {
+        "avg_logprob": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Avg Logprob"
+        },
+        "kind": {
+          "$ref": "#/$defs/TranscriptConfidenceKind"
+        },
+        "no_speech_probability": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "No Speech Probability"
+        },
+        "word_probability_count": {
+          "default": 0,
+          "maximum": 1000000,
+          "minimum": 0,
+          "title": "Word Probability Count",
+          "type": "integer"
+        },
+        "word_probability_max": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Word Probability Max"
+        },
+        "word_probability_mean": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Word Probability Mean"
+        },
+        "word_probability_min": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Word Probability Min"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "TranscriptConfidence",
+      "type": "object"
+    },
+    "TranscriptConfidenceKind": {
+      "enum": [
+        "not_available",
+        "backend_metric"
+      ],
+      "title": "TranscriptConfidenceKind",
+      "type": "string"
+    },
+    "TranscriptSegment": {
+      "additionalProperties": false,
+      "properties": {
+        "confidence": {
+          "$ref": "#/$defs/TranscriptConfidence"
+        },
+        "end_ms": {
+          "exclusiveMinimum": 0,
+          "title": "End Ms",
+          "type": "integer"
+        },
+        "flags": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Flags",
+          "type": "array"
+        },
+        "lineage": {
+          "$ref": "#/$defs/SegmentLineage"
+        },
+        "normalized_text": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Normalized Text",
+          "type": "string"
+        },
+        "raw_text": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Raw Text",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "segment_id": {
+          "pattern": "^T[0-9]{6}$",
+          "title": "Segment Id",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/TranscriptSource"
+        },
+        "speaker": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Speaker"
+        },
+        "start_ms": {
+          "minimum": 0,
+          "title": "Start Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "segment_id",
+        "start_ms",
+        "end_ms",
+        "raw_text",
+        "normalized_text",
+        "source",
+        "confidence",
+        "lineage"
+      ],
+      "title": "TranscriptSegment",
+      "type": "object"
+    },
+    "TranscriptSource": {
+      "enum": [
+        "normalized_subtitle",
+        "asr"
+      ],
+      "title": "TranscriptSource",
+      "type": "string"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/authoring-request-manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "draft_version": {
+      "const": "v001",
+      "default": "v001",
+      "title": "Draft Version",
+      "type": "string"
+    },
+    "fixed_evidence": {
+      "$ref": "#/$defs/FixedEvidenceBundle"
+    },
+    "job_id": {
+      "maxLength": 63,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+      "title": "Job Id",
+      "type": "string"
+    },
+    "output_constraints": {
+      "$ref": "#/$defs/OutputConstraints"
+    },
+    "request_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Request Fingerprint",
+      "type": "string"
+    },
+    "revision_count": {
+      "const": 0,
+      "default": 0,
+      "title": "Revision Count",
+      "type": "integer"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "skill": {
+      "$ref": "#/$defs/SkillSnapshot"
+    }
+  },
+  "required": [
+    "job_id",
+    "request_fingerprint",
+    "fixed_evidence",
+    "output_constraints",
+    "skill",
+    "created_at"
+  ],
+  "title": "AuthoringRequestManifest",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

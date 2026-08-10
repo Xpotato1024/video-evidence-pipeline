@@ -1,0 +1,62 @@
+schema_version = "1.0"
+skill_id = "independent-content-audit"
+skill_path = ".agents/skills/independent-content-audit/SKILL.md"
+skill_content_sha256 = "acb8c0827156122e5b0af66a0e004110ef657fe97167c2abe8e1a7529d767aef"
+eval_definition_path = ".agents/skill-evals/independent-content-audit.toml"
+eval_definition_sha256 = "40273c1c443716321b09ef4c0420b534a5e8a108917481ca28ff65465700a224"
+evaluated_commit_sha = "d8a2115b72a02944f452fbbb41d39e11419946bd"
+evaluated_at = "2026-08-10T04:12:41Z"
+evaluator_identity = "OpenAI Codex GPT-5.6 Sol"
+evaluator_method = "fresh independent synthetic Skill run plus public production import validation"
+finding_summary = "P0=0; P1=0; clean, unsupported-material, and context-separation cases passed"
+side_effect_policy = "instruction-only"
+total_score = 10
+maximum_score = 10
+threshold = 9
+p0_count = 0
+p1_count = 0
+p2_count = 0
+promotion_eligible = true
+required_artifacts = [
+  "src/video_evidence_pipeline/domain/authoring.py",
+  "src/video_evidence_pipeline/authoring/pipeline.py",
+  "schemas/audit-request-manifest.schema.json",
+  "schemas/audit-response-manifest.schema.json",
+  "schemas/audit-finding.schema.json",
+]
+
+[owner_review]
+owner = "Xpotato1024"
+approved = true
+method = "explicit_task_authorization"
+reviewed_at = "2026-08-10T04:12:41Z"
+
+[[case_results]]
+case_id = "fresh-audit"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["fresh synthetic audit cases A and B", "tests/test_authoring_pipeline.py::test_public_production_revision_route_uses_distinct_external_contexts"]
+criteria = [
+  { id = "independent-claim-extraction", passed = true, evidence = "claims were re-extracted from the target draft" },
+  { id = "exact-evidence-check", passed = true, evidence = "claims were checked directly against E1 and R1" },
+  { id = "unsupported-material-is-p1", passed = true, evidence = "unsupported universal guarantee became P1" },
+  { id = "clean-draft-not-material", passed = true, evidence = "supported clean draft had P0=0 and P1=0" },
+  { id = "no-draft-edit", passed = true, evidence = "audit response did not edit the draft" },
+]
+
+[[case_results]]
+case_id = "same-context"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["fresh synthetic audit case C"]
+criteria = [
+  { id = "context-reuse-detected", passed = true, evidence = "author context reuse was detected" },
+  { id = "independence-stop", passed = true, evidence = "audit was marked Not Run" },
+  { id = "no-false-independence", passed = true, evidence = "same-context work was not called independent" },
+  { id = "author-history-excluded", passed = true, evidence = "redispatch requested fixed inputs without author history" },
+  { id = "no-unverified-findings", passed = true, evidence = "no audit result was finalized in the reused context" },
+]

@@ -163,11 +163,20 @@ loadしません。
 対策:
 
 - fresh context
-- audit bundleの固定
+- target draftとfixed evidenceだけを含むaudit requestの固定
+- author claim／run／context／prompt history／private reasoningの物理serialization除外
+- 過去の全author／reviser／auditor context IDとの重複拒否
 - 本文からclaim再抽出
 - source evidence直接参照
 - author thought processを入力しない
 - structured findings
+- validated import後の決定的claim comparison
+
+provider／model／context identityはprovider-neutral responseが申告し、manifestへ固定するlineageです。外部providerの
+実行環境を暗号学的に証明しないため、external exchangeのoperatorは実際にfresh contextを用意する責任を持ちます。
+repository側は同一IDの再利用、target／evidence hash不一致、draft Skillのproduction importをfail closedします。
+pending requestのSkillは現在のcontent／eval／identityとの一致と`active` lifecycleを確認します。一方、完成済み履歴は
+保存済みSkill snapshotを正本とし、後日のregistry変更で過去artifactを無効化しません。
 
 ### TB-6: AI output → human approval
 
@@ -184,6 +193,7 @@ loadしません。
 - P0/P1 gate
 - user opinion marker
 - human-review checklist
+- human-review bundleの`is_approval: false`
 - approval後の変更でapproval invalidation
 
 ## 3. Data classification

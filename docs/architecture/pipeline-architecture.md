@@ -26,10 +26,10 @@ related_documents: ["VEP-ARCH-CONTEXT", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-STATE", 
 
 中核は「動画からレポートを生成すること」ではなく、「動画から検証可能な証拠パッケージを構築し、その証拠から任意の成果物を生成すること」です。
 
-現在、Intake / Authorizationのcore contractと、Acquisitionの`local_file`、`direct_http`、
-`generic_ytdlp`、`panopto`、`box`経路が実装済みです。実動作するstate pathは
-`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → EVIDENCE_READY`です。
-authoring以降の層は設計済みですが未実装です。
+現在、Intake / Authorizationからevidence construction、bounded authoring／independent audit／revision、
+human-review packageまで実装済みです。実動作する直線経路は
+`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → EVIDENCE_READY → DRAFTED → AUDITED → HUMAN_REVIEW_READY`
+で、P0／P1が残る経路は最大2回のrevision後に`BLOCKED`です。human approval／exportは未実装です。
 
 ## 2. 層
 
@@ -188,6 +188,19 @@ gateで証明し、source fingerprint、document fingerprint、normalizer、quer
 
 authorはevidenceにない事実を補完してはいけません。
 
+`vep author prepare`はjobに属するfixed selected-evidence bundle、requirements、constraints、Skill snapshotを
+immutable requestへ固定します。provider-neutral response importはclaim typeごとのinterpretation境界、evidence／
+requirementの相互対応、user opinionの`[要確認]`表現、UTF-8 byte上限を検証し、`v001`をprivate stagingから
+exclusive publishします。`external_exchange` public author／audit／revision production importは`active` Skillだけを
+許可し、`draft-video-report`、`draft-video-summary`、`independent-content-audit`、`revise-from-audit`が現在の
+active Skillです。`analyze-video-evidence`と`prepare-human-review`はdraftのままで、このproduction routeの
+allowlistには含めません。allowlist内のSkillがdraftなら`DRAFT_SKILL_FORBIDDEN`でfail closedします。
+request内のSkill snapshotはimmutable lineageとして保持し、完成済み履歴の再検証を現在のregistry内容へ結合しません。
+完成済みのauthor／audit／revision importを同一responseで再実行する場合も、保存済みrequestとcanonical responseの
+完全一致を先に検証し、現在のSkill content／eval／lifecycleは再適格性判定へ使用しません。
+pending production importは、現在のSkillが同じcontent／eval／identityのまま`active`へ昇格した場合だけ許可し、
+それ以外のdriftは`SKILL_SNAPSHOT_STALE`で拒否します。
+
 ### 2.6 Independent Audit
 
 責務:
@@ -200,6 +213,14 @@ authorはevidenceにない事実を補完してはいけません。
 
 監査者は本文を修正しません。
 
+audit requestはtarget draftとfixed evidenceだけをserializationし、author claim ledger、agent run／context、prompt
+history、private reasoningを物理的に含めません。auditor contextは過去の全author／reviser／auditor contextと異なる
+必要があり、provider／model／context identityはmanifestへ記録します。validated response import後にauthor claimとの
+comparison artifactを決定的に生成します。context identityはprovider-neutralな自己申告lineageであり、外部providerの
+実行分離を暗号学的に証明するものではありません。
+全findingはdraft／audit claim／requirementへ束縛し、P0／P1はexact draft spanを必須とします。evidence-linked
+findingは引用したEvidenceRecordのSourceRef unionと完全一致しなければなりません。
+
 ### 2.7 Revision
 
 責務:
@@ -209,7 +230,13 @@ authorはevidenceにない事実を補完してはいけません。
 - resolution ledger
 - revised claim ledger
 
-最大自動反復回数を超えた場合はhuman escalationへ進めます。
+resolution ledgerはfindingごとのaccept／reject／defer、evidence、old／new diff spanを保持します。`v002`／`v003`
+だけを許可し、predecessor、audit、request、response、context historyをfull verifyします。最大2回のrevision後も
+P0／P1が残る場合は`BLOCKED`へ進め、`v004`を生成しません。clean auditではcurrent draft、audit findings、
+claim comparison、requirements、revision historyを`is_approval: false`のhuman-review packageへ固定します。
+ACCEPTのevidenceは対応findingと完全一致し、各insert／replace／delete hunkはそのfindingのexact draft spanへ
+位置的に帰属しなければなりません。old sideを持つhunkはhalf-open spanとしてstrict overlapを要求し、
+zero-width insertionだけは挿入点がanchor境界上または内部にある場合を許可します。
 
 ### 2.8 Human Approval
 
@@ -271,9 +298,15 @@ network sourceは有効な`ACQUIRED` bundleをlocal検証して再利用し、�
 完全な`NORMALIZED` bundleの再実行は、保存済みtool version／executable SHA-256／capabilityを含むfingerprintと
 全artifactをlocal検証し、FFmpeg／ffprobe subprocessを起動せず再利用します。新規処理中はjob lockを保持せず、
 snapshot取得と公開直前のstate／raw hash再検証だけをlock下で行います。
-`TRANSCRIBED`／`EVIDENCE_READY`もprimary manifest、stage manifest、全content artifact、semantic fingerprint、
-lineageをfull verifyしてから再利用します。evidence semantic validationとprivate staging、FTS rebuildability確認中は
-transition log lockを保持せず、公開直前の短いlock区間内で全上流bundleのsemantic fingerprintとcontent hashをfull verifyします。
+`TRANSCRIBED`／`EVIDENCE_READY`／authoring／audit／revision／human-reviewもprimary manifest、stage manifest、
+全content artifact、semantic fingerprint、lineageをfull verifyしてから再利用します。semantic validationとprivate
+staging中はtransition log lockを保持せず、公開直前の短いlock区間内でstate、authorization、job／fixed bundle、
+全履歴artifactのhashとsemantic bindingを再検証し、manifestとtransitionを最後にcommitします。
+author／audit／revisionでcontent artifact公開後かつprimary manifest前にprocessが停止した場合は、最後に公開した
+AgentRunRecordをdurable markerとして全content／request／response／lineageを再検証し、元のtimestampとfingerprint
+から同一manifestを再構築します。human-reviewでは先に公開したbundle自身をdurable markerとし、bundleの`created_at`
+からstage／primary manifestを決定的に再構築します。markerより前のpartial outputは同一contentなら再利用し、
+不一致ならfail closedします。
 
 ## 6. Failure behavior
 

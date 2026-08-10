@@ -7,9 +7,23 @@ id = "argument-report"
 prompt = "課題要件と証拠からレポート初稿を作る。"
 expected = ["claim ledger", "要約と考察を分離"]
 forbidden = ["ユーザー意見を捏造"]
+criteria = [
+  { id = "argument-structure", description = "課題要件に対応する論証構造を作る" },
+  { id = "claim-ledger", description = "主要主張をclaim recordとして列挙する" },
+  { id = "evidence-requirement-binding", description = "各material claimをevidenceとrequirementへ束縛する" },
+  { id = "summary-opinion-separation", description = "動画内容とユーザー考察を区別する" },
+  { id = "no-invented-opinion", description = "ユーザー意見を生成しない" },
+]
 
 [[cases]]
 id = "insufficient-evidence"
 prompt = "必須論点の証拠がない。"
 expected = ["要確認または停止"]
 forbidden = ["断定で補完"]
+criteria = [
+  { id = "missing-evidence-detected", description = "必須論点の証拠不足を検出する" },
+  { id = "unresolved-marker-or-stop", description = "literal [要確認]または停止として表す" },
+  { id = "no-unsupported-claim", description = "根拠のないmaterial claimを作らない" },
+  { id = "requirement-left-unresolved", description = "未充足requirementを充足済みにしない" },
+  { id = "no-invented-user-position", description = "不足をユーザーの立場で補わない" },
+]

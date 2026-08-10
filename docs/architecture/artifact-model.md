@@ -130,11 +130,15 @@ requestに列挙された`approved_artifact` refを必要とします。`reasona
 
 ```json
 {
-  "claim_id": "C0017",
-  "draft_span": {"paragraph": 4, "sentence": 2},
+  "claim_id": "C000017",
+  "draft_span": {
+    "start": 0,
+    "end": 31,
+    "text": "講師は単純なゲイン増加では安定性が保証されないと説明している。"
+  },
   "text": "講師は単純なゲイン増加では安定性が保証されないと説明している。",
   "claim_type": "video_fact",
-  "evidence_ids": ["E0042"],
+  "evidence_ids": ["E000042"],
   "author_confidence": "high"
 }
 ```
@@ -173,7 +177,7 @@ backendが観測できないfinal hostとredirect countは`null`とし、推測�
 
 ## 7. Storage layout
 
-`EVIDENCE_READY`までの実装済みローカル配置:
+`HUMAN_REVIEW_READY`／`BLOCKED`までの実装済みローカル配置:
 
 ```text
 .local/jobs/<job-id>/
@@ -204,17 +208,28 @@ backendが観測できないfinal hostとredirect countは`null`とし、推測�
 ├─ search/
 │  ├─ staging/
 │  └─ index.sqlite3               # private／rebuildable／non-canonical
+├─ semantic/
+│  └─ staging/                     # authoring／audit／revisionのprivate attempt
+├─ authoring/
+│  ├─ requests/{author,audit,revision}-vNNN.json
+│  ├─ responses/<sha256>/{author,audit,revision}-response.json
+│  ├─ drafts/vNNN/{draft.md,claims.jsonl,requirement-map.json,agent-run.json}
+│  ├─ audits/vNNN/{audit-claims.jsonl,findings.json,claim-comparison.jsonl,agent-run.json}
+│  └─ revisions/vNNN/resolutions.jsonl
+├─ human-review/vNNN/bundle.json       # review package; approval recordではない
 ├─ manifests/
 │  ├─ source-manifest.json
 │  ├─ media-manifest.json
 │  ├─ transcript-manifest.json
 │  ├─ evidence-manifest.json
+│  ├─ authoring/{draft-vNNN,audit-vNNN,revision-vNNN,human-review}.json
 │  ├─ transitions.jsonl
 │  └─ stages/
 │     ├─ acquisition.json
 │     ├─ normalization.json
 │     ├─ transcription.json
-│     └─ evidence.json
+│     ├─ evidence.json
+│     └─ {authoring,audit,revision,human-review}-vNNN.json
 └─ logs/
 ```
 
@@ -225,6 +240,10 @@ transcript segmentの`raw_text`は選択caption cueまたはASR backend出力を
 WebVTT decode後のtextなので、元subtitle markupのraw preservationとは区別します。
 `evidence.jsonl`だけは支持可能なrecordが0件の場合にzero-line／zero-byteをcanonical表現とします。
 raw、normalized、transcript、validated response、ambiguity ledgerは引き続きnon-zero artifactです。
+draftは`v001`、revisionは`v002`／`v003`をcontent hashとpredecessor lineageで識別し、pathやversion名だけを
+identityにしません。audit requestはauthor claim／run／contextを含まない独立入力で、claim comparisonはvalidated
+audit import後に生成する別artifactです。human-review bundleはcurrent draft、audit findings、comparison、requirement
+map、revision history、approval target hashを束縛しますが、approval recordではありません。
 
 ## 8. Approval binding
 

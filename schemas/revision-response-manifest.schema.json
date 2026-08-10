@@ -1,0 +1,409 @@
+{
+  "$defs": {
+    "AgentExecutionMode": {
+      "enum": [
+        "external_exchange",
+        "test_fixture"
+      ],
+      "title": "AgentExecutionMode",
+      "type": "string"
+    },
+    "AgentIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "context_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "title": "Context Id",
+          "type": "string"
+        },
+        "execution_mode": {
+          "$ref": "#/$defs/AgentExecutionMode"
+        },
+        "executor": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Executor",
+          "type": "string"
+        },
+        "external_api_used": {
+          "title": "External Api Used",
+          "type": "boolean"
+        },
+        "model": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Model",
+          "type": "string"
+        },
+        "provider": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Provider",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/AgentRole"
+        },
+        "version": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "provider",
+        "model",
+        "version",
+        "executor",
+        "context_id",
+        "execution_mode",
+        "external_api_used"
+      ],
+      "title": "AgentIdentity",
+      "type": "object"
+    },
+    "AgentRole": {
+      "enum": [
+        "author",
+        "auditor",
+        "reviser"
+      ],
+      "title": "AgentRole",
+      "type": "string"
+    },
+    "ClaimConfidence": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "ClaimConfidence",
+      "type": "string"
+    },
+    "ClaimRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "author_confidence": {
+          "$ref": "#/$defs/ClaimConfidence"
+        },
+        "claim_id": {
+          "pattern": "^C[0-9]{6}$",
+          "title": "Claim Id",
+          "type": "string"
+        },
+        "claim_type": {
+          "$ref": "#/$defs/ClaimType"
+        },
+        "draft_span": {
+          "$ref": "#/$defs/DraftSpan"
+        },
+        "evidence_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 256,
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "requirement_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100,
+          "title": "Requirement Ids",
+          "type": "array"
+        },
+        "requires_user_confirmation": {
+          "default": false,
+          "title": "Requires User Confirmation",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "claim_id",
+        "draft_span",
+        "text",
+        "claim_type",
+        "author_confidence"
+      ],
+      "title": "ClaimRecord",
+      "type": "object"
+    },
+    "ClaimType": {
+      "enum": [
+        "video_fact",
+        "visual_fact",
+        "inference",
+        "user_opinion",
+        "external_fact",
+        "transition_or_rhetoric"
+      ],
+      "title": "ClaimType",
+      "type": "string"
+    },
+    "DraftSpan": {
+      "additionalProperties": false,
+      "properties": {
+        "end": {
+          "description": "Exclusive Python Unicode code-point offset",
+          "exclusiveMinimum": 0,
+          "title": "End",
+          "type": "integer"
+        },
+        "start": {
+          "description": "Inclusive Python Unicode code-point offset",
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        },
+        "text": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "text"
+      ],
+      "title": "DraftSpan",
+      "type": "object"
+    },
+    "RequirementCoverage": {
+      "enum": [
+        "satisfied",
+        "partial",
+        "unmet"
+      ],
+      "title": "RequirementCoverage",
+      "type": "string"
+    },
+    "RequirementMap": {
+      "additionalProperties": false,
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/RequirementMapEntry"
+          },
+          "maxItems": 100,
+          "title": "Entries",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "title": "RequirementMap",
+      "type": "object"
+    },
+    "RequirementMapEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10000,
+          "title": "Claim Ids",
+          "type": "array"
+        },
+        "coverage": {
+          "$ref": "#/$defs/RequirementCoverage"
+        },
+        "evidence_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10000,
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "explanation": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Explanation",
+          "type": "string"
+        },
+        "requirement_id": {
+          "pattern": "^R[0-9]{6}$",
+          "title": "Requirement Id",
+          "type": "string"
+        },
+        "requirement_text": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Requirement Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "requirement_id",
+        "requirement_text",
+        "coverage",
+        "explanation"
+      ],
+      "title": "RequirementMapEntry",
+      "type": "object"
+    },
+    "ResolutionDecision": {
+      "enum": [
+        "accept",
+        "reject",
+        "defer"
+      ],
+      "title": "ResolutionDecision",
+      "type": "string"
+    },
+    "ResolutionRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "changed_spans": {
+          "items": {
+            "$ref": "#/$defs/DraftSpan"
+          },
+          "maxItems": 10000,
+          "title": "Changed Spans",
+          "type": "array"
+        },
+        "decision": {
+          "$ref": "#/$defs/ResolutionDecision"
+        },
+        "evidence_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10000,
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "finding_id": {
+          "pattern": "^AF[0-9]{6}$",
+          "title": "Finding Id",
+          "type": "string"
+        },
+        "removed_spans": {
+          "items": {
+            "$ref": "#/$defs/DraftSpan"
+          },
+          "maxItems": 10000,
+          "title": "Removed Spans",
+          "type": "array"
+        },
+        "resolution": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Resolution",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "finding_id",
+        "decision",
+        "resolution"
+      ],
+      "title": "ResolutionRecord",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/revision-response-manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "claims": {
+      "items": {
+        "$ref": "#/$defs/ClaimRecord"
+      },
+      "maxItems": 100000,
+      "minItems": 1,
+      "title": "Claims",
+      "type": "array"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "draft_markdown": {
+      "maxLength": 4194304,
+      "minLength": 1,
+      "title": "Draft Markdown",
+      "type": "string"
+    },
+    "request_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Request Fingerprint",
+      "type": "string"
+    },
+    "requirement_map": {
+      "$ref": "#/$defs/RequirementMap"
+    },
+    "resolutions": {
+      "items": {
+        "$ref": "#/$defs/ResolutionRecord"
+      },
+      "maxItems": 100000,
+      "minItems": 1,
+      "title": "Resolutions",
+      "type": "array"
+    },
+    "reviser": {
+      "$ref": "#/$defs/AgentIdentity"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "request_fingerprint",
+    "reviser",
+    "draft_markdown",
+    "claims",
+    "requirement_map",
+    "resolutions",
+    "created_at"
+  ],
+  "title": "RevisionResponseManifest",
+  "type": "object",
+  "x-schema-version": "1.0"
+}
