@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from enum import StrEnum
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
@@ -79,6 +80,13 @@ _STABLE_QUERY_NAMES = {
     "video",
 }
 _BOX_FILE_ID = re.compile(r"^[0-9]+$")
+_BOX_SHARED_TOKEN = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
+_BOX_ENTERPRISE_HOST = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.ent\.box\.com$")
+
+
+class BoxLocatorKind(StrEnum):
+    FILE_ID = "file_id"
+    SHARED_LINK = "shared_link"
 
 
 def is_sensitive_query_name(name: str) -> bool:
@@ -155,6 +163,8 @@ def canonicalize_panopto_locator(locator: str) -> str:
 
 
 def canonicalize_box_locator(locator: str) -> str:
+    if any(ord(character) < 0x20 or ord(character) == 0x7F for character in locator):
+        raise ValueError("Box locator must not contain control characters")
     candidate = locator.strip()
     if _BOX_FILE_ID.fullmatch(candidate):
         return f"box://file/{candidate}"
@@ -164,6 +174,22 @@ def canonicalize_box_locator(locator: str) -> str:
         if parsed.netloc.lower() != "file" or not match or parsed.query or parsed.fragment:
             raise ValueError("Box locator must identify one file")
         return f"box://file/{match.group(1)}"
+
+    if parsed.scheme.lower() == "https" and parsed.path.startswith("/s/"):
+        if "?" in candidate or "#" in candidate:
+            raise ValueError("Box shared link must not contain a query or fragment")
+        stable = canonicalize_https_locator(candidate, allow_query=False)
+        parsed = urlsplit(stable)
+        host = parsed.hostname or ""
+        if parsed.port not in {None, 443}:
+            raise ValueError("Box shared link must use the default HTTPS port")
+        if host not in {"app.box.com", "www.box.com"} and not _BOX_ENTERPRISE_HOST.fullmatch(host):
+            raise ValueError("Box shared link host is not permitted")
+        match = re.fullmatch(r"/s/([^/]+)", parsed.path)
+        if not match or not _BOX_SHARED_TOKEN.fullmatch(match.group(1)):
+            raise ValueError("Box shared link token is invalid")
+        return stable
+
     stable = canonicalize_https_locator(candidate)
     parsed = urlsplit(stable)
     host = parsed.hostname or ""
@@ -184,5 +210,22 @@ def panopto_identity(locator: str) -> tuple[str, str]:
     return parsed.hostname or "", parsed.path.rsplit("/", 1)[-1]
 
 
+def box_locator_kind(locator: str) -> BoxLocatorKind:
+    canonical = canonicalize_box_locator(locator)
+    if canonical.startswith("box://file/"):
+        return BoxLocatorKind.FILE_ID
+    return BoxLocatorKind.SHARED_LINK
+
+
 def box_file_id(locator: str) -> str:
-    return urlsplit(canonicalize_box_locator(locator)).path.rsplit("/", 1)[-1]
+    canonical = canonicalize_box_locator(locator)
+    if not canonical.startswith("box://file/"):
+        raise ValueError("Box locator does not identify a file ID")
+    return urlsplit(canonical).path.rsplit("/", 1)[-1]
+
+
+def box_shared_link(locator: str) -> str:
+    canonical = canonicalize_box_locator(locator)
+    if canonical.startswith("box://file/"):
+        raise ValueError("Box locator does not identify a shared link")
+    return canonical

@@ -26,6 +26,7 @@ SESSION_ID = "12345678-1234-1234-1234-123456789abc"
 PANOPTO_VIEWER = "https://tenant.hosted.panopto.com/Panopto/Pages/Viewer.aspx?id=" + SESSION_ID
 SIGNED_SECRET = "synthetic-signed-secret"
 TOKEN_SECRET = "synthetic-token-secret"
+BOX_SHARED_LINK = "https://acme.ent.box.com/s/syntheticsharedtoken"
 
 
 def public_resolver(_host: str, _port: int) -> list[str]:
@@ -480,6 +481,291 @@ def test_box_metadata_content_redirect_and_bearer_boundary(
     assert SIGNED_SECRET not in persisted
     assert TOKEN_SECRET not in persisted
     assert "dl.boxcloud.com/d/" not in persisted
+
+
+def test_box_shared_link_resolves_file_and_keeps_credentials_on_api_origin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = b"shared-link synthetic media"
+    requests: list[tuple[str, str | None, str | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(
+            (
+                str(request.url),
+                request.headers.get("authorization"),
+                request.headers.get("boxapi"),
+            )
+        )
+        if request.url.host == "api.box.com" and request.url.path == "/2.0/shared_items":
+            return httpx.Response(
+                200,
+                json={
+                    "id": "67890",
+                    "type": "file",
+                    "name": "Shared Box Video.mp4",
+                    "size": len(payload),
+                },
+            )
+        if request.url.host == "api.box.com" and request.url.path == "/2.0/files/67890":
+            return httpx.Response(
+                200,
+                json={
+                    "id": "67890",
+                    "type": "file",
+                    "name": "Shared Box Video.mp4",
+                    "size": len(payload),
+                },
+            )
+        if request.url.host == "api.box.com" and request.url.path == "/2.0/files/67890/content":
+            return httpx.Response(
+                302,
+                headers={
+                    "location": "https://dl.boxcloud.com/d/shared.mp4?Signature=" + SIGNED_SECRET
+                },
+            )
+        assert request.url.host == "dl.boxcloud.com"
+        assert request.headers.get("authorization") is None
+        assert request.headers.get("boxapi") is None
+        return httpx.Response(200, headers={"content-type": "video/mp4"}, content=payload)
+
+    monkeypatch.setenv("VEP_BOX_ACCESS_TOKEN", TOKEN_SECRET)
+    workspace = initialized_authorized_job(tmp_path, SourceKind.BOX, BOX_SHARED_LINK)
+    assert BOX_SHARED_LINK in workspace.job_yaml.read_text(encoding="utf-8")
+    runtime = AcquisitionRuntimeConfig(
+        box_token_env="VEP_BOX_ACCESS_TOKEN", maximum_download_bytes=1024
+    )
+    adapter = BoxAdapter(
+        runtime,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        resolver=public_resolver,
+    )
+    result = acquire_job(workspace.root, runtime, adapter)
+    reused = acquire_job(workspace.root, runtime, adapter)
+
+    assert [request[1] for request in requests[:3]] == [
+        "Bearer " + TOKEN_SECRET,
+        "Bearer " + TOKEN_SECRET,
+        "Bearer " + TOKEN_SECRET,
+    ]
+    assert [request[2] for request in requests[:3]] == [
+        "shared_link=" + BOX_SHARED_LINK,
+        "shared_link=" + BOX_SHARED_LINK,
+        "shared_link=" + BOX_SHARED_LINK,
+    ]
+    assert requests[3][1] is None
+    assert requests[3][2] is None
+    assert len(requests) == 4
+    assert reused.reused is True
+    artifact = result.source_manifest.artifact_record.artifact
+    assert artifact.content_sha256 == sha256_bytes(payload)
+    assert artifact.size_bytes == len(payload)
+    persisted = persisted_machine_text(workspace)
+    assert BOX_SHARED_LINK not in persisted
+    assert "syntheticsharedtoken" not in persisted
+    assert SIGNED_SECRET not in persisted
+
+
+@pytest.mark.parametrize("item_type", ["folder", "web_link", "app_item"])
+def test_box_shared_link_rejects_non_file_items(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, item_type: str
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/2.0/shared_items"
+        return httpx.Response(
+            200,
+            json={"id": "67890", "type": item_type, "name": "not media", "size": 1},
+        )
+
+    monkeypatch.setenv("VEP_BOX_ACCESS_TOKEN", TOKEN_SECRET)
+    workspace = initialized_authorized_job(tmp_path, SourceKind.BOX, BOX_SHARED_LINK)
+    runtime = AcquisitionRuntimeConfig(box_token_env="VEP_BOX_ACCESS_TOKEN")
+    adapter = BoxAdapter(
+        runtime,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        resolver=public_resolver,
+    )
+    with pytest.raises(VepError) as captured:
+        acquire_job(workspace.root, runtime, adapter)
+    assert captured.value.code == "BOX_SHARED_ITEM_NOT_FILE"
+    assert BOX_SHARED_LINK not in captured.value.safe_message
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"type": "file", "name": "video.mp4", "size": 1},
+        {"id": "not-numeric", "type": "file", "name": "video.mp4", "size": 1},
+        {"id": "67890", "type": "file", "name": "", "size": 1},
+        {"id": "67890", "type": "file", "name": "video.mp4", "size": 0},
+        {"id": "67890", "name": "video.mp4", "size": 1},
+    ],
+)
+def test_box_shared_link_rejects_malformed_file_response(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    response: dict[str, object],
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/2.0/shared_items"
+        return httpx.Response(200, json=response)
+
+    monkeypatch.setenv("VEP_BOX_ACCESS_TOKEN", TOKEN_SECRET)
+    workspace = initialized_authorized_job(tmp_path, SourceKind.BOX, BOX_SHARED_LINK)
+    runtime = AcquisitionRuntimeConfig(box_token_env="VEP_BOX_ACCESS_TOKEN")
+    adapter = BoxAdapter(
+        runtime,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        resolver=public_resolver,
+    )
+    with pytest.raises(VepError) as captured:
+        acquire_job(workspace.root, runtime, adapter)
+    assert captured.value.code == "BOX_SHARED_LINK_INVALID"
+    assert BOX_SHARED_LINK not in captured.value.safe_message
+
+
+def test_box_shared_link_rejects_metadata_identity_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/2.0/shared_items":
+            return httpx.Response(
+                200,
+                json={"id": "67890", "type": "file", "name": "media.mp4", "size": 1},
+            )
+        assert request.url.path == "/2.0/files/67890"
+        return httpx.Response(
+            200,
+            json={"id": "99999", "type": "file", "name": "media.mp4", "size": 1},
+        )
+
+    monkeypatch.setenv("VEP_BOX_ACCESS_TOKEN", TOKEN_SECRET)
+    workspace = initialized_authorized_job(tmp_path, SourceKind.BOX, BOX_SHARED_LINK)
+    runtime = AcquisitionRuntimeConfig(box_token_env="VEP_BOX_ACCESS_TOKEN")
+    adapter = BoxAdapter(
+        runtime,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        resolver=public_resolver,
+    )
+    with pytest.raises(VepError) as captured:
+        acquire_job(workspace.root, runtime, adapter)
+    assert captured.value.code == "BOX_API_INVALID"
+    assert BOX_SHARED_LINK not in captured.value.safe_message
+
+
+@pytest.mark.parametrize("status", [401, 403, 404])
+def test_box_shared_link_resolution_statuses_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/2.0/shared_items"
+        return httpx.Response(status)
+
+    monkeypatch.setenv("VEP_BOX_ACCESS_TOKEN", TOKEN_SECRET)
+    workspace = initialized_authorized_job(tmp_path, SourceKind.BOX, BOX_SHARED_LINK)
+    runtime = AcquisitionRuntimeConfig(box_token_env="VEP_BOX_ACCESS_TOKEN")
+    adapter = BoxAdapter(
+        runtime,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        resolver=public_resolver,
+    )
+    with pytest.raises(VepError) as captured:
+        acquire_job(workspace.root, runtime, adapter)
+    assert captured.value.code == (
+        "BOX_ACCESS_DENIED" if status in {401, 403} else "BOX_SHARED_LINK_INVALID"
+    )
+    assert BOX_SHARED_LINK not in captured.value.safe_message
+
+
+def test_box_shared_link_api_response_is_bounded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/2.0/shared_items"
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/json"},
+            content=b"{" + b"x" * (1024 * 1024),
+        )
+
+    monkeypatch.setenv("VEP_BOX_ACCESS_TOKEN", TOKEN_SECRET)
+    workspace = initialized_authorized_job(tmp_path, SourceKind.BOX, BOX_SHARED_LINK)
+    runtime = AcquisitionRuntimeConfig(box_token_env="VEP_BOX_ACCESS_TOKEN")
+    adapter = BoxAdapter(
+        runtime,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        resolver=public_resolver,
+    )
+    with pytest.raises(VepError) as captured:
+        acquire_job(workspace.root, runtime, adapter)
+    assert captured.value.code == "API_RESPONSE_INVALID"
+    assert BOX_SHARED_LINK not in captured.value.safe_message
+
+
+def test_box_shared_link_resolution_timeout_is_safe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("synthetic timeout", request=request)
+
+    monkeypatch.setenv("VEP_BOX_ACCESS_TOKEN", TOKEN_SECRET)
+    workspace = initialized_authorized_job(tmp_path, SourceKind.BOX, BOX_SHARED_LINK)
+    runtime = AcquisitionRuntimeConfig(box_token_env="VEP_BOX_ACCESS_TOKEN")
+    adapter = BoxAdapter(
+        runtime,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        resolver=public_resolver,
+    )
+    with pytest.raises(VepError) as captured:
+        acquire_job(workspace.root, runtime, adapter)
+    assert captured.value.code == "NETWORK_TIMEOUT"
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    assert BOX_SHARED_LINK not in captured.value.safe_message
+
+
+def test_box_shared_link_resolution_metadata_and_download_share_one_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = [0.0]
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if request.url.path == "/2.0/shared_items":
+            clock[0] = 0.4
+            return httpx.Response(
+                200,
+                json={"id": "67890", "type": "file", "name": "media.mp4", "size": 5},
+            )
+        if request.url.path == "/2.0/files/67890":
+            clock[0] = 0.75
+            return httpx.Response(
+                200,
+                json={"id": "67890", "type": "file", "name": "media.mp4", "size": 5},
+            )
+        clock[0] = 1.01
+        return httpx.Response(200, content=b"media")
+
+    monkeypatch.setenv("VEP_BOX_ACCESS_TOKEN", TOKEN_SECRET)
+    workspace = initialized_authorized_job(tmp_path, SourceKind.BOX, BOX_SHARED_LINK)
+    runtime = AcquisitionRuntimeConfig(
+        box_token_env="VEP_BOX_ACCESS_TOKEN",
+        maximum_download_bytes=1024,
+        maximum_download_seconds=1,
+    )
+    adapter = BoxAdapter(
+        runtime,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        resolver=public_resolver,
+        monotonic=lambda: clock[0],
+    )
+    with pytest.raises(VepError) as captured:
+        acquire_job(workspace.root, runtime, adapter)
+    assert captured.value.code == "NETWORK_TIMEOUT"
+    assert calls == 3
+    assert not list(workspace.safe_path("source/staging").glob("*"))
 
 
 @pytest.mark.parametrize(

@@ -22,6 +22,8 @@ from video_evidence_pipeline.application import authorize_job, initialize_job
 from video_evidence_pipeline.domain.authorization import AuthorizationRecord
 from video_evidence_pipeline.domain.job import JobSpec, SourceKind
 from video_evidence_pipeline.domain.locators import (
+    BoxLocatorKind,
+    box_locator_kind,
     canonicalize_box_locator,
     canonicalize_https_locator,
     canonicalize_panopto_locator,
@@ -151,6 +153,7 @@ def test_panopto_viewer_url_is_reduced_to_tenant_session_identity() -> None:
     [
         ("12345", "box://file/12345"),
         ("https://acme.app.box.com/files/12345", "box://file/12345"),
+        ("https://app.box.com/file/12345", "box://file/12345"),
         ("box://file/12345", "box://file/12345"),
     ],
 )
@@ -158,9 +161,48 @@ def test_box_file_identity_is_canonical(locator: str, expected: str) -> None:
     assert canonicalize_box_locator(locator) == expected
 
 
-def test_box_shared_link_is_not_a_source_of_truth() -> None:
+@pytest.mark.parametrize(
+    ("locator", "expected"),
+    [
+        (
+            "https://app.box.com/s/syntheticsharedtoken",
+            "https://app.box.com/s/syntheticsharedtoken",
+        ),
+        (
+            "https://WWW.box.com/s/Synthetic-Token_123",
+            "https://www.box.com/s/Synthetic-Token_123",
+        ),
+        (
+            "https://ACME.ent.box.com/s/enterpriseToken123",
+            "https://acme.ent.box.com/s/enterpriseToken123",
+        ),
+    ],
+)
+def test_box_shared_link_is_canonical(locator: str, expected: str) -> None:
+    assert canonicalize_box_locator(locator) == expected
+    assert box_locator_kind(expected) is BoxLocatorKind.SHARED_LINK
+
+
+@pytest.mark.parametrize(
+    "locator",
+    [
+        "http://app.box.com/s/syntheticsharedtoken",
+        "https://evil.example/s/syntheticsharedtoken",
+        "https://ent.box.com/s/syntheticsharedtoken",
+        "https://acme.other.ent.box.com/s/syntheticsharedtoken",
+        "https://acme.ent.box.com.evil/s/syntheticsharedtoken",
+        "https://app.box.com:8443/s/syntheticsharedtoken",
+        "https://app.box.com/s/short",
+        "https://app.box.com/s/syntheticsharedtoken/extra",
+        "https://app.box.com/s/syntheticsharedtoken?download=1",
+        "https://app.box.com/s/syntheticsharedtoken#fragment",
+        "https://user@app.box.com/s/syntheticsharedtoken",
+        "https://app.box.com/s/syntheticsharedtoken\r\nX-Injected: yes",
+    ],
+)
+def test_box_shared_link_rejects_unsafe_forms(locator: str) -> None:
     with pytest.raises(ValueError):
-        canonicalize_box_locator("https://app.box.com/s/shared-secret")
+        canonicalize_box_locator(locator)
 
 
 @pytest.mark.parametrize(
