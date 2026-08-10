@@ -47,14 +47,14 @@ adapterは自動検出の互換層であり、共通規則を弱めません。
 
 ## 3. Skills
 
-active Skillは`repository-sot-audit`のみです。transcript／evidence Schemaと`EVIDENCE_READY`までの
-実装が存在しても、`analyze-video-evidence`はdraft／explicit-onlyのままです。現行evalは2つの
-expected／forbidden caseだけで、promotion threshold 9に必要なscore、representative run、成果物evidence、
-owner reviewを満たす検証はNot Runです。authoring／audit関連Skillも個別evalを完了するまでdraftのままとし、
-実装完了だけを理由にimplicit invocationへ昇格しません。
-authoring／audit／revision requestはdraft Skill snapshotから作成できますが、production response importは
-`lifecycle = "active"`を必須とし、draft Skillを`DRAFT_SKILL_FORBIDDEN`で拒否します。fixture executionは
-repository test内部だけで許可し、CLIのproduction routeには公開しません。
+active Skillは`repository-sot-audit`に加え、`draft-video-report`、`draft-video-summary`、
+`independent-content-audit`、`revise-from-audit`です。後者4つは明示選択専用
+（`automatic_trigger = false`）かつ`instruction-only`で、各result evidenceはSkill本文SHA、eval定義SHA、
+評価対象commit、10/10（threshold 9）、P0/P1=0、owner reviewへ束縛されています。`analyze-video-evidence`と
+`prepare-human-review`はdraft／explicit-onlyのままで、production importには使用できません。
+authoring／audit／revisionの`external_exchange` public response importは`lifecycle = "active"`を必須とし、
+draft Skillを`DRAFT_SKILL_FORBIDDEN`で拒否します。fixture executionはrepository test内部だけで許可し、
+CLIのproduction routeには公開しません。
 requestへ固定したSkill snapshotは履歴の正本であり、完成済みjobを現在のSkill file／eval／lifecycleへ再結合しません。
 完成済みのauthor／audit／revision importを同一responseで再実行する場合も、保存済みrequestとcanonical responseを
 完全検証してから再利用し、現在のSkill eligibilityを再評価しません。

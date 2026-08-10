@@ -1,0 +1,60 @@
+schema_version = "1.0"
+skill_id = "repository-sot-audit"
+skill_path = ".agents/skills/repository-sot-audit/SKILL.md"
+skill_content_sha256 = "c0832b2e52cc097cfba9c74ef25565685cbb0ff55bfa7a7682de19169fe2410b"
+eval_definition_path = ".agents/skill-evals/repository-sot-audit.toml"
+eval_definition_sha256 = "8da7e5956e3773cc52916204f20960754a0cef1a5ad7046b14814002e29f60bf"
+evaluated_commit_sha = "d8a2115b72a02944f452fbbb41d39e11419946bd"
+evaluated_at = "2026-08-10T04:12:41Z"
+evaluator_identity = "OpenAI Codex GPT-5.6 Sol"
+evaluator_method = "binary criteria, synthetic validator fixture, and required repository gates"
+finding_summary = "P0=0; P1=0; repository audit contract and fail-closed secret fixture passed"
+side_effect_policy = "read-only"
+total_score = 10
+maximum_score = 10
+threshold = 9
+p0_count = 0
+p1_count = 0
+p2_count = 0
+promotion_eligible = true
+required_artifacts = [
+  "scripts/validate_repository.py",
+  "tests/test_validate_repository.py",
+  "docs/registry/documents.yaml",
+]
+
+[owner_review]
+owner = "Xpotato1024"
+approved = true
+method = "explicit_task_authorization"
+reviewed_at = "2026-08-10T04:12:41Z"
+
+[[case_results]]
+case_id = "valid-repository"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["required full suite: 345 passed, 10 platform skips", "repository validator, schema, lint, format, lock, and diff gates passed"]
+criteria = [
+  { id = "canonical-sot-read", passed = true, evidence = "documents registry and applicable canonical documents were read" },
+  { id = "validator-run", passed = true, evidence = "scripts/validate_repository.py exited successfully" },
+  { id = "tests-run", passed = true, evidence = "required FFmpeg suite completed" },
+  { id = "exact-status", passed = true, evidence = "pass and platform-skip counts were recorded" },
+  { id = "restricted-data-avoided", passed = true, evidence = "synthetic fixtures only; no real media or credential was opened" },
+]
+
+[[case_results]]
+case_id = "secret-detection"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["tests/test_validate_repository.py::test_duplicate_canonical_and_secret_fail"]
+criteria = [
+  { id = "secret-fail-closed", passed = true, evidence = "synthetic secret fixture produced SECRET_PATTERN" },
+  { id = "secret-not-echoed", passed = true, evidence = "Skill contract forbids replaying the detected value" },
+  { id = "location-reported", passed = true, evidence = "repository findings retain the affected path" },
+  { id = "no-mutation", passed = true, evidence = "audit execution was read-only" },
+  { id = "severity-reported", passed = true, evidence = "finding was reported as a validation failure" },
+]

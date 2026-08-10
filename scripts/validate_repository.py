@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import re
 import subprocess
 import sys
 import tomllib
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +18,7 @@ MARKDOWN_LINK_RE = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 FENCED_CODE_RE = re.compile(r"```.*?```|~~~.*?~~~", re.DOTALL)
 ACTION_RE = re.compile(r"^\s*-?\s*uses:\s*([^\s#]+)", re.MULTILINE)
 SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 REQUIRED_REGISTRY_FIELDS = {
     "document_id",
@@ -426,13 +429,43 @@ class RepositoryValidator:
         except (OSError, tomllib.TOMLDecodeError):
             return
         policy = data.get("policy") or {}
-        required_cases = policy.get("required_eval_cases", 2)
+        required_cases = policy.get("required_eval_cases")
+        promotion_threshold = policy.get("promotion_threshold")
+        if policy.get("activation_mode") != "explicit-only":
+            self.add(
+                "SKILL_POLICY_INVALID",
+                relative,
+                "activation_mode must remain explicit-only",
+            )
+        if (
+            not isinstance(required_cases, int)
+            or isinstance(required_cases, bool)
+            or required_cases < 2
+        ):
+            self.add(
+                "SKILL_POLICY_INVALID",
+                relative,
+                "required_eval_cases must be an integer of at least 2",
+            )
+            required_cases = 2
+        if (
+            not isinstance(promotion_threshold, int)
+            or isinstance(promotion_threshold, bool)
+            or promotion_threshold < 9
+        ):
+            self.add(
+                "SKILL_POLICY_INVALID",
+                relative,
+                "promotion_threshold must be an integer of at least 9",
+            )
+            promotion_threshold = 9
         skills = data.get("skills")
         if not isinstance(skills, list):
             self.add("SKILL_SYSTEM_INVALID", relative, "skills must be an array of tables")
             return
         ids: set[str] = set()
         paths: set[str] = set()
+        result_paths: set[str] = set()
         for entry in skills:
             if not isinstance(entry, dict):
                 self.add("SKILL_ENTRY_INVALID", relative, "skill entry must be a mapping")
@@ -457,6 +490,12 @@ class RepositoryValidator:
                 self.add("SKILL_LIFECYCLE_INVALID", skill_path, lifecycle)
             if side_effect not in ALLOWED_SIDE_EFFECTS:
                 self.add("SKILL_SIDE_EFFECT_INVALID", skill_path, side_effect)
+            if entry.get("automatic_trigger") is not False:
+                self.add(
+                    "SKILL_TRIGGER_INVALID",
+                    skill_path,
+                    "explicit-only Skill must not auto-trigger",
+                )
             if lifecycle == "draft":
                 if entry.get("automatic_trigger") is not False:
                     self.add("DRAFT_SKILL_TRIGGER", skill_path, "draft Skill must not auto-trigger")
@@ -484,6 +523,360 @@ class RepositoryValidator:
             cases = evaluation.get("cases") or []
             if not isinstance(cases, list) or len(cases) < int(required_cases):
                 self.add("SKILL_EVAL_CASES", eval_path, f"requires at least {required_cases} cases")
+            if lifecycle == "active":
+                result_path = entry.get("eval_result_path")
+                if not isinstance(result_path, str) or not result_path:
+                    self.add(
+                        "ACTIVE_SKILL_RESULT_MISSING",
+                        skill_path,
+                        "active Skill requires eval_result_path",
+                    )
+                    continue
+                if result_path in result_paths:
+                    self.add("SKILL_RESULT_PATH_DUPLICATE", result_path, sid)
+                result_paths.add(result_path)
+                self._validate_skill_result(
+                    sid=sid,
+                    owner=entry.get("owner"),
+                    side_effect_policy=side_effect,
+                    skill_path=skill_path,
+                    eval_path=eval_path,
+                    result_path=result_path,
+                    evaluation=evaluation,
+                    promotion_threshold=promotion_threshold,
+                )
+
+    def _validate_skill_result(
+        self,
+        *,
+        sid: str,
+        owner: object,
+        side_effect_policy: str,
+        skill_path: str,
+        eval_path: str,
+        result_path: str,
+        evaluation: dict[str, Any],
+        promotion_threshold: object,
+    ) -> None:
+        path = self.root / result_path
+        if result_path not in self.tracked_files or not path.is_file():
+            self.add("ACTIVE_SKILL_RESULT_MISSING", result_path, sid)
+            return
+        try:
+            result = tomllib.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
+            self.add("SKILL_EVAL_RESULT_INVALID", result_path, str(exc))
+            return
+
+        required_strings = (
+            "skill_id",
+            "skill_path",
+            "skill_content_sha256",
+            "eval_definition_path",
+            "eval_definition_sha256",
+            "evaluated_commit_sha",
+            "evaluated_at",
+            "evaluator_identity",
+            "evaluator_method",
+            "finding_summary",
+            "side_effect_policy",
+        )
+        if result.get("schema_version") != "1.0" or not all(
+            isinstance(result.get(key), str) and result[key].strip() for key in required_strings
+        ):
+            self.add(
+                "SKILL_EVAL_RESULT_INVALID",
+                result_path,
+                "schema and required string fields are invalid",
+            )
+            return
+        if (
+            result["skill_id"] != sid
+            or result["skill_path"] != skill_path
+            or result["eval_definition_path"] != eval_path
+            or result["side_effect_policy"] != side_effect_policy
+        ):
+            self.add(
+                "SKILL_EVAL_RESULT_INVALID",
+                result_path,
+                "Skill ID, definition paths, or side-effect policy do not match the registry",
+            )
+        current_skill_sha = self._canonical_text_sha256(self.root / skill_path)
+        current_eval_sha = self._canonical_text_sha256(self.root / eval_path)
+        if (
+            not SHA256_RE.fullmatch(result["skill_content_sha256"])
+            or not SHA256_RE.fullmatch(result["eval_definition_sha256"])
+            or result["skill_content_sha256"] != current_skill_sha
+            or result["eval_definition_sha256"] != current_eval_sha
+        ):
+            self.add(
+                "SKILL_EVAL_RESULT_STALE",
+                result_path,
+                "evaluation evidence does not match current Skill or eval bytes",
+            )
+        evaluated_commit_sha = result["evaluated_commit_sha"]
+        if not SHA40_RE.fullmatch(evaluated_commit_sha):
+            self.add(
+                "SKILL_EVAL_RESULT_INVALID",
+                result_path,
+                "evaluated_commit_sha must be a lowercase 40-character SHA",
+            )
+        elif not self._evaluation_commit_matches(
+            evaluated_commit_sha,
+            {
+                skill_path: result["skill_content_sha256"],
+                eval_path: result["eval_definition_sha256"],
+            },
+        ):
+            self.add(
+                "SKILL_EVAL_RESULT_COMMIT",
+                result_path,
+                "evaluated commit is not an ancestor or does not contain the recorded bytes",
+            )
+        for field in ("evaluated_at",):
+            try:
+                parsed = datetime.fromisoformat(result[field].replace("Z", "+00:00"))
+            except ValueError:
+                parsed = None
+            if parsed is None or parsed.tzinfo is None:
+                self.add(
+                    "SKILL_EVAL_RESULT_INVALID",
+                    result_path,
+                    f"{field} must be timezone-aware",
+                )
+
+        case_definitions = evaluation.get("cases")
+        if not isinstance(case_definitions, list):
+            self.add("SKILL_EVAL_RESULT_INVALID", result_path, "eval cases are invalid")
+            return
+        definitions: dict[str, list[str]] = {}
+        for case in case_definitions:
+            if not isinstance(case, dict) or not isinstance(case.get("id"), str):
+                self.add("SKILL_EVAL_RESULT_INVALID", result_path, "eval case is invalid")
+                return
+            criteria = case.get("criteria")
+            if not isinstance(criteria, list) or len(criteria) != 5:
+                self.add(
+                    "SKILL_EVAL_RESULT_INVALID",
+                    eval_path,
+                    f"case {case['id']!r} requires exactly five criteria",
+                )
+                return
+            criterion_ids = [
+                item.get("id")
+                for item in criteria
+                if isinstance(item, dict)
+                and isinstance(item.get("id"), str)
+                and isinstance(item.get("description"), str)
+                and item["description"].strip()
+            ]
+            if len(criterion_ids) != 5 or len(set(criterion_ids)) != 5:
+                self.add(
+                    "SKILL_EVAL_RESULT_INVALID",
+                    eval_path,
+                    f"case {case['id']!r} criterion IDs are invalid",
+                )
+                return
+            if case["id"] in definitions:
+                self.add("SKILL_EVAL_RESULT_INVALID", eval_path, "duplicate case ID")
+                return
+            definitions[case["id"]] = criterion_ids
+
+        case_results = result.get("case_results")
+        if not isinstance(case_results, list) or len(case_results) != len(definitions):
+            self.add(
+                "SKILL_EVAL_RESULT_INVALID",
+                result_path,
+                "case result set does not match the eval definition",
+            )
+            return
+        result_map = {
+            item.get("case_id"): item
+            for item in case_results
+            if isinstance(item, dict) and isinstance(item.get("case_id"), str)
+        }
+        if set(result_map) != set(definitions) or len(result_map) != len(case_results):
+            self.add(
+                "SKILL_EVAL_RESULT_INVALID",
+                result_path,
+                "case result IDs do not match the eval definition",
+            )
+            return
+
+        computed_total = 0
+        computed_maximum = 0
+        all_cases_pass = True
+        for case_id, criterion_ids in definitions.items():
+            case = result_map[case_id]
+            criterion_results = case.get("criteria")
+            if not isinstance(criterion_results, list):
+                self.add(
+                    "SKILL_EVAL_RESULT_INVALID", result_path, f"case {case_id!r} has no criteria"
+                )
+                return
+            criterion_map = {
+                item.get("id"): item
+                for item in criterion_results
+                if isinstance(item, dict) and isinstance(item.get("id"), str)
+            }
+            if set(criterion_map) != set(criterion_ids) or len(criterion_map) != len(
+                criterion_results
+            ):
+                self.add(
+                    "SKILL_EVAL_RESULT_INVALID",
+                    result_path,
+                    f"case {case_id!r} criterion results are incomplete",
+                )
+                return
+            passed = sum(
+                item.get("passed") is True
+                and isinstance(item.get("evidence"), str)
+                and bool(item["evidence"].strip())
+                for item in criterion_map.values()
+            )
+            maximum = len(criterion_ids)
+            evidence = case.get("evidence")
+            case_pass = (
+                case.get("result") == "pass"
+                and case.get("forbidden_observed") is False
+                and passed == maximum
+                and isinstance(evidence, list)
+                and bool(evidence)
+                and all(isinstance(item, str) and item.strip() for item in evidence)
+            )
+            if case.get("score") != passed or case.get("maximum_score") != maximum:
+                case_pass = False
+            computed_total += passed
+            computed_maximum += maximum
+            all_cases_pass = all_cases_pass and case_pass
+
+        try:
+            expected_threshold = max(
+                int(promotion_threshold), int(evaluation.get("minimum_score", 0))
+            )
+        except (TypeError, ValueError):
+            expected_threshold = -1
+        if (
+            result.get("total_score") != computed_total
+            or result.get("maximum_score") != computed_maximum
+            or result.get("threshold") != expected_threshold
+            or computed_total < expected_threshold
+            or not all_cases_pass
+        ):
+            self.add(
+                "SKILL_EVAL_RESULT_SCORE",
+                result_path,
+                "scores or case pass status do not satisfy the objective rubric",
+            )
+        if (
+            result.get("p0_count") != 0
+            or result.get("p1_count") != 0
+            or result.get("promotion_eligible") is not True
+        ):
+            self.add(
+                "SKILL_EVAL_RESULT_FINDINGS",
+                result_path,
+                "active Skill requires P0=0, P1=0, and promotion eligibility",
+            )
+
+        artifacts = result.get("required_artifacts")
+        if (
+            not isinstance(artifacts, list)
+            or not artifacts
+            or len(artifacts) != len(set(artifacts))
+        ):
+            self.add(
+                "SKILL_EVAL_ARTIFACT_MISSING",
+                result_path,
+                "required_artifacts must be non-empty and unique",
+            )
+        else:
+            for artifact in artifacts:
+                if (
+                    not isinstance(artifact, str)
+                    or artifact.startswith(("/", "\\"))
+                    or ".." in Path(artifact).parts
+                    or artifact not in self.tracked_files
+                    or not (self.root / artifact).is_file()
+                ):
+                    self.add("SKILL_EVAL_ARTIFACT_MISSING", result_path, str(artifact))
+            if SHA40_RE.fullmatch(evaluated_commit_sha) and not self._evaluation_commit_matches(
+                evaluated_commit_sha,
+                {artifact: None for artifact in artifacts if isinstance(artifact, str)},
+            ):
+                self.add(
+                    "SKILL_EVAL_RESULT_COMMIT",
+                    result_path,
+                    "required artifacts were absent from the evaluated commit",
+                )
+
+        review = result.get("owner_review")
+        if (
+            not isinstance(owner, str)
+            or not isinstance(review, dict)
+            or review.get("owner") != owner
+            or review.get("approved") is not True
+            or not isinstance(review.get("method"), str)
+            or not review["method"].strip()
+            or not isinstance(review.get("reviewed_at"), str)
+        ):
+            self.add(
+                "SKILL_EVAL_OWNER_REVIEW",
+                result_path,
+                "owner review is absent or does not match the registry owner",
+            )
+        else:
+            try:
+                reviewed = datetime.fromisoformat(review["reviewed_at"].replace("Z", "+00:00"))
+            except ValueError:
+                reviewed = None
+            if reviewed is None or reviewed.tzinfo is None:
+                self.add(
+                    "SKILL_EVAL_OWNER_REVIEW",
+                    result_path,
+                    "owner review timestamp must be timezone-aware",
+                )
+
+    def _evaluation_commit_matches(
+        self,
+        commit_sha: str,
+        expected_files: dict[str, str | None],
+    ) -> bool:
+        try:
+            repository_root = subprocess.run(
+                ["git", "rev-parse", "--show-toplevel"],
+                cwd=self.root,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            if Path(repository_root).resolve() != self.root:
+                return False
+            subprocess.run(
+                ["git", "merge-base", "--is-ancestor", commit_sha, "HEAD"],
+                cwd=self.root,
+                check=True,
+                capture_output=True,
+            )
+            for relative, expected_sha256 in expected_files.items():
+                blob = subprocess.run(
+                    ["git", "show", f"{commit_sha}:{relative}"],
+                    cwd=self.root,
+                    check=True,
+                    capture_output=True,
+                ).stdout
+                if (
+                    expected_sha256 is not None
+                    and hashlib.sha256(blob).hexdigest() != expected_sha256
+                ):
+                    return False
+        except (OSError, subprocess.CalledProcessError):
+            return False
+        return True
+
+    @staticmethod
+    def _canonical_text_sha256(path: Path) -> str:
+        return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
     def _parse_skill_front_matter(self, relative: str) -> dict[str, Any] | None:
         text = (self.root / relative).read_text(encoding="utf-8")

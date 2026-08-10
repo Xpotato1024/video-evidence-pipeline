@@ -71,7 +71,9 @@ active化には点数だけでなく、全case pass、P0=0、P1=0、必要artifa
 Skill本文とeval定義のSHA-256へ束縛した評価結果、評価対象commit、evaluator identity／method／日時、
 finding summary、owner reviewを要求します。評価結果はeval定義と自己参照させず、
 `.agents/skill-eval-results/<skill-id>.toml`へ分離します。active Skillの評価結果がcurrent Skill本文または
-eval定義と一致しない場合はstaleとしてrepository validationを失敗させます。
+eval定義と一致しない場合はstaleとしてrepository validationを失敗させます。SHA-256はGitのcanonical
+LF content bytesを対象とし、評価対象commitがcurrent `HEAD`のancestorで、そのcommit内のSkill／eval bytesと
+一致することも検証します。required artifactも評価対象commitに存在しなければなりません。
 
 ## 7. Provider adapter
 

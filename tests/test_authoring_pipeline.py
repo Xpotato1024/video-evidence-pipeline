@@ -249,6 +249,7 @@ def _revision_response(
     request,
     *,
     context_id: str,
+    execution_mode: AgentExecutionMode = AgentExecutionMode.TEST_FIXTURE,
 ) -> RevisionResponseManifest:
     anchor = request.audit_findings[0].draft_span
     assert anchor is not None
@@ -307,7 +308,7 @@ def _revision_response(
     ]
     return RevisionResponseManifest(
         request_fingerprint=request.request_fingerprint,
-        reviser=_identity(AgentRole.REVISER, context_id),
+        reviser=_identity(AgentRole.REVISER, context_id, execution_mode=execution_mode),
         draft_markdown=draft,
         claims=[claim],
         requirement_map=_requirement_map(request, claim.claim_id, "E000001"),
@@ -359,6 +360,7 @@ def test_straight_author_audit_human_review_and_cli_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     workspace = _evidence_ready_job(tmp_path, "issue15-straight")
+    _set_skill_lifecycle(workspace, "draft-video-report", "draft")
     author_request = prepare_authoring_job(workspace.root, "draft-video-report").request
     assert author_request.skill.lifecycle == "draft"
     assert author_request.skill.automatic_trigger is False
@@ -589,12 +591,177 @@ def test_straight_author_audit_human_review_and_cli_contract(
     assert stage_tamper_error.value.code == "HUMAN_REVIEW_BUNDLE_INVALID"
 
 
+@pytest.mark.parametrize("author_skill", ["draft-video-report", "draft-video-summary"])
+def test_public_production_straight_routes_use_committed_active_skills(
+    tmp_path: Path,
+    author_skill: str,
+) -> None:
+    suffix = author_skill.removeprefix("draft-video-")
+    workspace = _evidence_ready_job(tmp_path, f"issue15-production-{suffix}")
+    author_request = prepare_authoring_job(workspace.root, author_skill).request
+    assert author_request.skill.lifecycle == "active"
+    assert author_request.skill.automatic_trigger is False
+    assert author_request.skill.side_effect_policy == "instruction-only"
+
+    denied_response = _author_response(
+        author_request,
+        context_id=f"production-{suffix}-author-denied",
+        execution_mode=AgentExecutionMode.EXTERNAL_EXCHANGE,
+    )
+    denied_response = denied_response.model_copy(
+        update={"author": denied_response.author.model_copy(update={"external_api_used": True})}
+    )
+    denied_path = tmp_path / f"{suffix}-external-api-denied.json"
+    _write_model(denied_path, denied_response)
+    with pytest.raises(VepError) as permission_error:
+        import_authoring_job(workspace.root, denied_path)
+    assert permission_error.value.code == "EXTERNAL_API_NOT_AUTHORIZED"
+
+    author_path = tmp_path / f"{suffix}-production-author.json"
+    author_response = _author_response(
+        author_request,
+        context_id=f"production-{suffix}-author",
+        execution_mode=AgentExecutionMode.EXTERNAL_EXCHANGE,
+    )
+    _write_model(author_path, author_response)
+    draft = import_authoring_job(workspace.root, author_path)
+    assert draft.agent_run.identity.execution_mode is AgentExecutionMode.EXTERNAL_EXCHANGE
+    status, exit_code = job_status(workspace.root)
+    assert status["stored_state"] == JobState.DRAFTED.value
+    assert exit_code == 0
+
+    audit_request = prepare_audit_job(workspace.root, "independent-content-audit").request
+    assert audit_request.skill.lifecycle == "active"
+    same_context_path = tmp_path / f"{suffix}-production-same-context-audit.json"
+    _write_model(
+        same_context_path,
+        _audit_response(
+            audit_request,
+            context_id=author_response.author.context_id,
+            execution_mode=AgentExecutionMode.EXTERNAL_EXCHANGE,
+        ),
+    )
+    with pytest.raises(VepError) as context_error:
+        import_audit_job(workspace.root, same_context_path)
+    assert context_error.value.code == "AUDIT_CONTEXT_NOT_INDEPENDENT"
+
+    audit_path = tmp_path / f"{suffix}-production-audit.json"
+    audit_response = _audit_response(
+        audit_request,
+        context_id=f"production-{suffix}-auditor",
+        execution_mode=AgentExecutionMode.EXTERNAL_EXCHANGE,
+    )
+    assert audit_response.auditor.context_id != author_response.author.context_id
+    _write_model(audit_path, audit_response)
+    audit = import_audit_job(workspace.root, audit_path)
+    assert audit.agent_run.identity.execution_mode is AgentExecutionMode.EXTERNAL_EXCHANGE
+    status, exit_code = job_status(workspace.root)
+    assert status["stored_state"] == JobState.HUMAN_REVIEW_READY.value
+    assert exit_code == 0
+    assert validate_job(workspace.root)["state"] == JobState.HUMAN_REVIEW_READY.value
+
+
+def test_public_production_revision_route_uses_distinct_external_contexts(
+    tmp_path: Path,
+) -> None:
+    workspace = _evidence_ready_job(tmp_path, "issue15-production-revision")
+    author_request = prepare_authoring_job(workspace.root, "draft-video-report").request
+    author_path = tmp_path / "production-revision-author.json"
+    author_response = _author_response(
+        author_request,
+        context_id="production-revision-author",
+        execution_mode=AgentExecutionMode.EXTERNAL_EXCHANGE,
+    )
+    _write_model(author_path, author_response)
+    import_authoring_job(workspace.root, author_path)
+
+    first_audit_request = prepare_audit_job(workspace.root, "independent-content-audit").request
+    first_audit_path = tmp_path / "production-revision-audit-1.json"
+    first_audit_response = _audit_response(
+        first_audit_request,
+        context_id="production-revision-auditor-1",
+        material=True,
+        execution_mode=AgentExecutionMode.EXTERNAL_EXCHANGE,
+    )
+    denied_audit_path = tmp_path / "production-revision-audit-api-denied.json"
+    _write_model(
+        denied_audit_path,
+        first_audit_response.model_copy(
+            update={
+                "auditor": first_audit_response.auditor.model_copy(
+                    update={"external_api_used": True}
+                )
+            }
+        ),
+    )
+    with pytest.raises(VepError) as audit_permission_error:
+        import_audit_job(workspace.root, denied_audit_path)
+    assert audit_permission_error.value.code == "EXTERNAL_API_NOT_AUTHORIZED"
+
+    _write_model(first_audit_path, first_audit_response)
+    import_audit_job(workspace.root, first_audit_path)
+    status, exit_code = job_status(workspace.root)
+    assert status["stored_state"] == JobState.REVISION_REQUIRED.value
+    assert exit_code == 0
+
+    revision_request = prepare_revision_job(workspace.root, "revise-from-audit").request
+    assert revision_request.skill.lifecycle == "active"
+    revision_path = tmp_path / "production-revision-response.json"
+    revision_response = _revision_response(
+        revision_request,
+        context_id="production-reviser-1",
+        execution_mode=AgentExecutionMode.EXTERNAL_EXCHANGE,
+    )
+    denied_revision_path = tmp_path / "production-revision-api-denied.json"
+    _write_model(
+        denied_revision_path,
+        revision_response.model_copy(
+            update={
+                "reviser": revision_response.reviser.model_copy(update={"external_api_used": True})
+            }
+        ),
+    )
+    with pytest.raises(VepError) as revision_permission_error:
+        import_revision_job(workspace.root, denied_revision_path)
+    assert revision_permission_error.value.code == "EXTERNAL_API_NOT_AUTHORIZED"
+
+    _write_model(revision_path, revision_response)
+    revised = import_revision_job(workspace.root, revision_path)
+    assert revised.draft.agent_run.identity.execution_mode is AgentExecutionMode.EXTERNAL_EXCHANGE
+    status, exit_code = job_status(workspace.root)
+    assert status["stored_state"] == JobState.DRAFTED.value
+    assert exit_code == 0
+
+    second_audit_request = prepare_audit_job(workspace.root, "independent-content-audit").request
+    second_audit_path = tmp_path / "production-revision-audit-2.json"
+    second_audit_response = _audit_response(
+        second_audit_request,
+        context_id="production-revision-auditor-2",
+        material=False,
+        execution_mode=AgentExecutionMode.EXTERNAL_EXCHANGE,
+    )
+    _write_model(second_audit_path, second_audit_response)
+    import_audit_job(workspace.root, second_audit_path)
+    contexts = {
+        author_response.author.context_id,
+        first_audit_response.auditor.context_id,
+        revision_response.reviser.context_id,
+        second_audit_response.auditor.context_id,
+    }
+    assert len(contexts) == 4
+    status, exit_code = job_status(workspace.root)
+    assert status["stored_state"] == JobState.HUMAN_REVIEW_READY.value
+    assert exit_code == 0
+    assert validate_job(workspace.root)["state"] == JobState.HUMAN_REVIEW_READY.value
+
+
 def test_skill_snapshot_history_is_immutable_but_pending_production_import_is_current(
     tmp_path: Path,
 ) -> None:
     completed_root = tmp_path / "completed"
     completed_root.mkdir()
     completed = _evidence_ready_job(completed_root, "issue15-skill-history")
+    _set_skill_lifecycle(completed, "draft-video-report", "draft")
     request = prepare_authoring_job(completed.root, "draft-video-report").request
     response_path = completed_root / "skill-history-author.json"
     _write_model(
@@ -621,6 +788,7 @@ def test_skill_snapshot_history_is_immutable_but_pending_production_import_is_cu
     pending_root = tmp_path / "pending"
     pending_root.mkdir()
     pending = _evidence_ready_job(pending_root, "issue15-skill-drift")
+    _set_skill_lifecycle(pending, "draft-video-report", "draft")
     pending_request = prepare_authoring_job(pending.root, "draft-video-report").request
     pending_path = pending_root / "skill-drift-author.json"
     _write_model(

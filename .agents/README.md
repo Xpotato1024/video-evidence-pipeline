@@ -29,8 +29,17 @@ related_documents: ["VEP-AGENT-POLICY", "VEP-AGENT-GOV", "VEP-ARCH-AGENTS"]
 | 機械可読Skill台帳 | [`skill-system.toml`](skill-system.toml) |
 | 利用可能なSkill | [`skills/`](skills/) |
 | Skill eval | [`skill-evals/`](skill-evals/) |
+| Active Skill評価結果 | [`skill-eval-results/`](skill-eval-results/) |
 | 未昇格候補 | [`skill-candidates/`](skill-candidates/) |
 | 新規Skillテンプレート | [`templates/SKILL.md`](templates/SKILL.md) |
+
+## Current Skill state
+
+`draft-video-report`、`draft-video-summary`、`independent-content-audit`、
+`revise-from-audit`はactive、明示選択専用（`automatic_trigger = false`）、
+`instruction-only`です。各SkillにはSkill本文SHA、eval定義SHA、評価対象commit、
+10/10（threshold 9）、P0/P1=0、owner reviewを含むcurrent result evidenceがあります。
+`analyze-video-evidence`と`prepare-human-review`はdraftのままです。
 
 ## Adapter
 

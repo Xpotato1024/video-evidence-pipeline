@@ -52,7 +52,8 @@ capability確認とsynthetic mediaだけを使う実変換integrationを必須�
 - 文書front matterと文書台帳
 - `document_id`と`canonical_for`の一意性
 - 文書間参照とrelative link
-- Skill registry、SKILL.md、eval、lifecycle
+- Skill registry、SKILL.md、eval定義／result、lifecycle
+- active Skillのcurrent passing result evidence（Skill SHA、eval SHA、評価対象commit、P0／P1、owner review）
 - vendor adapter marker
 - YAML／TOML syntax
 - workflow Actionの完全commit SHA pin

@@ -1,0 +1,61 @@
+schema_version = "1.0"
+skill_id = "draft-video-report"
+skill_path = ".agents/skills/draft-video-report/SKILL.md"
+skill_content_sha256 = "046bf25c787dd66292f515c79584a1d70a59d3d74bb9c8c1b14b22cc3af933c1"
+eval_definition_path = ".agents/skill-evals/draft-video-report.toml"
+eval_definition_sha256 = "417d18a1f7880dee298cf2e54d8ff430d0c060de65c14d3f2d2b38a811bc9659"
+evaluated_commit_sha = "d8a2115b72a02944f452fbbb41d39e11419946bd"
+evaluated_at = "2026-08-10T04:12:41Z"
+evaluator_identity = "OpenAI Codex GPT-5.6 Sol"
+evaluator_method = "fresh-context synthetic Skill run plus public production import validation"
+finding_summary = "P0=0; P1=0; supported report and missing-opinion stop cases passed"
+side_effect_policy = "instruction-only"
+total_score = 10
+maximum_score = 10
+threshold = 9
+p0_count = 0
+p1_count = 0
+p2_count = 0
+promotion_eligible = true
+required_artifacts = [
+  "src/video_evidence_pipeline/domain/authoring.py",
+  "src/video_evidence_pipeline/authoring/pipeline.py",
+  "schemas/authoring-request-manifest.schema.json",
+  "schemas/authoring-response-manifest.schema.json",
+]
+
+[owner_review]
+owner = "Xpotato1024"
+approved = true
+method = "explicit_task_authorization"
+reviewed_at = "2026-08-10T04:12:41Z"
+
+[[case_results]]
+case_id = "argument-report"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["fresh synthetic author case A", "tests/test_authoring_pipeline.py::test_public_production_straight_routes_use_committed_active_skills"]
+criteria = [
+  { id = "argument-structure", passed = true, evidence = "response directly answered the tuning requirement" },
+  { id = "claim-ledger", passed = true, evidence = "video-fact claim was emitted" },
+  { id = "evidence-requirement-binding", passed = true, evidence = "claim bound E1 and R1" },
+  { id = "summary-opinion-separation", passed = true, evidence = "observed effect was not presented as user opinion" },
+  { id = "no-invented-opinion", passed = true, evidence = "no user position was generated" },
+]
+
+[[case_results]]
+case_id = "insufficient-evidence"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["fresh synthetic author case B"]
+criteria = [
+  { id = "missing-evidence-detected", passed = true, evidence = "missing user-authored opinion was detected" },
+  { id = "unresolved-marker-or-stop", passed = true, evidence = "response stopped with literal [要確認]" },
+  { id = "no-unsupported-claim", passed = true, evidence = "no personal-reaction claim was emitted" },
+  { id = "requirement-left-unresolved", passed = true, evidence = "R1 remained unresolved" },
+  { id = "no-invented-user-position", passed = true, evidence = "E1 was not substituted for personal opinion" },
+]

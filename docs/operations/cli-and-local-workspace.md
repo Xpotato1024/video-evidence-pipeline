@@ -287,8 +287,11 @@ human-review bundleを作成して`HUMAN_REVIEW_READY`、あれば`REVISION_REQU
 だけを許可します。2回修正後の監査にもP0／P1が残れば`BLOCKED`とし、`v004`を生成しません。
 ACCEPTのevidenceは対応findingと完全一致し、各hunkはそのfindingのdraft spanへ帰属する必要があります。
 
-provider-neutral production importは対応Skillの`lifecycle = "active"`を必須とします。現行のauthoring／audit／
-revision Skillは`draft`なのでrequest作成は可能ですが、production importは`DRAFT_SKILL_FORBIDDEN`で停止します。
+provider-neutralな`external_exchange` public author／audit／revision production importは対応Skillの
+`lifecycle = "active"`を必須とします。現行のactive Skillは`draft-video-report`、`draft-video-summary`、
+`independent-content-audit`、`revise-from-audit`で、いずれも明示選択専用（`automatic_trigger = false`）かつ
+`instruction-only`です。`analyze-video-evidence`と`prepare-human-review`はdraftのままで、このproduction
+routeのallowlistには含めません。allowlist内のSkillがdraftなら`DRAFT_SKILL_FORBIDDEN`で停止します。
 fixture identityを許可する経路はrepository test内部だけです。human-review bundleは承認対象hashと監査／差分を整理する
 `is_approval: false`のpackageであり、human approval／exportは未実装です。
 requestへ保存したSkill snapshotはimmutableです。現在の同一content／eval／identityが`active`へ昇格した場合だけ
