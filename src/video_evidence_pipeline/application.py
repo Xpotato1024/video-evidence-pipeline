@@ -62,6 +62,8 @@ from video_evidence_pipeline.delivery import (
     ApprovalResult,
     ExportResult,
     approve_or_recover,
+    ensure_approval_confirmation_resolved,
+    ensure_approved_draft_marker_free,
     export_or_recover,
     load_approval,
     load_export,
@@ -1229,6 +1231,7 @@ def approve_job(
                 "APPROVAL_TARGET_MISMATCH",
                 "approval target does not match the current human-review bundle",
             )
+        ensure_approval_confirmation_resolved(workspace, draft, human_review)
         result = approve_or_recover(
             workspace,
             job,
@@ -1273,6 +1276,7 @@ def export_job(path: Path) -> ExportResult:
             raise integrity_error(
                 "APPROVAL_STALE", "approval no longer matches verified upstream state"
             ) from exc
+        ensure_approved_draft_marker_free(workspace, approval.record.approved_draft_artifact)
         if state is JobState.EXPORTED:
             return load_export(workspace, job, fixed, approval)
         result = export_or_recover(

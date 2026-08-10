@@ -33,7 +33,7 @@ from video_evidence_pipeline.domain.job import JobSpec, job_fingerprint
 from video_evidence_pipeline.domain.manifests import StageManifest, StageStatus
 from video_evidence_pipeline.domain.serialization import canonical_json_bytes, pretty_json_bytes
 from video_evidence_pipeline.domain.state import JobState
-from video_evidence_pipeline.errors import integrity_error, io_error, state_error
+from video_evidence_pipeline.errors import VepError, integrity_error, io_error, state_error
 from video_evidence_pipeline.storage.atomic import atomic_copy_exclusive, atomic_write_new_bytes
 from video_evidence_pipeline.storage.jsonl import append_jsonl
 from video_evidence_pipeline.storage.layout import JobWorkspace
@@ -42,6 +42,10 @@ from video_evidence_pipeline.storage.permissions import ensure_private_directory
 _MAX_APPROVAL_LEDGER_BYTES = 8 * 1024 * 1024
 _MAX_MANIFEST_BYTES = 8 * 1024 * 1024
 _MAX_DRAFT_BYTES = 4 * 1024 * 1024
+FORBIDDEN_APPROVAL_MARKERS: tuple[str, ...] = ("[要確認]",)
+_FORBIDDEN_APPROVAL_MARKER_BYTES = tuple(
+    marker.encode("utf-8") for marker in FORBIDDEN_APPROVAL_MARKERS
+)
 _APPROVAL_PRODUCER = ProducerIdentity(
     kind=ProducerKind.TOOL,
     name="video-evidence-pipeline-approval",
@@ -192,6 +196,66 @@ def _verify_artifact(workspace: JobWorkspace, artifact: ArtifactRef, *, code: st
         raise io_error(code, "bound delivery artifact could not be inspected") from exc
     if size != artifact.size_bytes or sha256_file(path) != artifact.content_sha256:
         raise integrity_error(code, "bound delivery artifact does not match its reference")
+
+
+def _read_verified_bytes(path: Path, artifact: ArtifactRef, *, code: str) -> bytes:
+    payload = _read_bounded(path, maximum=_MAX_DRAFT_BYTES, code=code)
+    if len(payload) != artifact.size_bytes or sha256_bytes(payload) != artifact.content_sha256:
+        raise integrity_error(code, "bound delivery artifact changed during verification")
+    return payload
+
+
+def _verified_draft_bytes(
+    workspace: JobWorkspace,
+    artifact: ArtifactRef,
+    *,
+    code: str,
+) -> bytes:
+    return _read_verified_bytes(
+        workspace.safe_path(artifact.relative_storage_path), artifact, code=code
+    )
+
+
+def _contains_forbidden_approval_marker(payload: bytes) -> bool:
+    return any(marker in payload for marker in _FORBIDDEN_APPROVAL_MARKER_BYTES)
+
+
+def _require_marker_free(payload: bytes) -> None:
+    if _contains_forbidden_approval_marker(payload):
+        raise state_error(
+            "APPROVAL_CONFIRMATION_UNRESOLVED",
+            "approved draft contains an unresolved confirmation marker",
+        )
+
+
+def ensure_approved_draft_marker_free(
+    workspace: JobWorkspace,
+    artifact: ArtifactRef,
+) -> bytes:
+    """Return fully verified approved bytes only when they contain no confirmation marker."""
+
+    payload = _verified_draft_bytes(workspace, artifact, code="APPROVAL_STALE")
+    _require_marker_free(payload)
+    return payload
+
+
+def ensure_approval_confirmation_resolved(
+    workspace: JobWorkspace,
+    draft: DraftResult,
+    human_review: HumanReviewResult,
+) -> None:
+    """Reject approval until verified review spans and draft markers are both resolved."""
+
+    payload = _verified_draft_bytes(
+        workspace,
+        draft.manifest.draft_artifact,
+        code="APPROVAL_STALE",
+    )
+    if human_review.bundle.confirmation_spans or _contains_forbidden_approval_marker(payload):
+        raise state_error(
+            "APPROVAL_CONFIRMATION_UNRESOLVED",
+            "human review confirmation spans or draft confirmation markers remain unresolved",
+        )
 
 
 def _approval_intent_values(
@@ -401,6 +465,15 @@ def load_approval(
 ) -> ApprovalResult:
     record = read_approval_records(workspace)[0]
     _validate_record_upstream(record, job, draft, audit, human_review)
+    try:
+        ensure_approval_confirmation_resolved(workspace, draft, human_review)
+    except VepError as exc:
+        if exc.code != "APPROVAL_CONFIRMATION_UNRESOLVED":
+            raise
+        raise integrity_error(
+            "APPROVAL_STALE",
+            "approval contains unresolved confirmation content",
+        ) from exc
     ledger_artifact = _approval_record_artifact(workspace)
     _verify_artifact(workspace, ledger_artifact, code="APPROVAL_LEDGER_INVALID")
     return _load_approval_manifests(workspace, job, record, ledger_artifact)
@@ -418,6 +491,7 @@ def approve_or_recover(
     unresolved_notes: list[str],
     approved_at: datetime,
 ) -> ApprovalResult:
+    ensure_approval_confirmation_resolved(workspace, draft, human_review)
     existed = workspace.approval_records_jsonl.exists()
     requested_intent = approval_intent_fingerprint(
         _approval_intent_values(
@@ -574,6 +648,13 @@ def _build_export_manifests(
 
 def _verify_final(workspace: JobWorkspace, package: ExportPackageManifest) -> None:
     _verify_artifact(workspace, package.final_artifact, code="EXPORT_BUNDLE_INVALID")
+    _require_marker_free(
+        _read_verified_bytes(
+            workspace.safe_path(package.final_artifact.relative_storage_path),
+            package.final_artifact,
+            code="EXPORT_BUNDLE_INVALID",
+        )
+    )
     if (
         package.final_artifact.content_sha256 != package.approved_draft_artifact.content_sha256
         or package.final_artifact.size_bytes != package.approved_draft_artifact.size_bytes
@@ -602,6 +683,7 @@ def load_export(
     fixed: FixedEvidenceBundle,
     approval: ApprovalResult,
 ) -> ExportResult:
+    ensure_approved_draft_marker_free(workspace, approval.record.approved_draft_artifact)
     package = _read_model(
         workspace.safe_path(_package_relative(approval.record)),
         ExportPackageManifest,
@@ -646,6 +728,7 @@ def export_or_recover(
     *,
     created_at: datetime,
 ) -> ExportResult:
+    ensure_approved_draft_marker_free(workspace, approval.record.approved_draft_artifact)
     cleanup_stale_attempts(workspace)
     package_path = workspace.safe_path(_package_relative(approval.record))
     final_path = workspace.safe_path(_final_relative(approval.record))
@@ -674,17 +757,6 @@ def export_or_recover(
     approved_path = workspace.safe_path(
         approval.record.approved_draft_artifact.relative_storage_path
     )
-    approved_bytes = _read_bounded(
-        approved_path,
-        maximum=_MAX_DRAFT_BYTES,
-        code="APPROVAL_STALE",
-    )
-    if (
-        len(approved_bytes) != approval.record.approved_draft_artifact.size_bytes
-        or sha256_bytes(approved_bytes) != approval.record.approved_draft_artifact.content_sha256
-    ):
-        raise integrity_error("APPROVAL_STALE", "approved draft bytes have changed")
-
     attempt = workspace.delivery_staging_root / uuid.uuid4().hex
     ensure_private_directory(attempt)
     try:
@@ -694,6 +766,13 @@ def export_or_recover(
             approved_path,
             staged_final,
             approval.record.approved_draft_artifact,
+        )
+        _require_marker_free(
+            _read_verified_bytes(
+                staged_final,
+                package.final_artifact,
+                code="EXPORT_BUNDLE_INVALID",
+            )
         )
         atomic_write_new_bytes(staged_package, pretty_json_bytes(package), private=True)
         _MARKDOWN_ADAPTER.copy_exact(staged_final, final_path, package.final_artifact)

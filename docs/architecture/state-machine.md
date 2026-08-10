@@ -164,7 +164,8 @@ stateDiagram-v2
 
 - `P0 = 0`
 - `P1 = 0`
-- unresolved `[要確認]` の扱いが明示
+- unresolved `[要確認]`と`confirmation_spans`の扱いが明示され、人間確認packageへ可視化される
+  - これらは`HUMAN_REVIEW_READY`まで残り得るが、approval authorizationではない
 - length／format等のdeterministic gate成功
 - current draft、audit findings、claim comparison、requirement map、revision history、approval target SHA-256を
   human-review bundleへ固定
@@ -174,6 +175,10 @@ stateDiagram-v2
 
 - 人間がhuman-review packageと対象draftを確認し、target SHA、reviewer identity、basis、`--confirm`をCLIへ明示
 - current draft、clean audit、fixed evidence、human-review bundle、approval target SHAをfull verify
+- full verify済みhuman-review bundleの`confirmation_spans`が空であり、full verify済みdraft bytesにliteral `[要確認]`がない
+  - いずれかが残れば`APPROVAL_CONFIRMATION_UNRESOLVED`として停止し、approval ledger／manifest／transitionを生成しない
+  - markerで停止したjobは`HUMAN_REVIEW_READY`に留め、v1はdraftをmutateしない。clean contentは別途有効なworkflowまたは新しいjobで作成し、approval／export中にmarkerを削除・置換しない
+  - genericなapproval `unresolved_notes`や`unresolved_ambiguity_ids`を、このmarker解消gateと同一視しない
 - self-hashとprevious hashを持つapproval recordをprivate append-only JSONLへ1行だけ追記
 - v1のreviewer identityはCLIでassertされたlineageであり、暗号学的本人確認ではない
 - approval record、stage／primary manifestを公開してからtransitionを最後にappend
@@ -182,6 +187,8 @@ stateDiagram-v2
 ### `HUMAN_APPROVED → EXPORTED`
 
 - approval record／manifest、human-review bundle、audit、current draftを再検証し、approval SHAとdraft SHAを一致させる
+- approved draft bytesとfinal candidate bytesを再検証し、literal `[要確認]`を含むfinalを拒否する
+  - markerを削除・置換して通過させず、cleanなfinal bytesはapproved draft bytesと完全一致する
 - `job.output.format = markdown`だけを実装し、approved draft bytesをdecode／再encode／改行変換せずcopy
 - private content-addressed pathへ`final.md`、package manifest、stage／primary manifestの順に公開
 - export artifactのbytes、size、SHA-256をapproved draftと完全一致させ、transitionを最後にappend

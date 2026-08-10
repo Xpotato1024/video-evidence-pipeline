@@ -3,33 +3,62 @@ from __future__ import annotations
 import json
 import shutil
 import threading
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from test_authoring_pipeline import _publish_audit, _publish_initial_draft
+from test_authoring_pipeline import (
+    _author_response,
+    _evidence_ready_job,
+    _publish_audit,
+    _publish_initial_draft,
+    _write_model,
+)
 from typer.testing import CliRunner
 
 import video_evidence_pipeline.application as application_module
 import video_evidence_pipeline.delivery.pipeline as delivery_pipeline_module
 from video_evidence_pipeline.application import (
+    _import_authoring_fixture,
     approve_job,
     export_job,
     job_status,
+    prepare_authoring_job,
     validate_job,
 )
 from video_evidence_pipeline.cli import app
 from video_evidence_pipeline.delivery.pipeline import read_approval_records
-from video_evidence_pipeline.domain.delivery import approval_record_fingerprint
+from video_evidence_pipeline.domain.delivery import ReviewerIdentity, approval_record_fingerprint
 from video_evidence_pipeline.domain.serialization import canonical_json_bytes
 from video_evidence_pipeline.domain.state import JobState
 from video_evidence_pipeline.domain.transitions import TransitionRecord
 from video_evidence_pipeline.errors import VepError
-from video_evidence_pipeline.storage.jsonl import read_jsonl
+from video_evidence_pipeline.storage.jsonl import exclusive_append_lock, read_jsonl
 from video_evidence_pipeline.storage.layout import JobWorkspace
 
 
 def _human_review_ready(tmp_path: Path, job_id: str):
     workspace, draft = _publish_initial_draft(tmp_path, job_id)
+    audit = _publish_audit(
+        tmp_path,
+        workspace,
+        context_id=f"{job_id}-clean-audit",
+        material=False,
+    )
+    assert audit.human_review is not None
+    return workspace, draft, audit
+
+
+def _literal_marker_review_ready(tmp_path: Path, job_id: str):
+    workspace = _evidence_ready_job(tmp_path, job_id)
+    request = prepare_authoring_job(workspace.root, "draft-video-report").request
+    response = _author_response(request, context_id=f"{job_id}-author")
+    response = response.model_copy(
+        update={"draft_markdown": f"{response.draft_markdown}\n[要確認]"}
+    )
+    response_path = tmp_path / f"{job_id}-author.json"
+    _write_model(response_path, response)
+    draft = _import_authoring_fixture(workspace.root, response_path)
     audit = _publish_audit(
         tmp_path,
         workspace,
@@ -152,6 +181,7 @@ def test_approval_gates_cli_privacy_exact_replay_and_markdown_export(
 
     first_record = read_approval_records(workspace)[0]
     assert first_record.confirmed_by_user is True
+    assert first_record.unresolved_notes == ["non-blocking uncertainty"]
     replay = _approve(workspace, target)
     assert replay.reused is True
     assert replay.record.approved_at == first_record.approved_at
@@ -237,6 +267,110 @@ def test_approval_gates_cli_privacy_exact_replay_and_markdown_export(
         export_job(workspace.root)
     assert export_tamper.value.code == "EXPORT_BUNDLE_INVALID"
     assert _transition_count(workspace, JobState.EXPORTED) == 1
+
+
+def test_approval_rejects_literal_marker_and_export_rechecks_legacy_approval(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, draft, audit = _literal_marker_review_ready(tmp_path, "issue16-marker")
+    target = audit.human_review.approval_target_sha256
+    current_workspace, job, _transitions, state = application_module._load_context(workspace.root)
+    _fixed, verified_draft, verified_audit, human_review = application_module._approval_upstream(
+        current_workspace,
+        job,
+        state,
+        stale_code=False,
+    )
+    assert human_review.bundle.confirmation_spans == []
+    transition_before = workspace.transitions_jsonl.read_bytes()
+    staging_before = tuple(sorted(path.name for path in workspace.delivery_staging_root.iterdir()))
+
+    with pytest.raises(VepError) as approval_error:
+        approve_job(
+            workspace.root,
+            approval_target_sha256=target,
+            reviewer="reviewer-17",
+            basis="exact review",
+            confirm=True,
+            unresolved_notes=["non-blocking uncertainty"],
+        )
+    assert approval_error.value.code == "APPROVAL_CONFIRMATION_UNRESOLVED"
+    assert application_module._load_context(workspace.root)[3] is JobState.HUMAN_REVIEW_READY
+    assert _transition_count(workspace, JobState.HUMAN_APPROVED) == 0
+    assert _transition_count(workspace, JobState.EXPORTED) == 0
+    assert workspace.transitions_jsonl.read_bytes() == transition_before
+    assert (
+        tuple(sorted(path.name for path in workspace.delivery_staging_root.iterdir()))
+        == staging_before
+    )
+    assert not workspace.approval_records_jsonl.exists()
+    assert not workspace.approval_stage_manifest_json.exists()
+    assert not workspace.approval_manifest_json.exists()
+    assert not workspace.export_stage_manifest_json.exists()
+    assert not workspace.export_manifest_json.exists()
+    assert not list((workspace.root / "exports" / "markdown").iterdir())
+    assert (
+        "[要確認]".encode()
+        in workspace.safe_path(draft.manifest.draft_artifact.relative_storage_path).read_bytes()
+    )
+
+    with monkeypatch.context() as legacy:
+        legacy.setattr(
+            delivery_pipeline_module,
+            "ensure_approval_confirmation_resolved",
+            lambda *_args: None,
+        )
+        legacy_approval = delivery_pipeline_module.approve_or_recover(
+            workspace,
+            job,
+            verified_draft,
+            verified_audit,
+            human_review,
+            reviewer=ReviewerIdentity(identity="legacy-reviewer"),
+            basis="legacy approval record",
+            unresolved_notes=["non-blocking uncertainty"],
+            approved_at=datetime.now(UTC),
+        )
+    assert legacy_approval.record.unresolved_notes == ["non-blocking uncertainty"]
+    with exclusive_append_lock(workspace.transitions_jsonl):
+        current_workspace, job, _transitions, state = application_module._load_context(
+            workspace.root
+        )
+        assert state is JobState.HUMAN_REVIEW_READY
+        application_module._append_transition_locked(
+            current_workspace,
+            job,
+            from_state=JobState.HUMAN_REVIEW_READY,
+            to_state=JobState.HUMAN_APPROVED,
+            trigger="legacy.approve",
+        )
+
+    export_transition_before = workspace.transitions_jsonl.read_bytes()
+    export_staging_before = tuple(
+        sorted(path.name for path in workspace.delivery_staging_root.iterdir())
+    )
+    with pytest.raises(VepError) as export_error:
+        export_job(workspace.root)
+    assert export_error.value.code == "APPROVAL_STALE"
+    assert application_module._load_context(workspace.root)[3] is JobState.HUMAN_APPROVED
+    assert _transition_count(workspace, JobState.HUMAN_APPROVED) == 1
+    assert _transition_count(workspace, JobState.EXPORTED) == 0
+    assert workspace.transitions_jsonl.read_bytes() == export_transition_before
+    assert (
+        tuple(sorted(path.name for path in workspace.delivery_staging_root.iterdir()))
+        == export_staging_before
+    )
+    assert not workspace.export_stage_manifest_json.exists()
+    assert not workspace.export_manifest_json.exists()
+    assert not list((workspace.root / "exports" / "markdown").iterdir())
+    with pytest.raises(VepError) as validation_error:
+        validate_job(workspace.root)
+    assert validation_error.value.code == "APPROVAL_STALE"
+    status, exit_code = job_status(workspace.root)
+    assert exit_code == 5
+    assert status["stored_state"] == JobState.HUMAN_APPROVED.value
+    assert status["approval_integrity"]["error_code"] == "APPROVAL_STALE"
 
 
 def test_approval_ledger_tampering_is_bounded_and_approval_specific(tmp_path: Path) -> None:
