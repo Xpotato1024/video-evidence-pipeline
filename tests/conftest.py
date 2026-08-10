@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from video_evidence_pipeline.storage.layout import is_link_or_junction
+
 
 @pytest.fixture
 def tmp_path() -> Path:
@@ -35,17 +37,68 @@ def _test_temp_root(config) -> Path:
         candidate = Path(raw_root)
         if not candidate.is_absolute():
             raise pytest.UsageError("VEP_TEST_TEMP_ROOT must be an absolute path")
-        candidate = candidate.absolute()
-    else:
-        candidate = Path(tempfile.mkdtemp(prefix="vep-", dir=tempfile.gettempdir()))
+        candidate = Path(os.path.abspath(os.fspath(candidate)))
+        repository_root = Path(config.rootpath).resolve(strict=False)
+        reason = _unsafe_basetemp_reason(candidate, repository_root)
+        if reason is not None:
+            raise pytest.UsageError(f"Unsafe test temporary root rejected: {candidate} is {reason}")
+        if not candidate.exists():
+            candidate.mkdir(parents=True)
+        return _short_windows_path(candidate)
 
-    repository_root = Path(config.rootpath).resolve()
+    candidate = Path(os.path.abspath(tempfile.gettempdir()))
+    repository_root = Path(config.rootpath).resolve(strict=False)
     reason = _unsafe_basetemp_reason(candidate, repository_root)
     if reason is not None:
         raise pytest.UsageError(f"Unsafe test temporary root rejected: {candidate} is {reason}")
-    if not candidate.exists():
-        candidate.mkdir(parents=True)
-    return _short_windows_path(candidate)
+
+    created = Path(tempfile.mkdtemp(prefix="vep-", dir=str(candidate)))
+    return _short_windows_path(created)
+
+
+def _path_is_within(candidate: Path, root: Path) -> bool:
+    candidate_text = os.path.normcase(os.path.abspath(os.fspath(candidate)))
+    root_text = os.path.normcase(os.path.abspath(os.fspath(root)))
+    try:
+        return os.path.commonpath([candidate_text, root_text]) == root_text
+    except ValueError:
+        return False
+
+
+def _path_contains_link_or_junction(path: Path) -> bool:
+    current = Path(os.path.abspath(os.fspath(path)))
+    while True:
+        if is_link_or_junction(current):
+            return True
+        parent = current.parent
+        if parent == current:
+            return False
+        current = parent
+
+
+def _unsafe_basetemp_reason(candidate: Path, repository_root: Path) -> str | None:
+    absolute = Path(os.path.abspath(os.fspath(candidate)))
+    if absolute == Path(absolute.anchor) or absolute.parent == Path(absolute.anchor):
+        return "at a drive or filesystem root, or directly below one"
+
+    if _path_contains_link_or_junction(absolute):
+        return "contains a symlink, junction, or reparse point"
+
+    try:
+        canonical = absolute.resolve(strict=False)
+        canonical_repository = repository_root.resolve(strict=False)
+    except OSError:
+        return "could not be canonically resolved"
+
+    if _path_is_within(canonical, canonical_repository) or _path_is_within(
+        absolute, repository_root
+    ):
+        return "inside the repository root"
+
+    if absolute.exists() and not absolute.is_dir():
+        return "not a directory"
+
+    return None
 
 
 def _short_windows_path(path: Path) -> Path:
@@ -87,21 +140,10 @@ def _resolved_basetemp(config) -> Path | None:
     if not raw_basetemp:
         return None
 
-    candidate = Path(str(raw_basetemp))
+    candidate = Path(os.path.abspath(str(raw_basetemp)))
     if not candidate.is_absolute():
         candidate = Path.cwd() / candidate
-    return candidate.resolve()
-
-
-def _unsafe_basetemp_reason(candidate: Path, repository_root: Path) -> str | None:
-    if candidate == repository_root or repository_root in candidate.parents:
-        return "inside the repository root"
-
-    drive_root = Path(candidate.anchor)
-    if candidate == drive_root or candidate.parent == drive_root:
-        return "at a drive root or directly below a drive root"
-
-    return None
+    return candidate
 
 
 def pytest_configure(config) -> None:

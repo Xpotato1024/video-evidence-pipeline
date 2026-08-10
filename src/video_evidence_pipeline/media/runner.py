@@ -16,6 +16,7 @@ from typing import BinaryIO, Literal, Protocol
 from video_evidence_pipeline.domain.hashing import sha256_file
 from video_evidence_pipeline.domain.media import ToolIdentity
 from video_evidence_pipeline.errors import VepError, configuration_error, io_error
+from video_evidence_pipeline.storage.layout import is_link_or_junction
 
 ToolName = Literal["ffmpeg", "ffprobe"]
 
@@ -129,6 +130,17 @@ def _system_executable(name: ToolName) -> str:
     return _validate_executable_path(name, resolved)
 
 
+def _path_contains_link_or_junction(path: Path) -> bool:
+    current = path
+    while True:
+        if is_link_or_junction(current):
+            return True
+        parent = current.parent
+        if parent == current:
+            return False
+        current = parent
+
+
 def _validate_executable_path(name: ToolName, value: str | Path) -> str:
     text = str(value)
     if not text or "\x00" in text:
@@ -137,7 +149,7 @@ def _validate_executable_path(name: ToolName, value: str | Path) -> str:
     if path.name.lower() not in {name, f"{name}.exe"}:
         raise configuration_error("MEDIA_TOOL_INVALID", "media tool executable name is invalid")
     try:
-        if not path.is_file() or path.is_symlink() or getattr(path, "is_junction", lambda: False)():
+        if not path.is_file() or _path_contains_link_or_junction(path):
             raise configuration_error(
                 "MEDIA_TOOL_INVALID", "media tool executable must be a regular non-link file"
             )
@@ -161,13 +173,13 @@ class _ExecutableSnapshot:
 def _stable_executable_snapshot(path: Path) -> _ExecutableSnapshot:
     """Hash a regular executable only when its metadata remains stable at both edges."""
     try:
-        if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
+        if _path_contains_link_or_junction(path):
             raise OSError("media tool executable must not be a link or junction")
         before = path.stat(follow_symlinks=False)
         if not stat.S_ISREG(before.st_mode):
             raise OSError("media tool executable must be a regular file")
         digest = sha256_file(path)
-        if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
+        if _path_contains_link_or_junction(path):
             raise OSError("media tool executable became a link or junction")
         after = path.stat(follow_symlinks=False)
         if not stat.S_ISREG(after.st_mode):

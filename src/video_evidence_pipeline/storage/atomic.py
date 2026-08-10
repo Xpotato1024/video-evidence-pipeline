@@ -23,7 +23,7 @@ from video_evidence_pipeline.storage.permissions import (
 
 
 def _temporary_path(target: Path) -> Path:
-    return target.parent / f".{target.name}.{uuid.uuid4().hex}.tmp"
+    return target.parent / f".vep-{uuid.uuid4().hex}.tmp"
 
 
 @dataclass(frozen=True, slots=True)

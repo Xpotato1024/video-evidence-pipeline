@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
-    [switch]$VerifyOnly
+    [switch]$VerifyOnly,
+    [switch]$AddToUserPath,
+    [string]$ArchivePath
 )
 
 $ErrorActionPreference = "Stop"
@@ -9,6 +11,10 @@ $ProgressPreference = "SilentlyContinue"
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $manifestPath = Join-Path $repositoryRoot "tools\ffmpeg-toolchain.json"
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+
+if ($VerifyOnly -and ($AddToUserPath -or $ArchivePath)) {
+    throw "-VerifyOnly cannot be combined with installation options"
+}
 
 if ($manifest.schema_version -ne "1.0" -or $manifest.platform -ne "windows-amd64") {
     throw "Unsupported FFmpeg toolchain manifest"
@@ -25,8 +31,18 @@ function Assert-RegularFile {
     if (-not ($item -is [System.IO.FileInfo]) -or $item.LinkType) {
         throw "FFmpeg executable is not a regular non-link file: $Path"
     }
-    if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
-        throw "FFmpeg executable is a reparse point: $Path"
+
+    $currentPath = [System.IO.Path]::GetFullPath($Path)
+    while ($true) {
+        $current = Get-Item -LiteralPath $currentPath -Force -ErrorAction Stop
+        if (($current.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "FFmpeg executable path contains a reparse point: $Path"
+        }
+        $parentPath = Split-Path -Parent $currentPath
+        if (-not $parentPath -or $parentPath -eq $currentPath) {
+            break
+        }
+        $currentPath = $parentPath
     }
 }
 
@@ -103,7 +119,13 @@ try {
         New-Item -ItemType Directory -Path $temporaryRoot -Force | Out-Null
 
         $archivePath = Join-Path $temporaryRoot $manifest.archive.name
-        Invoke-WebRequest -Uri $manifest.archive.url -OutFile $archivePath
+        if ($ArchivePath) {
+            $sourceArchive = (Resolve-Path -LiteralPath $ArchivePath -ErrorAction Stop).Path
+            Assert-RegularFile -Path $sourceArchive
+            Copy-Item -LiteralPath $sourceArchive -Destination $archivePath
+        } else {
+            Invoke-WebRequest -Uri $manifest.archive.url -OutFile $archivePath
+        }
         $archiveHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($archiveHash -ne $manifest.archive.sha256) {
             throw "Downloaded FFmpeg archive SHA-256 does not match the pinned manifest"
@@ -132,9 +154,13 @@ try {
     if ($VerifyOnly) {
         Write-Output "Pinned FFmpeg toolchain verification passed."
     } else {
-        Ensure-UserPath
         Ensure-UserToolchainEnvironment
-        Write-Output "Pinned FFmpeg toolchain installation passed. Restart the shell before using PATH-based commands."
+        if ($AddToUserPath) {
+            Ensure-UserPath
+            Write-Output "Pinned FFmpeg toolchain installation passed. Restart the shell before using PATH-based commands."
+        } else {
+            Write-Output "Pinned FFmpeg toolchain installation passed. VEP_FFMPEG_BIN_DIR is the runtime selection; User PATH was unchanged."
+        }
     }
 } finally {
     if ($temporaryRoot -and (Test-Path -LiteralPath $temporaryRoot)) {

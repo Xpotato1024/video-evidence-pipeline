@@ -7,7 +7,7 @@ status: active
 canonical: true
 canonical_for: ci-quality-gates
 created_at: 2026-08-06T16:28:00+09:00
-updated_at: 2026-08-10T18:18:37+09:00
+updated_at: 2026-08-10T02:00:00+09:00
 authors: ["Xpotato1024", "OpenAI ChatGPT"]
 owners: ["Xpotato1024"]
 reviewers: []

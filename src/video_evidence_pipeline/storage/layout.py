@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -11,9 +12,22 @@ from video_evidence_pipeline.errors import configuration_error, integrity_error,
 from video_evidence_pipeline.storage.permissions import ensure_private_directory
 
 
-def _is_link_or_junction(path: Path) -> bool:
+def is_link_or_junction(path: Path) -> bool:
     is_junction = getattr(path, "is_junction", lambda: False)
-    return path.is_symlink() or is_junction()
+    if path.is_symlink() or is_junction():
+        return True
+    try:
+        metadata = path.stat(follow_symlinks=False)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    reparse_point = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x0400)
+    return bool(getattr(metadata, "st_file_attributes", 0) & reparse_point)
+
+
+def _is_link_or_junction(path: Path) -> bool:
+    return is_link_or_junction(path)
 
 
 def _assert_no_links(start: Path, target: Path) -> None:

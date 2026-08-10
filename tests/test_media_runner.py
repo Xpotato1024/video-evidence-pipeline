@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import os
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -10,6 +11,7 @@ import pytest
 from video_evidence_pipeline.domain.hashing import sha256_file
 from video_evidence_pipeline.domain.media import ToolIdentity
 from video_evidence_pipeline.errors import VepError
+from video_evidence_pipeline.media import runner as media_runner
 from video_evidence_pipeline.media.runner import FFmpegRunner, _has_required_decode_limits
 
 
@@ -107,8 +109,9 @@ def test_runner_uses_fixed_argv_no_shell_and_disabled_stdin(tmp_path: Path) -> N
 def test_runner_prefers_configured_pinned_bin_dir(monkeypatch, tmp_path: Path) -> None:
     bin_dir = tmp_path / "pinned-bin"
     bin_dir.mkdir()
-    ffmpeg = bin_dir / "ffmpeg.exe"
-    ffprobe = bin_dir / "ffprobe.exe"
+    suffix = ".exe" if os.name == "nt" else ""
+    ffmpeg = bin_dir / f"ffmpeg{suffix}"
+    ffprobe = bin_dir / f"ffprobe{suffix}"
     ffmpeg.write_bytes(b"pinned ffmpeg executable")
     ffprobe.write_bytes(b"pinned ffprobe executable")
     observed: dict[str, object] = {}
@@ -129,6 +132,91 @@ def test_runner_prefers_configured_pinned_bin_dir(monkeypatch, tmp_path: Path) -
     )
 
     assert Path(str(observed["argv"][0])) == ffmpeg
+
+
+def test_runner_rejects_invalid_relative_configured_bin_dir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, object] = {}
+
+    def factory(argv: list[str], **kwargs: object) -> FakeProcess:
+        observed["argv"] = argv
+        observed.update(kwargs)
+        return FakeProcess()
+
+    monkeypatch.setenv("VEP_FFMPEG_BIN_DIR", "relative-media-tools")
+    with pytest.raises(VepError) as captured:
+        FFmpegRunner(popen_factory=factory)
+
+    assert captured.value.code == "MEDIA_TOOL_INVALID"
+    assert observed == {}
+
+
+def test_runner_does_not_fallback_to_path_when_configured_executable_is_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    bin_dir = tmp_path / "pinned-bin"
+    bin_dir.mkdir()
+    which_calls: list[str] = []
+
+    def fail_which(name: str) -> str | None:
+        which_calls.append(name)
+        return str(tmp_path / name)
+
+    monkeypatch.setenv("VEP_FFMPEG_BIN_DIR", str(bin_dir))
+    monkeypatch.setattr(media_runner.shutil, "which", fail_which)
+    with pytest.raises(VepError) as captured:
+        FFmpegRunner(popen_factory=lambda *_args, **_kwargs: FakeProcess())
+
+    assert captured.value.code == "MEDIA_TOOL_INVALID"
+    assert which_calls == []
+
+
+def test_runner_rejects_symlinked_configured_executable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    bin_dir = tmp_path / "pinned-bin"
+    bin_dir.mkdir()
+    target = tmp_path / "target-tool"
+    target.write_bytes(b"target")
+    executable = bin_dir / f"ffmpeg{'.exe' if os.name == 'nt' else ''}"
+    try:
+        executable.symlink_to(target)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+
+    monkeypatch.setenv("VEP_FFMPEG_BIN_DIR", str(bin_dir))
+    with pytest.raises(VepError) as captured:
+        FFmpegRunner(popen_factory=lambda *_args, **_kwargs: FakeProcess())
+
+    assert captured.value.code == "MEDIA_TOOL_INVALID"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="junctions are Windows-specific")
+def test_runner_rejects_junctioned_configured_bin_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    target_dir = tmp_path / "target-bin"
+    target_dir.mkdir()
+    (target_dir / "ffmpeg.exe").write_bytes(b"target")
+    junction = tmp_path / "pinned-bin"
+    result = subprocess.run(
+        ["cmd.exe", "/c", "mklink", "/J", str(junction), str(target_dir)],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if result.returncode != 0 or not getattr(junction, "is_junction", lambda: False)():
+        pytest.skip("junction creation is unavailable")
+
+    try:
+        monkeypatch.setenv("VEP_FFMPEG_BIN_DIR", str(junction))
+        with pytest.raises(VepError) as captured:
+            FFmpegRunner(popen_factory=lambda *_args, **_kwargs: FakeProcess())
+
+        assert captured.value.code == "MEDIA_TOOL_INVALID"
+    finally:
+        junction.rmdir()
 
 
 def test_runner_bounds_both_output_streams_while_draining(tmp_path: Path) -> None:
