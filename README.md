@@ -83,6 +83,31 @@ synthetic fixture実行は内部test routeだけです。
 `vep approve`はAI／Skill実行ではなく、対象SHA、reviewer、basis、`--confirm`を明示する人間操作です。
 reviewer identityはlocal CLIの自己申告lineageであり、暗号学的な本人確認ではありません。
 
+## Supported sources
+
+The matrix below describes the current VEP source contract. `Supported` means
+the source has a bounded VEP adapter; `Partial/site-dependent` means that
+provider or extractor behavior can still limit acquisition.
+
+| Source | source-kind | Input form | Status | Authentication | Backend | Limitations |
+|---|---|---|---|---|---|---|
+| Local file | `local_file` | Local filesystem path | Supported | Local processing authorization | Local immutable copy | The caller must have access to the local file. |
+| Direct HTTPS media | `direct_http` | HTTPS direct media URL | Supported | Local processing and network acquisition authorization | Pinned HTTPX transport | HTTPS direct media only. |
+| YouTube | `generic_ytdlp` | YouTube URL | Partial/site-dependent | Optional explicit browser cookies | Hardened yt-dlp | Current yt-dlp behavior applies. PO Token and other cases outside the VEP contract are not guaranteed. |
+| Other yt-dlp-supported services | `generic_ytdlp` | One service URL | Partial/site-dependent | Explicit browser cookies only where the existing policy allows them | Hardened yt-dlp | No playlists or arbitrary arguments; the contract is one progressive A/V source. |
+| Panopto | `panopto` | Viewer URL or canonical session locator | Supported | Official REST token first; explicit browser-cookie yt-dlp fallback only under the existing policy | Panopto REST with constrained yt-dlp fallback | Tenant policy, download prohibition, and DRM remain fail-closed. |
+| Box file ID/file URL | `box` | Numeric ID, `box://file/<id>`, `https://app.box.com/files/<id>`, or `https://app.box.com/file/<id>` | Supported | Official Box API token via `--box-token-env` | Box Files metadata/content API | File-level acquisition only. |
+| Box shared link | `box` | `https://app.box.com/s/<token>` or `https://www.box.com/s/<token>` | Supported | Official Box API token via `--box-token-env` | Box `shared_items` plus Files API | The shared item must resolve to a file; shared-link passwords are unsupported. |
+| Box Enterprise shared link | `box` | `https://<enterprise>.ent.box.com/s/<token>` | Supported | Official Box API token via `--box-token-env` | Box `shared_items` plus Files API | Uses official shared-item resolution; no EntBox adapter/source kind is introduced. |
+| Box folder shared link | `box` | Box folder shared link | Unsupported | — | — | Folder download is not a video acquisition contract. |
+| DRM/access-control bypass | — | — | Unsupported | — | — | VEP does not bypass provider restrictions. |
+
+Box shared links are capability-like private inputs. When a job needs one, the
+full link is kept only in the private local job input; manifests, acquisition
+evidence, stage manifests, and logs use redacted identity such as a locator
+fingerprint. A browser login alone does not satisfy the official Box REST token
+route; without an access token, shared-link acquisition is blocked.
+
 ## Pipeline
 
 1. authorization／requirements

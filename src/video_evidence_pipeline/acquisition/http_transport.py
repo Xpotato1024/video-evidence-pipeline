@@ -8,7 +8,7 @@ import ssl
 import time
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import unquote, urljoin, urlsplit
@@ -35,6 +35,11 @@ from video_evidence_pipeline.acquisition.staged import (
     open_private_staging_file,
 )
 from video_evidence_pipeline.domain.identifiers import sanitize_filename
+from video_evidence_pipeline.domain.locators import (
+    BoxLocatorKind,
+    box_locator_kind,
+    canonicalize_box_locator,
+)
 from video_evidence_pipeline.domain.manifests import HttpStatusCategory
 from video_evidence_pipeline.errors import VepError, configuration_error, integrity_error, io_error
 from video_evidence_pipeline.storage.layout import JobWorkspace
@@ -48,6 +53,7 @@ _REJECTED_MEDIA_TYPES = {
     "text/json",
     "text/xml",
 }
+_BOX_API_ORIGIN = ("https", "api.box.com", 443)
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +61,23 @@ class JsonResponse:
     data: Mapping[str, Any]
     status_code: int
     host: str
+
+
+@dataclass(frozen=True, slots=True)
+class BoxApiHeader:
+    """Typed, memory-only Box shared-link access for the official API origin."""
+
+    shared_link: str = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if canonicalize_box_locator(self.shared_link) != self.shared_link:
+            raise ValueError("BoxApi shared link must be canonical")
+        if box_locator_kind(self.shared_link) is not BoxLocatorKind.SHARED_LINK:
+            raise ValueError("BoxApi header requires a Box shared link")
+
+    @property
+    def value(self) -> str:
+        return f"shared_link={self.shared_link}"
 
 
 class _DeadlineNetworkStream(httpcore.NetworkStream):
@@ -226,6 +249,7 @@ def _headers_for(
     *,
     credential_origin: tuple[str, str, int] | None,
     bearer_token: str | None,
+    box_api_header: BoxApiHeader | None,
 ) -> dict[str, str]:
     headers = {
         "Accept": "application/octet-stream,*/*;q=0.8",
@@ -234,6 +258,8 @@ def _headers_for(
     }
     if bearer_token is not None and credential_origin == origin(locator):
         headers["Authorization"] = f"Bearer {bearer_token}"
+    if box_api_header is not None and origin(locator) == _BOX_API_ORIGIN:
+        headers["BoxApi"] = box_api_header.value
     return headers
 
 
@@ -278,6 +304,7 @@ def stream_download(
     client: httpx.Client | None = None,
     resolver: Resolver = default_resolver,
     bearer_token: str | None = None,
+    box_api_header: BoxApiHeader | None = None,
     credential_origin: tuple[str, str, int] | None = None,
     allow_sensitive_redirect_query: bool = False,
     display_name: str | None = None,
@@ -333,6 +360,7 @@ def stream_download(
                         current,
                         credential_origin=credential_origin,
                         bearer_token=bearer_token,
+                        box_api_header=box_api_header,
                     ),
                     follow_redirects=False,
                     timeout=_request_timeout(runtime, acquisition_deadline),
@@ -496,6 +524,7 @@ def get_json(
     client: httpx.Client | None = None,
     resolver: Resolver = default_resolver,
     bearer_token: str,
+    box_api_header: BoxApiHeader | None = None,
     credential_origin: tuple[str, str, int],
     error_code: str,
     access_denied_code: str | None = None,
@@ -529,6 +558,7 @@ def get_json(
                         locator,
                         credential_origin=credential_origin,
                         bearer_token=bearer_token,
+                        box_api_header=box_api_header,
                     ),
                     "Accept": "application/json",
                 },

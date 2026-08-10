@@ -23,6 +23,11 @@ related_documents:
 
 ## Source locator
 
+For `box`, file IDs and file URLs canonicalize to `box://file/<file-id>`.
+Shared-link inputs retain their private canonical HTTPS URL for the job input;
+machine artifacts use the locator fingerprint and do not persist the shared
+token.
+
 jobに保存するlocatorはcredentialを含まないstable identityに限定します。
 
 | source kind | canonical locator | 備考 |
@@ -105,11 +110,27 @@ access denial、DRM、extractor failureを回避しません。
 
 ## Box
 
+The `box` file-ID locator is extended with private shared-link locators. For a
+shared link, the adapter sends the typed `BoxApi: shared_link=<full-link>`
+header with the Bearer token to the official `api.box.com` `shared_items`
+endpoint, validates `type=file` and the numeric ID/name/size, then uses the
+official file metadata and content endpoints. Folder, web-link, and app-item
+responses fail closed. The full shared-link URL is never written to manifests,
+evidence, stage artifacts, logs, or errors; only the private job input may hold
+the source locator. `BoxApi` and Bearer headers are not sent to a signed CDN
+redirect, and the shared-link password contract is unsupported.
+
 official Files APIでfile IDのmetadataを確認し、content endpointを取得します。bearer tokenはBox API originだけへ
 送り、302先のsigned CDNへ転送しません。file-not-readyの`Retry-After`は回数と秒数をboundedに扱います。
 Box SHA-1等はSHA-256の代用にせず、実bytesから独自にSHA-256を計算します。shared-link passwordは非対応です。
 
 ## Troubleshooting
+
+Shared-link failures are explicit: `BOX_SHARED_LINK_INVALID` covers an
+invalid/expired link or malformed shared-item response,
+`BOX_SHARED_ITEM_NOT_FILE` covers folders and other non-file items, and
+`BOX_ACCESS_DENIED` covers provider access denial. A missing configured token
+continues to use `BOX_CREDENTIAL_REQUIRED`.
 
 - `NETWORK_ACQUISITION_NOT_AUTHORIZED`: network permissionを明示して再認可可能な新jobを作成する。
 - `NETWORK_SSRF_REJECTED`: public HTTPS destinationか確認する。検査無効化optionはない。
