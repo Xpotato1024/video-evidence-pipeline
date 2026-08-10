@@ -61,6 +61,30 @@ def test_default_os_temp_outside_repository_passes(
         shutil.rmtree(created)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX system temp root contract")
+def test_default_posix_system_temp_parent_is_allowed_before_mkdtemp(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repository_root = tmp_path / "repository"
+    repository_root.mkdir()
+    created = tmp_path / "created-by-mkdtemp"
+    calls: list[dict[str, object]] = []
+
+    monkeypatch.delenv("VEP_TEST_TEMP_ROOT", raising=False)
+    monkeypatch.setattr(temp_policy.tempfile, "gettempdir", lambda: "/tmp")
+
+    def record_mkdtemp(**kwargs: object) -> str:
+        calls.append(kwargs)
+        return str(created)
+
+    monkeypatch.setattr(temp_policy.tempfile, "mkdtemp", record_mkdtemp)
+
+    result = temp_policy._test_temp_root(_config(repository_root))
+
+    assert result == created
+    assert calls == [{"prefix": "vep-", "dir": "/tmp"}]
+
+
 def test_explicit_safe_temp_root_is_created_after_validation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

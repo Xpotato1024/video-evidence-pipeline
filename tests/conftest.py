@@ -48,7 +48,7 @@ def _test_temp_root(config) -> Path:
 
     candidate = Path(os.path.abspath(tempfile.gettempdir()))
     repository_root = Path(config.rootpath).resolve(strict=False)
-    reason = _unsafe_basetemp_reason(candidate, repository_root)
+    reason = _unsafe_basetemp_reason(candidate, repository_root, allow_system_temp_parent=True)
     if reason is not None:
         raise pytest.UsageError(f"Unsafe test temporary root rejected: {candidate} is {reason}")
 
@@ -76,9 +76,16 @@ def _path_contains_link_or_junction(path: Path) -> bool:
         current = parent
 
 
-def _unsafe_basetemp_reason(candidate: Path, repository_root: Path) -> str | None:
+def _unsafe_basetemp_reason(
+    candidate: Path,
+    repository_root: Path,
+    *,
+    allow_system_temp_parent: bool = False,
+) -> str | None:
     absolute = Path(os.path.abspath(os.fspath(candidate)))
-    if absolute == Path(absolute.anchor) or absolute.parent == Path(absolute.anchor):
+    if absolute == Path(absolute.anchor):
+        return "at a drive or filesystem root, or directly below one"
+    if absolute.parent == Path(absolute.anchor) and not allow_system_temp_parent:
         return "at a drive or filesystem root, or directly below one"
 
     if _path_contains_link_or_junction(absolute):
