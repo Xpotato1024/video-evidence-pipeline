@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0",
+  "platform": "windows-amd64",
+  "license": "GPL-3.0",
+  "provider": "Gyan",
+  "version": "8.1.2",
+  "archive": {
+    "name": "ffmpeg-8.1.2-full_build.zip",
+    "root_directory": "ffmpeg-8.1.2-full_build",
+    "url": "https://github.com/GyanD/codexffmpeg/releases/download/8.1.2/ffmpeg-8.1.2-full_build.zip",
+    "sha256": "b8cdefab5f50590a076c27c2b56b0294a0e6154faded28ba1ba05ebc4f801f57"
+  },
+  "install": {
+    "windows_user_local_relative_root": "video-evidence-pipeline/ffmpeg/8.1.2/ffmpeg-8.1.2-full_build",
+    "bin_relative_path": "bin"
+  },
+  "executables": {
+    "ffmpeg": {
+      "filename": "ffmpeg.exe",
+      "version_prefix": "ffmpeg version 8.1.2",
+      "sha256": "ad8f211bc894755e0061c55ab280ae00e8d3d4f15a8cc4372b24cfa247b5942e"
+    },
+    "ffprobe": {
+      "filename": "ffprobe.exe",
+      "version_prefix": "ffprobe version 8.1.2",
+      "sha256": "9df3b0b5275e830961df6d94e1f7a71121a7abd5ff708e9fec8a0b6084a55015"
+    }
+  }
+}

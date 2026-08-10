@@ -55,7 +55,7 @@ related_documents: ["VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-TRUST",
 | generic/Panopto backend | pinned yt-dlp adapter | preferred／implemented |
 | Panopto API | official REST v1 contract | preferred／implemented |
 | Box API | official API adapter | optional／implemented |
-| media | system FFmpeg／ffprobe、generic decoder-limit capability／executable SHA検証 | required／implemented |
+| media | pinned FFmpeg／ffprobe toolchain manifest、generic decoder-limit capability／executable SHA検証 | required／implemented |
 | scene candidate | FFmpeg `select` scene score + periodic + pure-Python pHash | required／implemented |
 | caption transcription | normalized subtitle、strict segment／lineage model | required／implemented |
 | local ASR | lazy faster-whisper adapter、explicit existing model directory、offline only | preferred／implemented adapter、runtime package optional |
@@ -71,6 +71,11 @@ cloud ASR／vision routeは実装していません。具体dependency version�
 `pyproject.toml`と`uv.lock`を正本とし、yt-dlpのruntime self-updateは許可しません。SSRF防御の接続先IP pinningは
 HTTPX/httpcoreのtransport contractへ依存するため、監査済みのexact versionをdirect dependencyとして固定します。
 更新は別PRでcompatibility testとsecurity auditを通します。
+
+The media baseline is provisioned by the pinned manifest at
+`tools/ffmpeg-toolchain.json` on Windows. The installer verifies the archive
+and executable SHA-256 values, and the runtime records and revalidates the
+selected executable identity for each normalization run.
 
 ## 4. Deferred／rejected
 

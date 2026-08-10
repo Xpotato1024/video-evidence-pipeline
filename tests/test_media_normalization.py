@@ -694,7 +694,7 @@ def test_actual_synthetic_normalization_publish_recovery_reuse_and_tamper(
     tmp_path: Path,
     with_subtitle: bool,
 ) -> None:
-    root = tmp_path.parent / "m1"
+    root = tmp_path / "m1"
     root.mkdir()
     source = _synthetic_source(root, audio=True, subtitle=with_subtitle)
     source_hash = sha256_file(source)
@@ -795,7 +795,7 @@ def test_actual_synthetic_normalization_publish_recovery_reuse_and_tamper(
 def test_actual_srt_markup_is_normalized_without_source_text_preservation_claim(
     tmp_path: Path,
 ) -> None:
-    root = tmp_path.parent / "m-markup"
+    root = tmp_path / "m-markup"
     root.mkdir()
     source = _synthetic_source(
         root,
@@ -814,7 +814,7 @@ def test_actual_srt_markup_is_normalized_without_source_text_preservation_claim(
 
 
 def test_normalized_validate_and_status_require_the_stage_manifest(tmp_path: Path) -> None:
-    root = tmp_path.parent / "m4"
+    root = tmp_path / "m4"
     root.mkdir()
     source = _synthetic_source(root, audio=False, subtitle=False)
     workspace, _raw_artifact = _acquired_job(root, source, "normalized-stage-integrity")
@@ -853,7 +853,7 @@ def test_normalized_validate_and_status_require_the_stage_manifest(tmp_path: Pat
 def test_actual_synthetic_video_without_audio_or_subtitle_is_frame_only_success(
     tmp_path: Path,
 ) -> None:
-    root = tmp_path.parent / "m2"
+    root = tmp_path / "m2"
     root.mkdir()
     source = _synthetic_source(root, audio=False, subtitle=False)
     workspace, _raw_artifact = _acquired_job(root, source, "frame-only")
@@ -870,7 +870,7 @@ def test_actual_synthetic_video_without_audio_or_subtitle_is_frame_only_success(
 def test_actual_sparse_video_records_observed_frame_pts_not_requested_seek(
     tmp_path: Path,
 ) -> None:
-    root = tmp_path.parent / "m3"
+    root = tmp_path / "m3"
     root.mkdir()
     source = _synthetic_source(root, audio=False, subtitle=False, frame_rate=2)
     workspace, _raw_artifact = _acquired_job(root, source, "sparse-frame-pts")
@@ -974,7 +974,7 @@ def test_concurrent_normalization_keeps_active_attempt_and_publishes_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root = tmp_path.parent / "n"
+    root = tmp_path / "n"
     root.mkdir()
     source = root / "s.bin"
     source.write_bytes(b"synthetic raw bytes")
