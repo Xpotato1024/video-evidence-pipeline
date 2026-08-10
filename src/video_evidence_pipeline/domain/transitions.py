@@ -49,6 +49,7 @@ for _state in JobState:
 IMPLEMENTED_TRANSITIONS = {
     (JobState.CREATED, JobState.AUTHORIZED),
     (JobState.AUTHORIZED, JobState.ACQUIRED),
+    (JobState.ACQUIRED, JobState.NORMALIZED),
 }
 
 

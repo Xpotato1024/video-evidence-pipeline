@@ -1,0 +1,220 @@
+{
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/normalization-config.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "analysis_crf": {
+      "default": 23,
+      "maximum": 51,
+      "minimum": 0,
+      "title": "Analysis Crf",
+      "type": "integer"
+    },
+    "analysis_height": {
+      "default": 360,
+      "maximum": 4096,
+      "minimum": 64,
+      "title": "Analysis Height",
+      "type": "integer"
+    },
+    "analysis_video_codec": {
+      "const": "libx264",
+      "default": "libx264",
+      "title": "Analysis Video Codec",
+      "type": "string"
+    },
+    "analysis_width": {
+      "default": 640,
+      "maximum": 4096,
+      "minimum": 64,
+      "title": "Analysis Width",
+      "type": "integer"
+    },
+    "duration_tolerance_ms": {
+      "default": 1000,
+      "maximum": 10000,
+      "minimum": 0,
+      "title": "Duration Tolerance Ms",
+      "type": "integer"
+    },
+    "frame_height": {
+      "default": 180,
+      "maximum": 1080,
+      "minimum": 32,
+      "title": "Frame Height",
+      "type": "integer"
+    },
+    "frame_width": {
+      "default": 320,
+      "maximum": 1920,
+      "minimum": 32,
+      "title": "Frame Width",
+      "type": "integer"
+    },
+    "maximum_decoded_audio_sample_slots_per_frame": {
+      "default": 1048576,
+      "description": "FFmpeg generic -max_samples decoder slots per input audio frame",
+      "maximum": 1048576,
+      "minimum": 1,
+      "title": "Maximum Decoded Audio Sample Slots Per Frame",
+      "type": "integer"
+    },
+    "maximum_decoded_video_pixel_slots_per_frame": {
+      "default": 34070528,
+      "description": "FFmpeg generic -max_pixels decoder slots per input frame",
+      "maximum": 34070528,
+      "minimum": 4096,
+      "title": "Maximum Decoded Video Pixel Slots Per Frame",
+      "type": "integer"
+    },
+    "maximum_duration_ms": {
+      "default": 14400000,
+      "exclusiveMinimum": 0,
+      "maximum": 14400000,
+      "title": "Maximum Duration Ms",
+      "type": "integer"
+    },
+    "maximum_frame_candidates": {
+      "default": 512,
+      "maximum": 4096,
+      "minimum": 1,
+      "title": "Maximum Frame Candidates",
+      "type": "integer"
+    },
+    "maximum_frame_output_bytes": {
+      "default": 33554432,
+      "maximum": 67108864,
+      "minimum": 1048576,
+      "title": "Maximum Frame Output Bytes",
+      "type": "integer"
+    },
+    "maximum_output_bytes": {
+      "default": 4294967296,
+      "maximum": 8589934592,
+      "minimum": 1048576,
+      "title": "Maximum Output Bytes",
+      "type": "integer"
+    },
+    "maximum_output_file_bytes": {
+      "default": 1073741824,
+      "maximum": 4294967296,
+      "minimum": 1048576,
+      "title": "Maximum Output File Bytes",
+      "type": "integer"
+    },
+    "maximum_source_audio_channels": {
+      "default": 8,
+      "maximum": 64,
+      "minimum": 1,
+      "title": "Maximum Source Audio Channels",
+      "type": "integer"
+    },
+    "maximum_source_audio_sample_rate_hz": {
+      "default": 192000,
+      "maximum": 384000,
+      "minimum": 8000,
+      "title": "Maximum Source Audio Sample Rate Hz",
+      "type": "integer"
+    },
+    "maximum_source_height": {
+      "default": 8192,
+      "maximum": 32768,
+      "minimum": 64,
+      "title": "Maximum Source Height",
+      "type": "integer"
+    },
+    "maximum_source_pixels": {
+      "default": 33554432,
+      "maximum": 33554432,
+      "minimum": 4096,
+      "title": "Maximum Source Pixels",
+      "type": "integer"
+    },
+    "maximum_source_width": {
+      "default": 8192,
+      "maximum": 32768,
+      "minimum": 64,
+      "title": "Maximum Source Width",
+      "type": "integer"
+    },
+    "maximum_streams": {
+      "default": 128,
+      "maximum": 4096,
+      "minimum": 1,
+      "title": "Maximum Streams",
+      "type": "integer"
+    },
+    "maximum_subtitle_bytes": {
+      "default": 16777216,
+      "maximum": 67108864,
+      "minimum": 1048576,
+      "title": "Maximum Subtitle Bytes",
+      "type": "integer"
+    },
+    "perceptual_hash_distance": {
+      "default": 4,
+      "maximum": 64,
+      "minimum": 0,
+      "title": "Perceptual Hash Distance",
+      "type": "integer"
+    },
+    "periodic_frame_interval_seconds": {
+      "default": 30.0,
+      "exclusiveMinimum": 0,
+      "maximum": 3600,
+      "title": "Periodic Frame Interval Seconds",
+      "type": "number"
+    },
+    "scene_change_threshold": {
+      "default": 0.3,
+      "exclusiveMaximum": 1,
+      "exclusiveMinimum": 0,
+      "title": "Scene Change Threshold",
+      "type": "number"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "speech_sample_rate_hz": {
+      "default": 16000,
+      "maximum": 96000,
+      "minimum": 8000,
+      "title": "Speech Sample Rate Hz",
+      "type": "integer"
+    },
+    "stderr_limit_bytes": {
+      "default": 4194304,
+      "maximum": 67108864,
+      "minimum": 4096,
+      "title": "Stderr Limit Bytes",
+      "type": "integer"
+    },
+    "stdout_limit_bytes": {
+      "default": 4194304,
+      "maximum": 67108864,
+      "minimum": 4096,
+      "title": "Stdout Limit Bytes",
+      "type": "integer"
+    },
+    "timestamp_merge_tolerance_seconds": {
+      "default": 0.01,
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Timestamp Merge Tolerance Seconds",
+      "type": "number"
+    },
+    "tool_timeout_seconds": {
+      "default": 600.0,
+      "exclusiveMinimum": 0,
+      "maximum": 86400,
+      "title": "Tool Timeout Seconds",
+      "type": "number"
+    }
+  },
+  "title": "NormalizationConfig",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

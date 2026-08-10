@@ -26,6 +26,7 @@ from video_evidence_pipeline.domain.job import (
     job_to_yaml,
     load_job_yaml,
 )
+from video_evidence_pipeline.domain.media import NormalizationConfig
 from video_evidence_pipeline.domain.state import JobState
 from video_evidence_pipeline.domain.transitions import (
     TransitionRecord,
@@ -39,6 +40,17 @@ from video_evidence_pipeline.errors import (
     integrity_error,
     state_error,
 )
+from video_evidence_pipeline.media.normalization import (
+    NormalizationResult,
+    cleanup_attempt,
+    cleanup_stale_attempts,
+    create_attempt_directory,
+    load_normalization_result,
+    process_media,
+    publish_staged_media,
+    recover_normalization_result,
+)
+from video_evidence_pipeline.media.runner import FFmpegRunner
 from video_evidence_pipeline.storage.atomic import (
     atomic_write_json,
     atomic_write_new_bytes,
@@ -46,6 +58,7 @@ from video_evidence_pipeline.storage.atomic import (
 )
 from video_evidence_pipeline.storage.jsonl import append_jsonl, exclusive_append_lock, read_jsonl
 from video_evidence_pipeline.storage.layout import JobWorkspace
+from video_evidence_pipeline.storage.locking import exclusive_file_lock
 
 
 def _load_context(path: Path) -> tuple[JobWorkspace, JobSpec, list[TransitionRecord], JobState]:
@@ -118,8 +131,10 @@ def validate_job(path: Path) -> dict[str, Any]:
         authorization = _authorization(workspace)
         _validate_authorization_binding(job, transitions, authorization)
         _require_current_authorization_fingerprint(job, authorization)
-    if state is JobState.ACQUIRED:
-        verify_acquired_bundle(workspace, job)
+    if state in {JobState.ACQUIRED, JobState.NORMALIZED}:
+        raw_artifact = verify_acquired_bundle(workspace, job)
+        if state is JobState.NORMALIZED:
+            load_normalization_result(workspace, job, raw_artifact)
     return {
         "valid": True,
         "job_id": job.job_id,
@@ -279,6 +294,151 @@ def acquire_job(
         return result
 
 
+def normalize_job(
+    path: Path,
+    config: NormalizationConfig | None = None,
+    runner_override: FFmpegRunner | None = None,
+) -> NormalizationResult:
+    normalization_config = config or NormalizationConfig()
+    workspace = JobWorkspace.open(path)
+    with exclusive_file_lock(
+        workspace.normalization_lock_path,
+        busy_code="NORMALIZATION_BUSY",
+        busy_message="media normalization is already running",
+        failure_code="NORMALIZATION_LOCK_FAILED",
+        failure_message="media normalization could not be locked",
+    ):
+        cleanup_stale_attempts(workspace)
+        return _normalize_job_locked(path, normalization_config, runner_override)
+
+
+def _normalize_job_locked(
+    path: Path,
+    normalization_config: NormalizationConfig,
+    runner_override: FFmpegRunner | None,
+) -> NormalizationResult:
+    workspace = JobWorkspace.open(path)
+    with exclusive_append_lock(workspace.transitions_jsonl):
+        workspace, job, transitions, state = _load_context(path)
+        if state not in {JobState.ACQUIRED, JobState.NORMALIZED}:
+            raise state_error("STATE_GATE_FAILED", "job must be ACQUIRED before normalization")
+        authorization = _authorization(workspace)
+        _require_current_authorization(job, transitions, authorization)
+        raw_artifact = verify_acquired_bundle(workspace, job)
+        if state is JobState.NORMALIZED:
+            return load_normalization_result(
+                workspace,
+                job,
+                raw_artifact,
+                expected_config=normalization_config,
+            )
+        recovered = recover_normalization_result(
+            workspace,
+            job,
+            raw_artifact,
+            expected_config=normalization_config,
+        )
+        if recovered is not None:
+            _append_transition_locked(
+                workspace,
+                job,
+                from_state=JobState.ACQUIRED,
+                to_state=JobState.NORMALIZED,
+                trigger="normalize.ffmpeg",
+            )
+            return recovered
+        snapshot_sequence = transitions[-1].sequence
+        snapshot_raw_artifact = raw_artifact
+        source_path = workspace.safe_path(raw_artifact.relative_storage_path)
+
+    runner = runner_override or FFmpegRunner()
+    ffmpeg_identity, ffprobe_identity = runner.discover_identities(
+        timeout_seconds=normalization_config.tool_timeout_seconds,
+        output_limit_bytes=normalization_config.stdout_limit_bytes,
+    )
+    runner.pin_identities(ffmpeg_identity, ffprobe_identity)
+    attempt = create_attempt_directory(workspace)
+    operation_failed = False
+    try:
+        staged = process_media(
+            runner,
+            source_path,
+            snapshot_raw_artifact,
+            normalization_config,
+            attempt,
+            ffmpeg_identity,
+            ffprobe_identity,
+        )
+        with exclusive_append_lock(workspace.transitions_jsonl):
+            workspace, job, transitions, state = _load_context(path)
+            current_raw_artifact = verify_acquired_bundle(workspace, job)
+            if state is JobState.NORMALIZED:
+                winner = load_normalization_result(
+                    workspace,
+                    job,
+                    current_raw_artifact,
+                    expected_config=normalization_config,
+                )
+                if (
+                    winner.media_manifest.normalization_fingerprint
+                    != staged.normalization_fingerprint
+                ):
+                    raise integrity_error(
+                        "NORMALIZATION_FINGERPRINT_MISMATCH",
+                        "concurrent normalization used a different tool fingerprint",
+                    )
+                return winner
+            if (
+                state is not JobState.ACQUIRED
+                or transitions[-1].sequence != snapshot_sequence
+                or current_raw_artifact != snapshot_raw_artifact
+            ):
+                raise state_error(
+                    "NORMALIZATION_SNAPSHOT_STALE",
+                    "job or raw source changed while media tools were running",
+                )
+            recovered = recover_normalization_result(
+                workspace,
+                job,
+                current_raw_artifact,
+                expected_config=normalization_config,
+            )
+            if recovered is not None:
+                _append_transition_locked(
+                    workspace,
+                    job,
+                    from_state=JobState.ACQUIRED,
+                    to_state=JobState.NORMALIZED,
+                    trigger="normalize.ffmpeg",
+                )
+                return recovered
+            runner.revalidate_pinned_identities(ffmpeg_identity, ffprobe_identity)
+            result = publish_staged_media(
+                workspace,
+                job,
+                current_raw_artifact,
+                normalization_config,
+                staged,
+            )
+            _append_transition_locked(
+                workspace,
+                job,
+                from_state=JobState.ACQUIRED,
+                to_state=JobState.NORMALIZED,
+                trigger="normalize.ffmpeg",
+            )
+            return result
+    except Exception:
+        operation_failed = True
+        raise
+    finally:
+        try:
+            cleanup_attempt(workspace, attempt)
+        except VepError:
+            if not operation_failed:
+                raise
+
+
 def _append_transition_locked(
     workspace: JobWorkspace,
     job: JobSpec,
@@ -338,7 +498,7 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
             exit_code = int(exc.exit_code)
 
     artifact_status: dict[str, Any] = {"status": "not-applicable"}
-    if state is JobState.ACQUIRED:
+    if state in {JobState.ACQUIRED, JobState.NORMALIZED}:
         try:
             artifact = verify_acquired_bundle(workspace, job)
             artifact_status = {
@@ -350,6 +510,20 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
         except VepError as exc:
             artifact_status = {"status": "invalid", "error_code": exc.code}
             exit_code = int(exc.exit_code)
+    normalization_status: dict[str, Any] = {"status": "not-applicable"}
+    if state is JobState.NORMALIZED and artifact_status.get("status") == "valid":
+        try:
+            raw_artifact = verify_acquired_bundle(workspace, job)
+            normalization_result = load_normalization_result(workspace, job, raw_artifact)
+            media_manifest = normalization_result.media_manifest
+            normalization_status = {
+                "status": "valid",
+                "normalization_fingerprint": media_manifest.normalization_fingerprint,
+                "frame_count": len(media_manifest.frame_index.records),
+            }
+        except VepError as exc:
+            normalization_status = {"status": "invalid", "error_code": exc.code}
+            exit_code = int(exc.exit_code)
     return (
         {
             "job_id": job.job_id,
@@ -357,6 +531,7 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
             "job_fingerprint": current_fingerprint,
             "authorization": authorization_status,
             "artifact_integrity": artifact_status,
+            "normalization_integrity": normalization_status,
         },
         exit_code,
     )

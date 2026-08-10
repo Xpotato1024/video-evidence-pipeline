@@ -723,7 +723,7 @@ def test_unimplemented_transition_is_rejected_before_integrity_status(tmp_path: 
     result = acquire_job(job_path)
     transitions_path = job_path / "manifests/transitions.jsonl"
     records = read_jsonl(transitions_path, TransitionRecord)
-    append = TransitionRecord(
+    normalized = TransitionRecord(
         sequence=4,
         job_id="demo-report",
         from_state=records[-1].to_state,
@@ -732,7 +732,17 @@ def test_unimplemented_transition_is_rejected_before_integrity_status(tmp_path: 
         occurred_at=records[-1].occurred_at,
         job_fingerprint=records[-1].job_fingerprint,
     )
+    append = TransitionRecord(
+        sequence=5,
+        job_id="demo-report",
+        from_state=normalized.to_state,
+        to_state="TRANSCRIBED",
+        trigger="tampered.unimplemented",
+        occurred_at=records[-1].occurred_at,
+        job_fingerprint=records[-1].job_fingerprint,
+    )
     with transitions_path.open("ab") as handle:
+        handle.write((normalized.model_dump_json() + "\n").encode())
         handle.write((append.model_dump_json() + "\n").encode())
     artifact = result.source_manifest.artifact_record.artifact
     (job_path / artifact.relative_storage_path).write_bytes(b"tampered")

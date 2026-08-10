@@ -49,7 +49,19 @@ jobs:
           enable-cache: true
       - run: uv python install "${{ env.PYTHON_VERSION }}"
       - run: uv sync --locked --all-groups
+      - name: Install system FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ffmpeg
+      - name: Verify system FFmpeg capabilities
+        run: >-
+          uv run python -c "from video_evidence_pipeline.media.runner import FFmpegRunner;
+          ffmpeg, ffprobe = FFmpegRunner().discover_identities(timeout_seconds=30,
+          output_limit_bytes=4194304); print(ffmpeg.version); print(ffprobe.version);
+          print(','.join(ffmpeg.capabilities))"
       - run: uv run pytest -q
+        env:
+          VEP_REQUIRE_FFMPEG_TESTS: "1"
       - run: uv run vep schema check
 
   repository-validation:

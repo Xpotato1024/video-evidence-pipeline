@@ -45,7 +45,8 @@ GitHubプランが要件を満たした時点で、`lint`、`tests`、`repositor
 
 ## 3. 検査内容
 
-`lint`はRuffのlint／format、`tests`はvalidatorのunit/contract test、
+`lint`はRuffのlint／format、`tests`はUbuntu package repositoryからsystem FFmpeg／ffprobeを明示導入し、
+capability確認とsynthetic mediaだけを使う実変換integrationを必須化し、
 `repository-validation`は実リポジトリ全体の次を検査します。
 
 - 文書front matterと文書台帳
@@ -69,6 +70,10 @@ Cookie、OpenAI等のcredentialをActions secretsへ登録しません。
 network acquisition testはHTTPX MockTransport、fake DNS resolver、fake subprocess runnerを使用し、
 real networkへ接続しません。synthetic token／Cookie／signed URL markerがmanifest、CLI JSON、transition、
 log、safe exceptionへ残らないことも検査します。manual live integrationは通常CIの成功条件にしません。
+
+media integrationは`VEP_REQUIRE_FFMPEG_TESTS=1`でtool不在時のskipを禁止します。実講義mediaや外部取得を
+使わず、CI内で生成した短いvideo／audio／subtitle fixtureについてproxy、speech audio、subtitle、frame、
+manifest、transition、idempotent reuseを検証します。localでtoolがPATHにない場合だけ同testは理由付きskipです。
 
 ActionsはNode 24対応版を完全commit SHAでpinし、Dependabotが更新候補を作成します。
 

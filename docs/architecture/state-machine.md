@@ -43,7 +43,7 @@ related_documents: ["VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-AGENTS"
 | `CANCELLED` | ユーザーが処理を中止した |
 
 全stateは`JobState` enumとして実装されています。実行可能な遷移は現在
-`CREATED → AUTHORIZED → ACQUIRED`だけです。後続遷移はmodel／policy上の設計契約として存在しても、
+`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED`です。後続遷移はmodel／policy上の設計契約として存在しても、
 CLIから実行できません。
 
 ## 2. 遷移
@@ -102,14 +102,15 @@ stateDiagram-v2
 - copy後のsize／SHA-256再検証
 - authorizationのjob fingerprintがcurrent jobと一致
 
-ここまでが実装済みgateです。以下は未実装stageの設計gateであり、現在のCLIでは実行できません。
-
 ### `ACQUIRED → NORMALIZED`
 
-- ffprobe成功
-- durationが妥当
-- audio/video/subtitleの存在が記録
-- 必要な派生成果物のhashが存在
+- safe demuxer／file protocol限定でdecoder slot上限を入力前に指定したffprobeが成功し、duration、dimensions、audio rate／channels、stream countが上限内
+- analysis proxyと、audio streamがある場合のmono固定rate lossless speech audioを出力再probe済み
+- normalizable-text allowlistのtext subtitleだけはWebVTT由来のnormalized decoded cue JSONLを出力し、raw-text preservationを主張せず、ASS／SSA／`mov_text`、bitmap／unknown subtitleはunsupported warningとして記録
+- periodic／scene-changeの要求candidateと実際にFFmpegが観測したframe PTSがduration範囲内で、pHash重複統合理由を保持
+- raw artifactが不変で、全派生成果物のsize／SHA-256とnormalization fingerprintが一致
+
+ここまでが実装済みgateです。以下は未実装stageの設計gateであり、現在のCLIでは実行できません。
 
 ### `NORMALIZED → TRANSCRIBED`
 

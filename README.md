@@ -6,7 +6,8 @@
 > [!IMPORTANT]
 > 現在実装済みなのは、core domain contracts、local workspace、`vep` CLI、明示authorization、
 > `local_file`／`direct_http`／`generic_ytdlp`／`panopto`／`box`による
-> `CREATED → AUTHORIZED → ACQUIRED`です。FFmpeg処理、ASR、
+> acquisitionと、system FFmpeg／ffprobeによるmedia normalizationです。実動作するstate pathは
+> `CREATED → AUTHORIZED → ACQUIRED → NORMALIZED`です。ASR、
 > evidence／authoring／audit／approval／exportは未実装です。
 
 ## Quickstart
@@ -30,6 +31,7 @@ uv run vep job authorize .local/jobs/demo-report \
   --allow-local-processing \
   --deny-external-api
 uv run vep acquire .local/jobs/demo-report
+uv run vep normalize .local/jobs/demo-report
 uv run vep job status .local/jobs/demo-report
 ```
 
@@ -94,6 +96,6 @@ uv run python scripts/validate_repository.py --root .
 
 ## Status
 
-- Implemented: core contracts、generated Schema、CLI、local workspace、local／network acquisition
-- Current state path: `CREATED → AUTHORIZED → ACQUIRED`
-- Next: FFmpeg／ffprobeによるmedia normalization（親ロードマップの後続Issue）
+- Implemented: core contracts、generated Schema、CLI、local workspace、local／network acquisition、media normalization
+- Current state path: `CREATED → AUTHORIZED → ACQUIRED → NORMALIZED`
+- Next: transcription／evidence ledger（親ロードマップの後続Issue）

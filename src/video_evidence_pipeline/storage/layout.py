@@ -69,6 +69,8 @@ class JobWorkspace:
             root / "authorization",
             root / "source",
             root / "source/raw",
+            root / "normalized",
+            root / "normalized/staging",
             root / "manifests",
             root / "manifests/stages",
             root / "logs",
@@ -116,6 +118,18 @@ class JobWorkspace:
     @property
     def acquisition_manifest_json(self) -> Path:
         return self.safe_path("manifests/stages/acquisition.json")
+
+    @property
+    def media_manifest_json(self) -> Path:
+        return self.safe_path("manifests/media-manifest.json")
+
+    @property
+    def normalization_manifest_json(self) -> Path:
+        return self.safe_path("manifests/stages/normalization.json")
+
+    @property
+    def normalization_lock_path(self) -> Path:
+        return self.safe_path("normalized/.normalization.lock")
 
     @property
     def transitions_jsonl(self) -> Path:

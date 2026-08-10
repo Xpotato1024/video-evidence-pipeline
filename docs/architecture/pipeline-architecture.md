@@ -28,7 +28,7 @@ related_documents: ["VEP-ARCH-CONTEXT", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-STATE", 
 
 現在、Intake / Authorizationのcore contractと、Acquisitionの`local_file`、`direct_http`、
 `generic_ytdlp`、`panopto`、`box`経路が実装済みです。実動作するstate pathは
-`CREATED → AUTHORIZED → ACQUIRED`です。media normalization以降の層は設計済みですが未実装です。
+`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED`です。transcription以降の層は設計済みですが未実装です。
 
 ## 2. 層
 
@@ -91,9 +91,7 @@ flowchart TD
 - analysis proxy作成
 - speech audio抽出
 - subtitle normalization
-- scene／periodic／semantic boundary frame抽出
-- contact sheet
-- clip生成
+- FFmpeg scene-change／periodic candidate frame抽出とpure-Python perceptual hash重複統合
 
 出力:
 
@@ -101,6 +99,31 @@ flowchart TD
 - normalized audio/video
 - subtitle segments
 - frame index
+
+実装はsystem FFmpeg／ffprobeだけを固定argv、`shell=False`、stdin無効、wall-clock timeout、bounded
+stdout／stderrで起動します。入力protocolは`file`、demuxerはMVP allowlistへ限定し、playlist／external
+reference形式を拒否します。全local inputではconfigの`-max_streams`、`-max_pixels`、`-max_samples`を
+probe／decodeより前へ指定します。`-h full`で両toolのgenericな`<int64>` decoder limitを確認し、source
+metadataのdimensions、audio sample rate、channelsも別途上限検証します。capability discoveryの両edgeと、pin後の
+各subprocess起動直前／終了直後、およびpublish直前に実行fileのSHA-256とstable metadataを再検証します。これにより
+persistentまたは偶発的なtool replacementは結果をpublishせず拒否します。same-userがhash境界の間だけ実行fileを
+swapして復元するtransient raceはこのMVPのcovered threatではなく、tool installationをtrusted local-admin boundaryに
+置きます。PySceneDetectを追加dependencyにせずFFmpegの`select` scene scoreを採用したのは、
+同じ検証済みtool identityとprocess境界でcandidate抽出を完結し、lock／fingerprint／CI実行契約を狭く保つためです。
+scene検出失敗時はperiodicだけへsilent fallbackせずstageを失敗させます。
+
+`normalized/staging/`はnormalization専用のcross-process lock下だけで使用します。hard crash後のstale
+attemptは同lock取得後にdirect childだけを検証して削除し、link、junction、mount point、traversal形状は拒否します。
+各output、frame、subtitle、およびaggregate staging bytesを生成中に上限検証し、WebVTT／cue JSONLのfull readは
+per-subtitle上限を`stat`で確認した後だけに行います。frame indexの`timestamp_ms`はseek要求値ではなくFFmpeg
+`showinfo`で観測した抽出frame PTSであり、要求candidateと選定理由は`candidate_timestamps_ms`に別途保持します。
+これらの上限は設定でunboundedに戻せず、aggregateは最大8 GiB、通常の単一outputは最大4 GiB、frameは最大64 MiB、
+subtitleの生成／readは最大64 MiBです。
+
+normalizable-text allowlistのembedded subtitle codecは`subrip`／`srt`／`text`／`webvtt`だけです。ASS、SSA、
+`mov_text`などstyleまたはcontainer表現を安全にnormalizationできないcodecはunsupportedとして記録します。cue JSONLは
+FFmpeg WebVTT transcodeから得るnormalized decoded cue textであり、`raw_text_preserved`は常にfalseです。raw media
+bytesはimmutableのままですが、SRT／WebVTTのpresentationやcontrol markupを含むcue textはexact preservationを約束しません。
 
 ### 2.4 Evidence Construction
 
@@ -213,6 +236,9 @@ domain modelは特定backendの引数やレスポンスを直接保持せず、a
 fingerprintが一致し、出力検証が成功する場合は再利用できます。raw sourceの再取得、AI出力の暗黙な再生成は行いません。
 network sourceは有効な`ACQUIRED` bundleをlocal検証して再利用し、通常の再実行でnetworkへ接続しません。
 `local_file`は再probeしてcontent changeを検出します。
+完全な`NORMALIZED` bundleの再実行は、保存済みtool version／executable SHA-256／capabilityを含むfingerprintと
+全artifactをlocal検証し、FFmpeg／ffprobe subprocessを起動せず再利用します。新規処理中はjob lockを保持せず、
+snapshot取得と公開直前のstate／raw hash再検証だけをlock下で行います。
 
 ## 6. Failure behavior
 

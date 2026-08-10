@@ -22,6 +22,7 @@ from video_evidence_pipeline.application import (
     authorize_job,
     initialize_job,
     job_status,
+    normalize_job,
     validate_job,
 )
 from video_evidence_pipeline.domain.job import SourceKind
@@ -254,6 +255,29 @@ def acquire(
             "artifact_id": artifact.artifact_id,
             "content_sha256": artifact.content_sha256,
             "size_bytes": artifact.size_bytes,
+            "reused": result.reused,
+        },
+        json_output=json_output,
+    )
+
+
+@app.command("normalize")
+def normalize(
+    workspace: Path,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    result = _run(lambda: normalize_job(workspace), json_output=json_output)
+    manifest = result.media_manifest
+    _emit(
+        {
+            "ok": True,
+            "job_id": manifest.job_id,
+            "state": "NORMALIZED",
+            "normalization_fingerprint": manifest.normalization_fingerprint,
+            "frame_count": len(manifest.frame_index.records),
+            "subtitle_count": len(manifest.subtitles),
+            "speech_audio": manifest.speech_audio is not None,
+            "warnings": manifest.warnings,
             "reused": result.reused,
         },
         json_output=json_output,
