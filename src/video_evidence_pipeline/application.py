@@ -27,7 +27,9 @@ from video_evidence_pipeline.domain.job import (
     load_job_yaml,
 )
 from video_evidence_pipeline.domain.media import NormalizationConfig
+from video_evidence_pipeline.domain.serialization import fingerprint
 from video_evidence_pipeline.domain.state import JobState
+from video_evidence_pipeline.domain.transcription import TranscriptionConfig
 from video_evidence_pipeline.domain.transitions import (
     TransitionRecord,
     require_implemented_transition,
@@ -40,6 +42,24 @@ from video_evidence_pipeline.errors import (
     integrity_error,
     state_error,
 )
+from video_evidence_pipeline.evidence.pipeline import (
+    EvidenceImportResult,
+    EvidencePrepareResult,
+    commit_staged_evidence,
+    load_evidence_request,
+    load_evidence_result,
+    prepare_evidence_request,
+    read_evidence_response,
+    recover_evidence_result,
+    stage_evidence,
+)
+from video_evidence_pipeline.evidence.pipeline import cleanup_attempt as cleanup_evidence_attempt
+from video_evidence_pipeline.evidence.pipeline import (
+    cleanup_stale_attempts as cleanup_stale_evidence_attempts,
+)
+from video_evidence_pipeline.evidence.pipeline import (
+    create_attempt_directory as create_evidence_attempt_directory,
+)
 from video_evidence_pipeline.media.normalization import (
     NormalizationResult,
     cleanup_attempt,
@@ -51,6 +71,12 @@ from video_evidence_pipeline.media.normalization import (
     recover_normalization_result,
 )
 from video_evidence_pipeline.media.runner import FFmpegRunner
+from video_evidence_pipeline.search import (
+    SearchIndexBuildResult,
+    SearchResult,
+    build_index,
+    search_index,
+)
 from video_evidence_pipeline.storage.atomic import (
     atomic_write_json,
     atomic_write_new_bytes,
@@ -59,6 +85,24 @@ from video_evidence_pipeline.storage.atomic import (
 from video_evidence_pipeline.storage.jsonl import append_jsonl, exclusive_append_lock, read_jsonl
 from video_evidence_pipeline.storage.layout import JobWorkspace
 from video_evidence_pipeline.storage.locking import exclusive_file_lock
+from video_evidence_pipeline.transcription.base import AsrBackend
+from video_evidence_pipeline.transcription.pipeline import (
+    TranscriptionResult,
+    load_transcription_result,
+    media_bundle_fingerprint,
+    prepare_transcript,
+    publish_transcript,
+    recover_transcription_result,
+)
+from video_evidence_pipeline.transcription.pipeline import (
+    cleanup_attempt as cleanup_transcription_attempt,
+)
+from video_evidence_pipeline.transcription.pipeline import (
+    cleanup_stale_attempts as cleanup_stale_transcription_attempts,
+)
+from video_evidence_pipeline.transcription.pipeline import (
+    create_attempt_directory as create_transcription_attempt_directory,
+)
 
 
 def _load_context(path: Path) -> tuple[JobWorkspace, JobSpec, list[TransitionRecord], JobState]:
@@ -131,10 +175,31 @@ def validate_job(path: Path) -> dict[str, Any]:
         authorization = _authorization(workspace)
         _validate_authorization_binding(job, transitions, authorization)
         _require_current_authorization_fingerprint(job, authorization)
-    if state in {JobState.ACQUIRED, JobState.NORMALIZED}:
+    acquired_states = {
+        JobState.ACQUIRED,
+        JobState.NORMALIZED,
+        JobState.TRANSCRIBED,
+        JobState.EVIDENCE_READY,
+    }
+    normalized_states = {
+        JobState.NORMALIZED,
+        JobState.TRANSCRIBED,
+        JobState.EVIDENCE_READY,
+    }
+    if state in acquired_states:
         raw_artifact = verify_acquired_bundle(workspace, job)
-        if state is JobState.NORMALIZED:
-            load_normalization_result(workspace, job, raw_artifact)
+        if state in normalized_states:
+            media_manifest = load_normalization_result(workspace, job, raw_artifact).media_manifest
+            if state in {JobState.TRANSCRIBED, JobState.EVIDENCE_READY}:
+                transcription = load_transcription_result(workspace, job, media_manifest)
+                if state is JobState.EVIDENCE_READY:
+                    load_evidence_result(
+                        workspace,
+                        job,
+                        media_manifest,
+                        transcription.transcript_manifest,
+                        transcription.segments,
+                    )
     return {
         "valid": True,
         "job_id": job.job_id,
@@ -439,6 +504,411 @@ def _normalize_job_locked(
                 raise
 
 
+def transcribe_job(
+    path: Path,
+    config: TranscriptionConfig | None = None,
+    backend_override: AsrBackend | None = None,
+    *,
+    asr_model_directory: Path | None = None,
+) -> TranscriptionResult:
+    transcription_config = config or TranscriptionConfig()
+    workspace = JobWorkspace.open(path)
+    with exclusive_file_lock(
+        workspace.transcription_lock_path,
+        busy_code="TRANSCRIPTION_BUSY",
+        busy_message="transcription is already running",
+        failure_code="TRANSCRIPTION_LOCK_FAILED",
+        failure_message="transcription could not be locked",
+    ):
+        cleanup_stale_transcription_attempts(workspace)
+        return _transcribe_job_locked(
+            path,
+            transcription_config,
+            backend_override,
+            asr_model_directory=asr_model_directory,
+        )
+
+
+def _transcribe_job_locked(
+    path: Path,
+    config: TranscriptionConfig,
+    backend_override: AsrBackend | None,
+    *,
+    asr_model_directory: Path | None,
+) -> TranscriptionResult:
+    workspace = JobWorkspace.open(path)
+    with exclusive_append_lock(workspace.transitions_jsonl):
+        workspace, job, transitions, state = _load_context(path)
+        if state not in {JobState.NORMALIZED, JobState.TRANSCRIBED}:
+            raise state_error("STATE_GATE_FAILED", "job must be NORMALIZED before transcription")
+        authorization = _authorization(workspace)
+        _require_current_authorization(job, transitions, authorization)
+        raw_artifact = verify_acquired_bundle(workspace, job)
+        media_result = load_normalization_result(workspace, job, raw_artifact)
+        media_manifest = media_result.media_manifest
+        if state is JobState.TRANSCRIBED:
+            return load_transcription_result(
+                workspace,
+                job,
+                media_manifest,
+                expected_config=config,
+            )
+        recovered = recover_transcription_result(
+            workspace,
+            job,
+            media_manifest,
+            expected_config=config,
+        )
+        if recovered is not None:
+            _append_transition_locked(
+                workspace,
+                job,
+                from_state=JobState.NORMALIZED,
+                to_state=JobState.TRANSCRIBED,
+                trigger="transcribe.local",
+            )
+            return recovered
+        snapshot_sequence = transitions[-1].sequence
+        snapshot_raw_artifact = raw_artifact
+        snapshot_media_fingerprint = media_bundle_fingerprint(media_manifest)
+
+    attempt = create_transcription_attempt_directory(workspace)
+    operation_failed = False
+    try:
+        prepared = prepare_transcript(
+            workspace,
+            job,
+            media_manifest,
+            config,
+            backend_override,
+            model_directory=asr_model_directory,
+        )
+        with exclusive_append_lock(workspace.transitions_jsonl):
+            workspace, job, transitions, state = _load_context(path)
+            current_raw_artifact = verify_acquired_bundle(workspace, job)
+            current_media_result = load_normalization_result(workspace, job, current_raw_artifact)
+            current_media_manifest = current_media_result.media_manifest
+            if state is JobState.TRANSCRIBED:
+                winner = load_transcription_result(
+                    workspace,
+                    job,
+                    current_media_manifest,
+                    expected_config=config,
+                )
+                if (
+                    winner.transcript_manifest.transcription_fingerprint
+                    != prepared.transcription_fingerprint
+                ):
+                    raise integrity_error(
+                        "TRANSCRIPTION_FINGERPRINT_MISMATCH",
+                        "concurrent transcription used a different fingerprint",
+                    )
+                return winner
+            if (
+                state is not JobState.NORMALIZED
+                or transitions[-1].sequence != snapshot_sequence
+                or current_raw_artifact != snapshot_raw_artifact
+                or media_bundle_fingerprint(current_media_manifest) != snapshot_media_fingerprint
+            ):
+                raise state_error(
+                    "TRANSCRIPTION_SNAPSHOT_STALE",
+                    "job or normalized media changed while transcription was running",
+                )
+            recovered = recover_transcription_result(
+                workspace,
+                job,
+                current_media_manifest,
+                expected_config=config,
+            )
+            if recovered is not None:
+                _append_transition_locked(
+                    workspace,
+                    job,
+                    from_state=JobState.NORMALIZED,
+                    to_state=JobState.TRANSCRIBED,
+                    trigger="transcribe.local",
+                )
+                return recovered
+            result = publish_transcript(
+                workspace,
+                job,
+                current_media_manifest,
+                prepared,
+                attempt,
+            )
+            _append_transition_locked(
+                workspace,
+                job,
+                from_state=JobState.NORMALIZED,
+                to_state=JobState.TRANSCRIBED,
+                trigger="transcribe.local",
+            )
+            return result
+    except Exception:
+        operation_failed = True
+        raise
+    finally:
+        try:
+            cleanup_transcription_attempt(workspace, attempt)
+        except VepError:
+            if not operation_failed:
+                raise
+
+
+def prepare_evidence_job(path: Path) -> EvidencePrepareResult:
+    workspace = JobWorkspace.open(path)
+    with (
+        exclusive_file_lock(
+            workspace.evidence_lock_path,
+            busy_code="EVIDENCE_BUSY",
+            busy_message="evidence preparation or import is already running",
+            failure_code="EVIDENCE_LOCK_FAILED",
+            failure_message="evidence stage could not be locked",
+        ),
+        exclusive_append_lock(workspace.transitions_jsonl),
+    ):
+        workspace, job, transitions, state = _load_context(path)
+        if state not in {JobState.TRANSCRIBED, JobState.EVIDENCE_READY}:
+            raise state_error(
+                "STATE_GATE_FAILED", "job must be TRANSCRIBED before evidence preparation"
+            )
+        authorization = _authorization(workspace)
+        _require_current_authorization(job, transitions, authorization)
+        raw_artifact = verify_acquired_bundle(workspace, job)
+        media_result = load_normalization_result(workspace, job, raw_artifact)
+        media_manifest = media_result.media_manifest
+        transcription = load_transcription_result(workspace, job, media_manifest)
+        if state is JobState.EVIDENCE_READY:
+            load_evidence_result(
+                workspace,
+                job,
+                media_manifest,
+                transcription.transcript_manifest,
+                transcription.segments,
+            )
+        return prepare_evidence_request(
+            workspace,
+            job,
+            media_manifest,
+            transcription.transcript_manifest,
+            transcription.segments,
+        )
+
+
+def import_evidence_job(
+    path: Path,
+    response_path: Path,
+    *,
+    _allow_fixture: bool = False,
+) -> EvidenceImportResult:
+    workspace = JobWorkspace.open(path)
+    with exclusive_file_lock(
+        workspace.evidence_lock_path,
+        busy_code="EVIDENCE_BUSY",
+        busy_message="evidence preparation or import is already running",
+        failure_code="EVIDENCE_LOCK_FAILED",
+        failure_message="evidence stage could not be locked",
+    ):
+        cleanup_stale_evidence_attempts(workspace)
+        return _import_evidence_job_locked(
+            path,
+            response_path,
+            allow_fixture=_allow_fixture,
+        )
+
+
+def _import_evidence_fixture(path: Path, response_path: Path) -> EvidenceImportResult:
+    """Internal test-only hook; production CLI never exposes this route."""
+    return import_evidence_job(path, response_path, _allow_fixture=True)
+
+
+def _import_evidence_job_locked(
+    path: Path,
+    response_path: Path,
+    *,
+    allow_fixture: bool,
+) -> EvidenceImportResult:
+    workspace = JobWorkspace.open(path)
+    with exclusive_append_lock(workspace.transitions_jsonl):
+        workspace, job, transitions, state = _load_context(path)
+        if state not in {JobState.TRANSCRIBED, JobState.EVIDENCE_READY}:
+            raise state_error("STATE_GATE_FAILED", "job must be TRANSCRIBED before evidence import")
+        authorization = _authorization(workspace)
+        _require_current_authorization(job, transitions, authorization)
+        snapshot_state = state
+        snapshot_sequence = transitions[-1].sequence
+        snapshot_job = job
+        snapshot_authorization = authorization
+
+    raw_artifact = verify_acquired_bundle(workspace, snapshot_job)
+    media_result = load_normalization_result(workspace, snapshot_job, raw_artifact)
+    media_manifest = media_result.media_manifest
+    transcription = load_transcription_result(workspace, snapshot_job, media_manifest)
+    request = load_evidence_request(
+        workspace,
+        snapshot_job,
+        media_manifest,
+        transcription.transcript_manifest,
+        transcription.segments,
+    )
+
+    response = read_evidence_response(
+        response_path,
+        request,
+        allow_fixture=allow_fixture,
+    )
+    if response.analyzer.external_api_used and not snapshot_authorization.allow_external_api:
+        raise state_error(
+            "EXTERNAL_API_NOT_AUTHORIZED",
+            "evidence response used an external API without job authorization",
+        )
+    response_fingerprint = fingerprint(response)
+    if snapshot_state is JobState.EVIDENCE_READY:
+        existing = load_evidence_result(
+            workspace,
+            snapshot_job,
+            media_manifest,
+            transcription.transcript_manifest,
+            transcription.segments,
+        )
+        if existing.evidence_manifest.response_fingerprint != response_fingerprint:
+            raise integrity_error(
+                "EVIDENCE_FINGERPRINT_MISMATCH",
+                "evidence response does not match the committed bundle",
+            )
+        return existing
+
+    recovered = recover_evidence_result(
+        workspace,
+        snapshot_job,
+        media_manifest,
+        transcription.transcript_manifest,
+        transcription.segments,
+        commit=False,
+    )
+    if (
+        recovered is not None
+        and recovered.evidence_manifest.response_fingerprint != response_fingerprint
+    ):
+        raise integrity_error(
+            "EVIDENCE_FINGERPRINT_MISMATCH",
+            "recoverable evidence bundle uses a different response",
+        )
+
+    attempt = None
+    operation_failed = False
+    try:
+        staged = recovered
+        if staged is None:
+            attempt = create_evidence_attempt_directory(workspace)
+            staged = stage_evidence(
+                workspace,
+                snapshot_job,
+                media_manifest,
+                transcription.transcript_manifest,
+                transcription.segments,
+                request,
+                response,
+                attempt,
+            )
+
+        # Re-verify every canonical upstream bundle after expensive response validation and
+        # private staging. This keeps stale attempts from publishing any canonical output.
+        current_raw_artifact = verify_acquired_bundle(workspace, snapshot_job)
+        current_media_result = load_normalization_result(
+            workspace, snapshot_job, current_raw_artifact
+        )
+        current_transcription = load_transcription_result(
+            workspace, snapshot_job, current_media_result.media_manifest
+        )
+        current_request = load_evidence_request(
+            workspace,
+            snapshot_job,
+            current_media_result.media_manifest,
+            current_transcription.transcript_manifest,
+            current_transcription.segments,
+        )
+        if (
+            current_raw_artifact != raw_artifact
+            or current_media_result != media_result
+            or current_transcription != transcription
+            or current_request != request
+        ):
+            raise state_error(
+                "EVIDENCE_SNAPSHOT_STALE",
+                "canonical evidence inputs changed while importing the response",
+            )
+        with exclusive_append_lock(workspace.transitions_jsonl):
+            workspace, current_job, transitions, state = _load_context(path)
+            current_authorization = _authorization(workspace)
+            if (
+                state is not JobState.TRANSCRIBED
+                or transitions[-1].sequence != snapshot_sequence
+                or current_job != snapshot_job
+                or current_authorization != snapshot_authorization
+            ):
+                raise state_error(
+                    "EVIDENCE_SNAPSHOT_STALE",
+                    "job or evidence request changed while importing the response",
+                )
+            # The final publication boundary performs complete local semantic and hash
+            # verification while the transition log is locked. Analyzer execution and
+            # response staging stay outside this short canonical mutation boundary.
+            locked_raw_artifact = verify_acquired_bundle(workspace, current_job)
+            locked_media_result = load_normalization_result(
+                workspace, current_job, locked_raw_artifact
+            )
+            locked_transcription = load_transcription_result(
+                workspace, current_job, locked_media_result.media_manifest
+            )
+            locked_request = load_evidence_request(
+                workspace,
+                current_job,
+                locked_media_result.media_manifest,
+                locked_transcription.transcript_manifest,
+                locked_transcription.segments,
+            )
+            if (
+                locked_raw_artifact != raw_artifact
+                or locked_media_result != media_result
+                or locked_transcription != transcription
+                or locked_request != request
+            ):
+                raise state_error(
+                    "EVIDENCE_SNAPSHOT_STALE",
+                    "canonical evidence inputs changed before publication",
+                )
+            result = commit_staged_evidence(
+                workspace,
+                current_job,
+                locked_media_result.media_manifest,
+                locked_transcription.transcript_manifest,
+                locked_transcription.segments,
+                locked_request,
+                response,
+                staged,
+                attempt=attempt,
+            )
+            _append_transition_locked(
+                workspace,
+                current_job,
+                from_state=JobState.TRANSCRIBED,
+                to_state=JobState.EVIDENCE_READY,
+                trigger="evidence.import",
+            )
+            return result
+    except Exception:
+        operation_failed = True
+        raise
+    finally:
+        if attempt is not None:
+            try:
+                cleanup_evidence_attempt(workspace, attempt)
+            except VepError:
+                if not operation_failed:
+                    raise
+
+
 def _append_transition_locked(
     workspace: JobWorkspace,
     job: JobSpec,
@@ -464,6 +934,62 @@ def _append_transition_locked(
         job_fingerprint=fingerprint,
     )
     append_jsonl(workspace.transitions_jsonl, record)
+
+
+def _load_search_inputs(
+    path: Path,
+) -> tuple[
+    JobWorkspace,
+    JobSpec,
+    TranscriptionResult,
+    EvidenceImportResult,
+]:
+    workspace, job, transitions, state = _load_context(path)
+    if state is not JobState.EVIDENCE_READY:
+        raise state_error("STATE_GATE_FAILED", "job must be EVIDENCE_READY before search")
+    authorization = _authorization(workspace)
+    _require_current_authorization(job, transitions, authorization)
+    raw_artifact = verify_acquired_bundle(workspace, job)
+    media_manifest = load_normalization_result(workspace, job, raw_artifact).media_manifest
+    transcription = load_transcription_result(workspace, job, media_manifest)
+    evidence = load_evidence_result(
+        workspace,
+        job,
+        media_manifest,
+        transcription.transcript_manifest,
+        transcription.segments,
+    )
+    return workspace, job, transcription, evidence
+
+
+def build_search_index_job(path: Path) -> SearchIndexBuildResult:
+    workspace = JobWorkspace.open(path)
+    with exclusive_append_lock(workspace.transitions_jsonl):
+        workspace, job, transcription, evidence = _load_search_inputs(path)
+    return build_index(
+        workspace,
+        job.job_id,
+        transcription.transcript_manifest,
+        transcription.segments,
+        evidence.evidence_manifest,
+        evidence.evidence_records,
+    )
+
+
+def search_job(path: Path, query: str, limit: int = 20) -> SearchResult:
+    workspace = JobWorkspace.open(path)
+    with exclusive_append_lock(workspace.transitions_jsonl):
+        workspace, job, transcription, evidence = _load_search_inputs(path)
+    return search_index(
+        workspace,
+        job.job_id,
+        transcription.transcript_manifest,
+        transcription.segments,
+        evidence.evidence_manifest,
+        evidence.evidence_records,
+        query,
+        limit,
+    )
 
 
 def job_status(path: Path) -> tuple[dict[str, Any], int]:
@@ -498,7 +1024,18 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
             exit_code = int(exc.exit_code)
 
     artifact_status: dict[str, Any] = {"status": "not-applicable"}
-    if state in {JobState.ACQUIRED, JobState.NORMALIZED}:
+    downstream_acquired_states = {
+        JobState.ACQUIRED,
+        JobState.NORMALIZED,
+        JobState.TRANSCRIBED,
+        JobState.EVIDENCE_READY,
+    }
+    downstream_normalized_states = {
+        JobState.NORMALIZED,
+        JobState.TRANSCRIBED,
+        JobState.EVIDENCE_READY,
+    }
+    if state in downstream_acquired_states:
         try:
             artifact = verify_acquired_bundle(workspace, job)
             artifact_status = {
@@ -511,7 +1048,8 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
             artifact_status = {"status": "invalid", "error_code": exc.code}
             exit_code = int(exc.exit_code)
     normalization_status: dict[str, Any] = {"status": "not-applicable"}
-    if state is JobState.NORMALIZED and artifact_status.get("status") == "valid":
+    media_manifest = None
+    if state in downstream_normalized_states and artifact_status.get("status") == "valid":
         try:
             raw_artifact = verify_acquired_bundle(workspace, job)
             normalization_result = load_normalization_result(workspace, job, raw_artifact)
@@ -524,6 +1062,52 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
         except VepError as exc:
             normalization_status = {"status": "invalid", "error_code": exc.code}
             exit_code = int(exc.exit_code)
+    transcription_status: dict[str, Any] = {"status": "not-applicable"}
+    transcription = None
+    if (
+        state in {JobState.TRANSCRIBED, JobState.EVIDENCE_READY}
+        and normalization_status.get("status") == "valid"
+        and media_manifest is not None
+    ):
+        try:
+            transcription = load_transcription_result(workspace, job, media_manifest)
+            transcription_status = {
+                "status": "valid",
+                "transcription_fingerprint": (
+                    transcription.transcript_manifest.transcription_fingerprint
+                ),
+                "segment_count": len(transcription.segments),
+            }
+        except VepError as exc:
+            transcription_status = {"status": "invalid", "error_code": exc.code}
+            exit_code = int(exc.exit_code)
+    evidence_status: dict[str, Any] = {"status": "not-applicable"}
+    if (
+        state is JobState.EVIDENCE_READY
+        and transcription_status.get("status") == "valid"
+        and media_manifest is not None
+        and transcription is not None
+    ):
+        try:
+            evidence = load_evidence_result(
+                workspace,
+                job,
+                media_manifest,
+                transcription.transcript_manifest,
+                transcription.segments,
+            )
+            evidence_status = {
+                "status": "valid",
+                "evidence_bundle_fingerprint": (
+                    evidence.evidence_manifest.evidence_bundle_fingerprint
+                ),
+                "evidence_count": len(evidence.evidence_records),
+                "ambiguity_count": len(evidence.ambiguity_records),
+                "index_rebuildable": True,
+            }
+        except VepError as exc:
+            evidence_status = {"status": "invalid", "error_code": exc.code}
+            exit_code = int(exc.exit_code)
     return (
         {
             "job_id": job.job_id,
@@ -532,6 +1116,8 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
             "authorization": authorization_status,
             "artifact_integrity": artifact_status,
             "normalization_integrity": normalization_status,
+            "transcription_integrity": transcription_status,
+            "evidence_integrity": evidence_status,
         },
         exit_code,
     )

@@ -6,9 +6,10 @@
 > [!IMPORTANT]
 > 現在実装済みなのは、core domain contracts、local workspace、`vep` CLI、明示authorization、
 > `local_file`／`direct_http`／`generic_ytdlp`／`panopto`／`box`による
-> acquisitionと、system FFmpeg／ffprobeによるmedia normalizationです。実動作するstate pathは
-> `CREATED → AUTHORIZED → ACQUIRED → NORMALIZED`です。ASR、
-> evidence／authoring／audit／approval／exportは未実装です。
+> acquisition、system FFmpeg／ffprobeによるmedia normalization、caption-first transcription、
+> provider-neutralなevidence prepare／import、private SQLite FTS5 searchです。実動作するstate pathは
+> `CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → EVIDENCE_READY`です。
+> authoring／audit／approval／exportは未実装です。
 
 ## Quickstart
 
@@ -32,24 +33,35 @@ uv run vep job authorize .local/jobs/demo-report \
   --deny-external-api
 uv run vep acquire .local/jobs/demo-report
 uv run vep normalize .local/jobs/demo-report
+uv run vep transcribe .local/jobs/demo-report --preferred-language ja
+uv run vep evidence prepare .local/jobs/demo-report
+# evidence/request.jsonを固定入力として外部analystがresponse.jsonを作成する
+uv run vep evidence import .local/jobs/demo-report --response /path/to/response.json
+uv run vep index build .local/jobs/demo-report
+uv run vep search .local/jobs/demo-report "検索語" --limit 20
 uv run vep job status .local/jobs/demo-report
 ```
 
 `job init`だけでは未認可です。`job authorize --confirm`が成功するまでsourceを取得しません。
 `--requirement`は順序を保持するrepeatable optionで、指定順を含めてjob fingerprintへ拘束されます。
 raw sourceは`.local/`配下へcontent-addressedに保存され、上書きされません。
+captionが十分ならASR package／modelは不要です。不足区間だけASRを使用する場合も、明示された完全な
+local model directoryをofflineで使用し、暗黙downloadやcloud送信を行いません。外部APIを使った
+evidence responseのimportにはjobの`allow_external_api`認可が必要です。
 
 ## Pipeline
 
 1. authorization／requirements
 2. acquisition
 3. media normalization
-4. evidence construction
-5. deliverable authoring
-6. independent audit
-7. bounded revision
-8. human approval
-9. export
+4. caption-first transcription
+5. evidence construction／ambiguity preservation
+6. private rebuildable search cache
+7. deliverable authoring
+8. independent audit
+9. bounded revision
+10. human approval
+11. export
 
 ## SoT
 
@@ -91,11 +103,12 @@ uv run python scripts/validate_repository.py --root .
 
 ## Data boundary
 
-実講義動画、音声、字幕、Cookie、token、署名付きURL、文字起こし、ユーザー成果物はGit管理
-しません。CIは実データや実credentialを使用しません。
+実講義動画、音声、字幕、Cookie、token、署名付きURL、文字起こし、evidence response／ledger、
+SQLite index、ユーザー成果物はGit管理しません。runtime artifactとindexはprivate workspace内だけに置き、
+CIは実データや実credentialを使用しません。
 
 ## Status
 
-- Implemented: core contracts、generated Schema、CLI、local workspace、local／network acquisition、media normalization
-- Current state path: `CREATED → AUTHORIZED → ACQUIRED → NORMALIZED`
-- Next: transcription／evidence ledger（親ロードマップの後続Issue）
+- Implemented: core contracts、generated Schema、CLI、local workspace、local／network acquisition、media normalization、transcription、evidence ledger、private FTS5 cache
+- Current state path: `CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → EVIDENCE_READY`
+- Next: authoring／independent audit／human review（親ロードマップの後続Issue）

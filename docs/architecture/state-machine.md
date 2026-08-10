@@ -7,7 +7,7 @@ status: draft
 canonical: true
 canonical_for: job-state-machine
 created_at: 2026-08-06T16:07:00+09:00
-updated_at: 2026-08-06T16:07:00+09:00
+updated_at: 2026-08-10T02:00:00+09:00
 authors:
   - Xpotato1024
   - OpenAI ChatGPT
@@ -43,8 +43,8 @@ related_documents: ["VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-AGENTS"
 | `CANCELLED` | ユーザーが処理を中止した |
 
 全stateは`JobState` enumとして実装されています。実行可能な遷移は現在
-`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED`です。後続遷移はmodel／policy上の設計契約として存在しても、
-CLIから実行できません。
+`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → EVIDENCE_READY`です。
+`DRAFTED`以降はmodel／policy上の設計契約として存在しても、CLIから実行できません。
 
 ## 2. 遷移
 
@@ -110,21 +110,30 @@ stateDiagram-v2
 - periodic／scene-changeの要求candidateと実際にFFmpegが観測したframe PTSがduration範囲内で、pHash重複統合理由を保持
 - raw artifactが不変で、全派生成果物のsize／SHA-256とnormalization fingerprintが一致
 
-ここまでが実装済みgateです。以下は未実装stageの設計gateであり、現在のCLIでは実行できません。
-
 ### `NORMALIZED → TRANSCRIBED`
 
-- 公式字幕またはASR resultが存在
-- timestampがduration範囲内
-- rawとnormalized textが分離
-- backend identityが記録
+- normalized subtitleを言語、`official → embedded → sidecar`、default、non-forced、stream indexで決定的に選択
+- caption coverageが十分ならsubtitleだけで成功し、不足時だけspeech audioと明示local ASR backendを使用
+- segment IDがunique／contiguousで、integer millisecond timestampがduration範囲内
+- gap／overlap policyとcanonical intervalがmanifestへ記録
+- adapter出力の`raw_text`とNFKC＋空白正規化後の`normalized_text`を分離
+- source artifact／record、subtitle provenance、backend identity、config、implementation versionがfingerprintとlineageへ記録
+- canonical transcript JSONL、transcript manifest、stage manifestをfull verifyし、transitionを最後にappend
 
 ### `TRANSCRIBED → EVIDENCE_READY`
 
-- evidence参照先が存在
-- confidenceとinterpretation levelが存在
-- unresolved ambiguityが台帳化
-- indexが再構築可能
+- fixed requestにassignment／ordered requirements、exact transcript／frame catalog、承認済み外部artifact catalogが存在
+- provider-neutral responseがrequest fingerprintとanalyzer metadataへ束縛され、external API利用が認可済み
+- 全SourceRefがcatalogのID／timestamp／content hashと完全一致
+- confidenceとcanonical interpretation levelが存在し、非直接解釈をvideo factとして主張しない
+- generated user opinionとanalyzerによるself-approvalが存在しない
+- unresolved ambiguityが欠落／解決済みへ改変されず台帳化
+- 支持可能なevidenceが0件でもrecordを捏造せず、canonical zero-line JSONLとして表現可能
+- validated response、evidence JSONL、ambiguity ledger、manifest／stage manifestがfull verify可能
+- canonical JSON／JSONLからprivate FTS5 trigram cacheを再構築しintegrity checkできる
+- final transition lock内の全上流bundle再検証後、primary manifestをcommit marker、transitionを最後にappend
+
+ここまでが実装済みgateです。以下は未実装stageの設計gateであり、現在のCLIでは実行できません。
 
 ### `EVIDENCE_READY → DRAFTED`
 

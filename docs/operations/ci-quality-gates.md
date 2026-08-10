@@ -7,7 +7,7 @@ status: active
 canonical: true
 canonical_for: ci-quality-gates
 created_at: 2026-08-06T16:28:00+09:00
-updated_at: 2026-08-06T17:05:00+09:00
+updated_at: 2026-08-10T02:00:00+09:00
 authors: ["Xpotato1024", "OpenAI ChatGPT"]
 owners: ["Xpotato1024"]
 reviewers: []
@@ -74,6 +74,9 @@ log、safe exceptionへ残らないことも検査します。manual live integr
 media integrationは`VEP_REQUIRE_FFMPEG_TESTS=1`でtool不在時のskipを禁止します。実講義mediaや外部取得を
 使わず、CI内で生成した短いvideo／audio／subtitle fixtureについてproxy、speech audio、subtitle、frame、
 manifest、transition、idempotent reuseを検証します。localでtoolがPATHにない場合だけ同testは理由付きskipです。
+同じsynthetic fixtureからcaption-only transcription、provider-neutral fixture responseの明示的test hook、
+`TRANSCRIBED → EVIDENCE_READY`、FTS5 trigramの日本語substring／rebuild／tamper／stale検出まで検証します。
+ASR package／model／network downloadはCIへ要求せず、ASR経路はinjected fake backendだけで検証します。
 
 ActionsはNode 24対応版を完全commit SHAでpinし、Dependabotが更新候補を作成します。
 

@@ -1,0 +1,28 @@
+{
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/analyzer-contract.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "const": "video-evidence-analyzer",
+      "default": "video-evidence-analyzer",
+      "title": "Name",
+      "type": "string"
+    },
+    "response_schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Response Schema Version",
+      "type": "string"
+    },
+    "version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "title": "AnalyzerContract",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

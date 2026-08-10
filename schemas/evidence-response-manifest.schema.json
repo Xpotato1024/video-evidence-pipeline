@@ -1,0 +1,346 @@
+{
+  "$defs": {
+    "AmbiguityRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "ambiguity_id": {
+          "pattern": "^A[0-9]{6}$",
+          "title": "Ambiguity Id",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "end_ms": {
+          "exclusiveMinimum": 0,
+          "title": "End Ms",
+          "type": "integer"
+        },
+        "resolution": {
+          "anyOf": [
+            {
+              "maxLength": 65536,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolution"
+        },
+        "review_status": {
+          "$ref": "#/$defs/ReviewStatus",
+          "default": "needs_review"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source_refs": {
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "maxItems": 128,
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "start_ms": {
+          "minimum": 0,
+          "title": "Start Ms",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/AmbiguityStatus",
+          "default": "unresolved"
+        }
+      },
+      "required": [
+        "ambiguity_id",
+        "description",
+        "start_ms",
+        "end_ms"
+      ],
+      "title": "AmbiguityRecord",
+      "type": "object"
+    },
+    "AmbiguityStatus": {
+      "enum": [
+        "unresolved",
+        "resolved"
+      ],
+      "title": "AmbiguityStatus",
+      "type": "string"
+    },
+    "AnalyzerExecutionMode": {
+      "enum": [
+        "external_exchange",
+        "test_fixture"
+      ],
+      "title": "AnalyzerExecutionMode",
+      "type": "string"
+    },
+    "AnalyzerIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_mode": {
+          "$ref": "#/$defs/AnalyzerExecutionMode"
+        },
+        "executor": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Executor",
+          "type": "string"
+        },
+        "external_api_used": {
+          "title": "External Api Used",
+          "type": "boolean"
+        },
+        "model": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "provider": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "model",
+        "version",
+        "executor",
+        "execution_mode",
+        "external_api_used"
+      ],
+      "title": "AnalyzerIdentity",
+      "type": "object"
+    },
+    "EvidenceConfidence": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "EvidenceConfidence",
+      "type": "string"
+    },
+    "EvidenceRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "asserted_as_video_fact": {
+          "default": false,
+          "title": "Asserted As Video Fact",
+          "type": "boolean"
+        },
+        "confidence": {
+          "$ref": "#/$defs/EvidenceConfidence"
+        },
+        "evidence_id": {
+          "pattern": "^E[0-9]{6}$",
+          "title": "Evidence Id",
+          "type": "string"
+        },
+        "flags": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Flags",
+          "type": "array"
+        },
+        "interpretation_level": {
+          "$ref": "#/$defs/InterpretationLevel"
+        },
+        "observation": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Observation",
+          "type": "string"
+        },
+        "review_status": {
+          "$ref": "#/$defs/ReviewStatus",
+          "default": "unreviewed"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source_refs": {
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Source Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "evidence_id",
+        "observation",
+        "interpretation_level",
+        "confidence",
+        "source_refs"
+      ],
+      "title": "EvidenceRecord",
+      "type": "object"
+    },
+    "InterpretationLevel": {
+      "enum": [
+        "verbatim",
+        "explicit_statement",
+        "visual_observation",
+        "reasonable_inference",
+        "speculation",
+        "user_opinion",
+        "external_fact"
+      ],
+      "title": "InterpretationLevel",
+      "type": "string"
+    },
+    "ReviewStatus": {
+      "enum": [
+        "unreviewed",
+        "needs_review",
+        "accepted",
+        "rejected"
+      ],
+      "title": "ReviewStatus",
+      "type": "string"
+    },
+    "SourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "content_sha256": {
+          "description": "Transcript-record semantic fingerprint or canonical frame artifact SHA-256",
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "end_ms": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Ms"
+        },
+        "kind": {
+          "$ref": "#/$defs/SourceRefKind"
+        },
+        "ref_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Ref Id",
+          "type": "string"
+        },
+        "start_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Ms"
+        }
+      },
+      "required": [
+        "kind",
+        "ref_id",
+        "content_sha256"
+      ],
+      "title": "SourceRef",
+      "type": "object"
+    },
+    "SourceRefKind": {
+      "enum": [
+        "transcript_segment",
+        "frame",
+        "approved_artifact"
+      ],
+      "title": "SourceRefKind",
+      "type": "string"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/evidence-response-manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "ambiguity_records": {
+      "items": {
+        "$ref": "#/$defs/AmbiguityRecord"
+      },
+      "maxItems": 100000,
+      "title": "Ambiguity Records",
+      "type": "array"
+    },
+    "analyzer": {
+      "$ref": "#/$defs/AnalyzerIdentity"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "evidence_records": {
+      "items": {
+        "$ref": "#/$defs/EvidenceRecord"
+      },
+      "maxItems": 100000,
+      "title": "Evidence Records",
+      "type": "array"
+    },
+    "request_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Request Fingerprint",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "request_fingerprint",
+    "analyzer",
+    "evidence_records",
+    "created_at"
+  ],
+  "title": "EvidenceResponseManifest",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

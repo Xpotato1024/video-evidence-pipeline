@@ -8,7 +8,12 @@ from typing import Annotated, Literal, Self
 from pydantic import Field, model_validator
 
 from video_evidence_pipeline.domain import StrictModel, UtcDateTime
-from video_evidence_pipeline.domain.artifacts import ArtifactRecord, ArtifactRef, ProducerIdentity
+from video_evidence_pipeline.domain.artifacts import (
+    ArtifactRecord,
+    ArtifactRef,
+    EvidenceLedgerArtifactRef,
+    ProducerIdentity,
+)
 from video_evidence_pipeline.domain.identifiers import JobId, Sha256
 from video_evidence_pipeline.domain.job import SourceKind
 from video_evidence_pipeline.domain.state import JobState
@@ -82,7 +87,7 @@ class StageManifest(StrictModel):
     status: StageStatus
     state_transition: JobState
     input_artifacts: list[ArtifactRef] = Field(default_factory=list)
-    output_artifacts: list[ArtifactRef] = Field(default_factory=list)
+    output_artifacts: list[EvidenceLedgerArtifactRef | ArtifactRef] = Field(default_factory=list)
     producer: ProducerIdentity
     configuration_sha256: Sha256
     started_at: UtcDateTime

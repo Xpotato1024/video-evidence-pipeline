@@ -1,0 +1,69 @@
+{
+  "$defs": {
+    "SourceRefKind": {
+      "enum": [
+        "transcript_segment",
+        "frame",
+        "approved_artifact"
+      ],
+      "title": "SourceRefKind",
+      "type": "string"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/source-ref.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "content_sha256": {
+      "description": "Transcript-record semantic fingerprint or canonical frame artifact SHA-256",
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Content Sha256",
+      "type": "string"
+    },
+    "end_ms": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "End Ms"
+    },
+    "kind": {
+      "$ref": "#/$defs/SourceRefKind"
+    },
+    "ref_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Ref Id",
+      "type": "string"
+    },
+    "start_ms": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Start Ms"
+    }
+  },
+  "required": [
+    "kind",
+    "ref_id",
+    "content_sha256"
+  ],
+  "title": "SourceRef",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

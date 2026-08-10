@@ -7,7 +7,7 @@ status: draft
 canonical: true
 canonical_for: artifact-model
 created_at: 2026-08-06T16:07:00+09:00
-updated_at: 2026-08-06T16:07:00+09:00
+updated_at: 2026-08-10T02:00:00+09:00
 authors:
   - Xpotato1024
   - OpenAI ChatGPT
@@ -44,6 +44,10 @@ related_documents: ["VEP-ARCH-PIPELINE", "VEP-ARCH-STATE", "VEP-ARCH-TRUST", "VE
 | export | DOCX, PDF, HTML | Regenerate | No |
 | definition | code, Schema, templates, Skills | PR controlled | Yes |
 | synthetic fixture | artificial test media | PR controlled | Yes |
+
+transcript JSONL、validated analyzer response、evidence JSONL、ambiguity ledgerはcanonical artifactです。
+`search/index.sqlite3`はcanonical JSON／JSONLから再構築するprivate cacheで、manifestのoutput artifactや
+state transition根拠には含めません。
 
 ## 3. Lineage envelope
 
@@ -87,16 +91,23 @@ Box SHA-1等で代用しません。
 
 ```json
 {
-  "evidence_id": "E0042",
-  "topic": "PID制御の限界",
+  "schema_version": "1.0",
+  "evidence_id": "E000042",
   "observation": "講師はゲイン増加だけでは振動を抑えられないと説明した",
   "source_refs": [
-    {"type": "transcript", "id": "T001284"},
-    {"type": "frame", "id": "F000127"}
+    {
+      "kind": "transcript_segment",
+      "ref_id": "T001284",
+      "start_ms": 128400,
+      "end_ms": 131200,
+      "content_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    }
   ],
   "confidence": "high",
   "interpretation_level": "explicit_statement",
-  "review_status": "unreviewed"
+  "review_status": "unreviewed",
+  "asserted_as_video_fact": true,
+  "flags": []
 }
 ```
 
@@ -110,7 +121,10 @@ Box SHA-1等で代用しません。
 - `user_opinion`
 - `external_fact`
 
-`speculation`は動画内事実として成果物へ使用できません。使用する場合は仮説であることを本文に明示します。
+`verbatim`／`explicit_statement`はtranscript ref、`visual_observation`はframe ref、`external_fact`は
+requestに列挙された`approved_artifact` refを必要とします。`reasonable_inference`、`speculation`、
+`user_opinion`、`external_fact`を動画内事実としてassertできません。semantic analyzerは`unreviewed`だけを
+出力でき、人間review recordなしに自己承認できません。
 
 ## 5. Claim record
 
@@ -159,7 +173,7 @@ backendが観測できないfinal hostとredirect countは`null`とし、推測�
 
 ## 7. Storage layout
 
-`NORMALIZED`までの実装済みローカル配置:
+`EVIDENCE_READY`までの実装済みローカル配置:
 
 ```text
 .local/jobs/<job-id>/
@@ -178,18 +192,39 @@ backendが観測できないfinal hostとredirect countは`null`とし、推測�
 │  ├─ subtitles/<sha256>/subtitle-<stream>.{vtt,jsonl}
 │  ├─ frames/<sha256>/F<id>.png
 │  └─ index/<sha256>/frame-index.json
+├─ transcript/
+│  ├─ staging/
+│  └─ segments/<sha256>/transcript.jsonl
+├─ evidence/
+│  ├─ staging/
+│  ├─ request.json
+│  ├─ responses/<sha256>/response.json
+│  ├─ records/<sha256>/evidence.jsonl
+│  └─ ambiguities/<sha256>/ambiguities.json
+├─ search/
+│  ├─ staging/
+│  └─ index.sqlite3               # private／rebuildable／non-canonical
 ├─ manifests/
 │  ├─ source-manifest.json
 │  ├─ media-manifest.json
+│  ├─ transcript-manifest.json
+│  ├─ evidence-manifest.json
 │  ├─ transitions.jsonl
 │  └─ stages/
 │     ├─ acquisition.json
-│     └─ normalization.json
+│     ├─ normalization.json
+│     ├─ transcription.json
+│     └─ evidence.json
 └─ logs/
 ```
 
 pathは識別子ではありません。artifact IDとhashを正本とします。
 normalized artifactもrawと同様にcontent-addressed pathへ排他的に公開し、raw sourceを上書きしません。
+transcript segmentの`raw_text`は選択caption cueまたはASR backend出力を変形せず保持し、
+`normalized_text`はNFKC＋空白正規化した検索／比較用文字列です。normalized subtitle cue自体はFFmpeg
+WebVTT decode後のtextなので、元subtitle markupのraw preservationとは区別します。
+`evidence.jsonl`だけは支持可能なrecordが0件の場合にzero-line／zero-byteをcanonical表現とします。
+raw、normalized、transcript、validated response、ambiguity ledgerは引き続きnon-zero artifactです。
 
 ## 8. Approval binding
 

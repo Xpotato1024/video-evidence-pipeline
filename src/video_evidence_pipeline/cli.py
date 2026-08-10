@@ -20,12 +20,22 @@ from video_evidence_pipeline.acquisition.runtime import (
 from video_evidence_pipeline.application import (
     acquire_job,
     authorize_job,
+    build_search_index_job,
+    import_evidence_job,
     initialize_job,
     job_status,
     normalize_job,
+    prepare_evidence_job,
+    search_job,
+    transcribe_job,
     validate_job,
 )
 from video_evidence_pipeline.domain.job import SourceKind
+from video_evidence_pipeline.domain.transcription import (
+    GapPolicy,
+    OverlapPolicy,
+    TranscriptionConfig,
+)
 from video_evidence_pipeline.errors import VepError, configuration_error
 from video_evidence_pipeline.schemas.generation import check_schemas, export_schemas
 
@@ -64,8 +74,12 @@ class StructuredTyper(typer.Typer):
 app = StructuredTyper(name="vep", no_args_is_help=True, pretty_exceptions_enable=False)
 job_app = typer.Typer(no_args_is_help=True)
 schema_app = typer.Typer(no_args_is_help=True)
+evidence_app = typer.Typer(no_args_is_help=True)
+index_app = typer.Typer(no_args_is_help=True)
 app.add_typer(job_app, name="job")
 app.add_typer(schema_app, name="schema")
+app.add_typer(evidence_app, name="evidence")
+app.add_typer(index_app, name="index")
 
 
 def _emit(value: Any, *, json_output: bool) -> None:
@@ -282,6 +296,143 @@ def normalize(
         },
         json_output=json_output,
     )
+
+
+@app.command("transcribe")
+def transcribe(
+    workspace: Path,
+    preferred_language: Annotated[
+        list[str] | None,
+        typer.Option("--preferred-language", help="Repeat in deterministic preference order."),
+    ] = None,
+    minimum_caption_coverage: Annotated[
+        float,
+        typer.Option("--minimum-caption-coverage", min=0.0, max=1.0),
+    ] = 0.8,
+    gap_policy: Annotated[GapPolicy, typer.Option("--gap-policy")] = GapPolicy.RECORD,
+    overlap_policy: Annotated[OverlapPolicy, typer.Option("--overlap-policy")] = (
+        OverlapPolicy.PRESERVE
+    ),
+    asr_language: Annotated[str | None, typer.Option("--asr-language")] = None,
+    asr_model_directory: Annotated[
+        Path | None,
+        typer.Option(
+            "--asr-model-directory",
+            help="Existing local faster-whisper model directory; never downloaded.",
+        ),
+    ] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    config = TranscriptionConfig(
+        preferred_languages=preferred_language or [],
+        minimum_caption_coverage=minimum_caption_coverage,
+        gap_policy=gap_policy,
+        overlap_policy=overlap_policy,
+        asr_language=asr_language,
+    )
+    result = _run(
+        lambda: transcribe_job(
+            workspace,
+            config,
+            asr_model_directory=asr_model_directory,
+        ),
+        json_output=json_output,
+    )
+    manifest = result.transcript_manifest
+    _emit(
+        {
+            "ok": True,
+            "job_id": manifest.job_id,
+            "state": "TRANSCRIBED",
+            "transcription_fingerprint": manifest.transcription_fingerprint,
+            "segment_count": manifest.segment_count,
+            "gap_count": len(manifest.gaps),
+            "overlap_count": len(manifest.overlaps),
+            "sources": [item.source.value for item in manifest.backends],
+            "reused": result.reused,
+        },
+        json_output=json_output,
+    )
+
+
+@evidence_app.command("prepare")
+def evidence_prepare(
+    workspace: Path,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    result = _run(lambda: prepare_evidence_job(workspace), json_output=json_output)
+    request = result.request
+    _emit(
+        {
+            "ok": True,
+            "job_id": request.job_id,
+            "request_fingerprint": request.request_fingerprint,
+            "transcript_segment_count": len(request.transcript_segments),
+            "transcript_ref_count": len(request.transcript_refs),
+            "frame_ref_count": len(request.frame_refs),
+            "unresolved_ambiguity_count": len(request.unresolved_ambiguities),
+            "reused": result.reused,
+        },
+        json_output=json_output,
+    )
+
+
+@evidence_app.command("import")
+def evidence_import(
+    workspace: Path,
+    response: Annotated[Path, typer.Option("--response")],
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    result = _run(
+        lambda: import_evidence_job(workspace, response),
+        json_output=json_output,
+    )
+    manifest = result.evidence_manifest
+    _emit(
+        {
+            "ok": True,
+            "job_id": manifest.job_id,
+            "state": "EVIDENCE_READY",
+            "evidence_bundle_fingerprint": manifest.evidence_bundle_fingerprint,
+            "evidence_count": manifest.evidence_count,
+            "ambiguity_count": manifest.ambiguity_count,
+            "reused": result.reused,
+        },
+        json_output=json_output,
+    )
+
+
+@index_app.command("build")
+def index_build(
+    workspace: Path,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    result = _run(lambda: build_search_index_job(workspace), json_output=json_output)
+    metadata = result.metadata
+    _emit(
+        {
+            "ok": True,
+            "job_id": metadata.job_id,
+            "semantic_fingerprint": metadata.semantic_fingerprint,
+            "transcript_count": metadata.transcript_count,
+            "evidence_count": metadata.evidence_count,
+            "tokenizer": metadata.tokenizer,
+            "reused": result.reused,
+        },
+        json_output=json_output,
+    )
+
+
+@app.command("search")
+def search(
+    workspace: Path,
+    query: str,
+    limit: Annotated[int, typer.Option("--limit", min=1, max=100)] = 20,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    result = _run(lambda: search_job(workspace, query, limit), json_output=json_output)
+    payload = result.model_dump(mode="json")
+    _emit({"ok": True, **payload}, json_output=json_output)
 
 
 @schema_app.command("export")

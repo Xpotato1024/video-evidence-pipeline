@@ -24,8 +24,9 @@ related_documents:
 ## 実装範囲
 
 `vep`は現在、job作成、validation、明示authorization、local／network acquisition、media normalization、
-status／integrity確認、JSON Schema生成／drift確認を実装しています。実行可能なstate pathは
-`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED`です。
+transcription、semantic evidence prepare／import、private search cache、status／integrity確認、JSON Schema
+生成／drift確認を実装しています。実行可能なstate pathは
+`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → EVIDENCE_READY`です。
 
 ## Commands
 
@@ -37,11 +38,16 @@ vep job authorize
 vep job status
 vep acquire
 vep normalize
+vep transcribe
+vep evidence prepare
+vep evidence import --response PATH
+vep index build
+vep search JOB QUERY --limit N
 vep schema export
 vep schema check
 ```
 
-`validate`、`status`、`acquire`、`normalize`は`--json`で機械可読出力を返します。通常の契約違反はstableな
+各commandは`--json`で機械可読出力を返します。通常の契約違反はstableな
 error codeとsafe messageを返し、Python stack traceを表示しません。
 
 `job init`ではassignment requirementをrepeatableな`--requirement`で指定します。未指定時は空配列で、
@@ -92,13 +98,29 @@ CLIは再認可を推測しません。このMVPではin-place再認可も実装
 │  ├─ subtitles/<sha256>/subtitle-<stream>.{vtt,jsonl}
 │  ├─ frames/<sha256>/F<id>.png
 │  └─ index/<sha256>/frame-index.json
+├─ transcript/
+│  ├─ staging/
+│  └─ segments/<sha256>/transcript.jsonl
+├─ evidence/
+│  ├─ staging/
+│  ├─ request.json
+│  ├─ responses/<sha256>/response.json
+│  ├─ records/<sha256>/evidence.jsonl
+│  └─ ambiguities/<sha256>/ambiguities.json
+├─ search/
+│  ├─ staging/
+│  └─ index.sqlite3
 ├─ manifests/
 │  ├─ source-manifest.json
 │  ├─ media-manifest.json
+│  ├─ transcript-manifest.json
+│  ├─ evidence-manifest.json
 │  ├─ transitions.jsonl
 │  └─ stages/
 │     ├─ acquisition.json
-│     └─ normalization.json
+│     ├─ normalization.json
+│     ├─ transcription.json
+│     └─ evidence.json
 └─ logs/
 ```
 
@@ -154,6 +176,10 @@ network jobは`job authorize --allow-network-acquisition`を明示します。to
 - `NETWORK_ACQUISITION_NOT_AUTHORIZED`: network取得を明示許可した新jobを用意する。
 - `YTDLP_NOT_AVAILABLE`: lock済みdependencyを再同期する。
 - `PANOPTO_CREDENTIAL_REQUIRED`／`BOX_CREDENTIAL_REQUIRED`: token valueではなく環境変数名を指定する。
+- `MODEL_UNAVAILABLE`／`BACKEND_UNAVAILABLE`: caption coverageが不足している。完全なlocal model directoryとoptional runtime packageを明示する。
+- `FIXTURE_ANALYZER_FORBIDDEN`: test fixture responseはproduction CLIへimportできない。
+- `EXTERNAL_API_NOT_AUTHORIZED`: 外部API利用responseにはjobの明示authorizationが必要。
+- `INDEX_STALE`／`INDEX_INVALID`: canonical JSON／JSONLを検証後、`vep index build`でprivate cacheを再構築する。
 
 ## Media normalization
 
@@ -180,4 +206,48 @@ configでもこのhard capを超えられません。完全bundleの再実行、
 fingerprint、全artifact hash、media manifest、normalization stage manifestを検証し、subprocessなしで再利用します。
 partial manifestは検証可能な完全artifactがある場合だけ復旧します。
 
-ASR、evidence、authoring、independent audit、approval、exportは本運用範囲外です。
+## Transcription
+
+`vep transcribe JOB [--preferred-language LANG] [--minimum-caption-coverage N] [--asr-model-directory DIR]`
+は検証済み`NORMALIZED` bundleだけを入力とします。cueがあるnormalized subtitleを言語、
+`official → embedded → sidecar`、default、non-forced、stream indexで決定的に選び、coverageが十分なら
+subtitleだけで`TRANSCRIBED`へ進みます。不足区間がある場合だけspeech audioをASRへ渡します。
+
+組込みfaster-whisper adapterは既存の完全なabsolute local model directoryだけを受け付け、
+`local_files_only`、offline環境、固定device／compute／decode optionでlazy loadします。packageやmodel fileが
+ない場合はdownloadせずstructured errorで停止します。captionだけのjobはpackage／model不要です。
+segmentは連続ID、integer millisecond、gap／overlap、source／backend lineageを検証します。
+`raw_text`はadapter出力を保持し、`normalized_text`はNFKC＋空白正規化後の値です。subtitle source markupの
+raw preservationとは別契約です。backend metricを校正済み確率として表示しません。
+
+## Evidence exchange
+
+`vep evidence prepare JOB`は`evidence/request.json`へassignment、順序付きrequirements、exact transcript
+segments／refs、frame records／artifact refs、承認済み外部artifact catalog、未解決ambiguityを固定します。
+analystはこのrequest fingerprintへ対応するprovider-neutral JSON responseを別pathに作成し、
+`vep evidence import JOB --response PATH`でimportします。production CLIはfixture execution modeを拒否します。
+
+importはbounded read後にstrict schema、analyzer identity、execution mode、`external_api_used`、全SourceRefの
+ID／timestamp／hash、interpretation level、review status、未解決ambiguity保持を検証します。
+外部APIを使ったresponseはauthorizationの`allow_external_api`がtrueでなければ拒否します。
+generated user opinion、非直接解釈のvideo fact化、未承認external source、analyzer self-approvalを拒否します。
+入力responseのabsolute pathや未検証bytesは保存せず、validated response、evidence JSONL、ambiguity ledgerだけを
+private attemptからcontent-addressed公開します。semantic staging中はtransition lockを保持せず、全上流bundleを
+再検証します。最終transition lock内でもstate／authorization確認後に全上流bundleのhashとsemantic integrityを
+再検証してからmanifestをcommitし、`EVIDENCE_READY` transitionを最後にappendします。支持可能なevidenceが
+0件の場合はrecordを捏造せず、zero-line／zero-byteのcanonical evidence JSONLと`evidence_count = 0`を保存します。
+
+## Private search cache
+
+`vep index build JOB`はcanonical transcript／evidence JSONLから`search/index.sqlite3`を再構築します。
+DBはcanonical artifactではなく削除可能なprivate cacheで、manifest／state transitionへ追加しません。
+SQLite FTS5 `trigram`が必須でfallback tokenizerはありません。3文字以上はparameterized literal `MATCH`、
+1〜2文字は種類ごと最大4096 recordのparameterized literal scanです。queryは256 code point／1024 UTF-8 byte、
+limitは1〜100、indexed textは64 MiB、DBは512 MiBに制限します。metadataはsource artifact／semantic／document
+fingerprint、tokenizer、normalizer、query／builder／implementation version、SQLite capabilityを保持します。
+stale／corrupt cacheは専用lock下のprivate stagingで再構築し、SQLiteとFTS integrity check後にatomic publishします。
+
+`job validate`と`job status`は`TRANSCRIBED`／`EVIDENCE_READY`でも全upstream artifact、transcript／evidence
+manifest、ledger、lineageをfull verifyし、canonical JSON／JSONLからindexを再構築できることを確認します。
+
+authoring、independent audit、approval、exportは本運用範囲外です。

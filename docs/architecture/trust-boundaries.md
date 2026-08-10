@@ -7,7 +7,7 @@ status: draft
 canonical: true
 canonical_for: trust-boundaries
 created_at: 2026-08-06T16:07:00+09:00
-updated_at: 2026-08-06T16:07:00+09:00
+updated_at: 2026-08-10T02:00:00+09:00
 authors:
   - Xpotato1024
   - OpenAI ChatGPT
@@ -29,6 +29,7 @@ related_documents: ["VEP-ARCH-CONTEXT", "VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS
 - 署名付きCDN URL
 - ユーザーの課題文、メモ、成果物
 - AI入力bundle
+- transcript、validated analyzer response、evidence／ambiguity ledger、search cache
 - approval record
 - ローカルファイルpathや個人情報
 
@@ -92,6 +93,29 @@ related_documents: ["VEP-ARCH-CONTEXT", "VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS
 - raw media全体送信を別権限にする
 - local backendを標準経路にする
 
+local ASR adapterは明示された既存model directoryだけをofflineで開き、model名からのdownload、
+implicit token、telemetry、cloud fallbackを禁止します。caption coverageが十分な場合はASR package自体を
+loadしません。
+
+### TB-3a: Semantic analyzer response → canonical evidence
+
+脅威:
+
+- stale requestへのresponse、fixture executorのproduction混入
+- 存在しないsegment／frame、改変timestamp／content hash
+- speculation／external fact／generated user opinionのvideo fact化
+- analyzerによるself-approval、未解決ambiguityの欠落
+- validation失敗responseやabsolute input pathの残留
+
+対策:
+
+- assignment、exact transcript／frame／approved artifact catalogをrequest fingerprintへ固定
+- analyzer execution modeとexternal API利用をstrict metadataとして要求し、job認可と照合
+- 全SourceRefをcatalogへ完全一致させ、timestampとhashを再検証
+- interpretation level、`asserted_as_video_fact`、`unreviewed`／`needs_review`をfail closedで検証
+- raw responseをcanonicalにせず、全検証後のvalidated responseだけをcontent-addressed保存
+- private attempt後に全上流bundleを再検証し、manifestとtransitionを最後にcommit
+
 ### TB-4: Local workspace → GitHub
 
 脅威:
@@ -114,7 +138,7 @@ related_documents: ["VEP-ARCH-CONTEXT", "VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS
 
 脅威:
 
-- restricted source、assignment、absolute local path、authorization recordの他ユーザーからの読取り
+- restricted source、assignment、transcript、evidence、search cache、absolute local path、authorization recordの他ユーザーからの読取り
 - permissive umaskによるruntime fileの意図しないgroup／world公開
 - temporary file、lock file、final target間のpermission不一致
 

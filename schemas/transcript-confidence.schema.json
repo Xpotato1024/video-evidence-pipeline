@@ -1,0 +1,102 @@
+{
+  "$defs": {
+    "TranscriptConfidenceKind": {
+      "enum": [
+        "not_available",
+        "backend_metric"
+      ],
+      "title": "TranscriptConfidenceKind",
+      "type": "string"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/transcript-confidence.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Raw confidence metadata, deliberately not a calibrated probability.",
+  "properties": {
+    "avg_logprob": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Avg Logprob"
+    },
+    "kind": {
+      "$ref": "#/$defs/TranscriptConfidenceKind"
+    },
+    "no_speech_probability": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "No Speech Probability"
+    },
+    "word_probability_count": {
+      "default": 0,
+      "maximum": 1000000,
+      "minimum": 0,
+      "title": "Word Probability Count",
+      "type": "integer"
+    },
+    "word_probability_max": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Word Probability Max"
+    },
+    "word_probability_mean": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Word Probability Mean"
+    },
+    "word_probability_min": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Word Probability Min"
+    }
+  },
+  "required": [
+    "kind"
+  ],
+  "title": "TranscriptConfidence",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

@@ -1,0 +1,59 @@
+{
+  "$defs": {
+    "AnalyzerExecutionMode": {
+      "enum": [
+        "external_exchange",
+        "test_fixture"
+      ],
+      "title": "AnalyzerExecutionMode",
+      "type": "string"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/analyzer-identity.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "execution_mode": {
+      "$ref": "#/$defs/AnalyzerExecutionMode"
+    },
+    "executor": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Executor",
+      "type": "string"
+    },
+    "external_api_used": {
+      "title": "External Api Used",
+      "type": "boolean"
+    },
+    "model": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Model",
+      "type": "string"
+    },
+    "provider": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Provider",
+      "type": "string"
+    },
+    "version": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "provider",
+    "model",
+    "version",
+    "executor",
+    "execution_mode",
+    "external_api_used"
+  ],
+  "title": "AnalyzerIdentity",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

@@ -7,7 +7,7 @@ status: draft
 canonical: true
 canonical_for: pipeline-architecture
 created_at: 2026-08-06T16:07:00+09:00
-updated_at: 2026-08-06T16:07:00+09:00
+updated_at: 2026-08-10T02:00:00+09:00
 authors:
   - Xpotato1024
   - OpenAI ChatGPT
@@ -28,7 +28,8 @@ related_documents: ["VEP-ARCH-CONTEXT", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-STATE", 
 
 現在、Intake / Authorizationのcore contractと、Acquisitionの`local_file`、`direct_http`、
 `generic_ytdlp`、`panopto`、`box`経路が実装済みです。実動作するstate pathは
-`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED`です。transcription以降の層は設計済みですが未実装です。
+`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → EVIDENCE_READY`です。
+authoring以降の層は設計済みですが未実装です。
 
 ## 2. 層
 
@@ -144,6 +145,37 @@ bytesはimmutableのままですが、SRT／WebVTTのpresentationやcontrol mark
 - evidence records
 - ambiguity ledger
 
+transcriptionはnormalized text subtitleのうちcueが存在するstreamだけを候補とし、明示された言語順、
+`official → embedded → sidecar`、default、non-forced、stream indexの順で決定的に1つを選びます。
+caption coverageが設定値以上ならASR package／modelを要求しません。不足時だけcoverage gapをprovider-neutral
+`AsrBackend`へ渡します。組込みadapterは完全なlocal faster-whisper model directoryだけをoffline／
+`local_files_only`でlazy loadし、model名からのdownload、cloud fallback、依存packageの暗黙追加を行いません。
+device、compute type、decode option、backend／library／model identityはfingerprintへ含めます。
+
+各segmentはinteger millisecond、連続ID、source artifact／record／backend lineageを保持します。
+`raw_text`はcaption adapterまたはASR backendから受け取った文字列、`normalized_text`はNFKC＋空白正規化後の
+検索・比較用文字列です。subtitle normalization以前のmarkupやsource bytesを`raw_text`が保存するとは主張しません。
+caption confidenceは`not_available`、ASRの`avg_logprob`／`no_speech_probability`等はbackend raw metricとして
+保存し、確率校正済みconfidenceへ読み替えません。
+
+`vep evidence prepare`はassignment、順序付きrequirements、exact transcript segment／SourceRef、frame
+record／artifact／SourceRef、承認済み外部artifact catalog、未解決ambiguityを固定requestへ束縛します。
+`vep evidence import`はprovider-neutral responseのrequest fingerprint、analyzer identity／execution mode／
+external API利用、全SourceRefの完全一致、timestamp、interpretation level、review status、未解決ambiguity保持を
+検証します。生成されたuser opinion、非直接解釈のvideo fact化、analyzer自身によるaccept／reject、未承認の
+external fact sourceを拒否します。検証前responseはcanonicalにせず、private attemptを全上流bundleの再検証後に
+最終transition lock内で再度full verifyしてからcontent-addressed公開し、manifestをcommit marker、state
+transitionを最後に書きます。支持可能なrecordがないresponseも有効であり、evidenceを捏造せずcanonical
+zero-line JSONLとして表現します。metric availabilityはtyped confidenceに保持し、それ自体をambiguityへ昇格
+しません。その他の真正なsegment uncertainty flagは未解決ambiguityとして保持します。
+
+SQLite FTS5 indexはcanonical evidenceではなく削除可能なprivate cacheです。`normalized_text`とevidence
+`observation`だけを明示`trigram` tokenizerで索引化し、1〜2文字は種類ごと4096件までのparameterized literal
+scanを使います。canonical JSON／JSONLからのfile-backed再構築とFTS integrity checkを`EVIDENCE_READY`
+gateで証明し、source fingerprint、document fingerprint、normalizer、query／builder version、SQLite capabilityが
+一致しないcacheはstale／invalidとして再構築します。DBをstage manifestやstate gateのcanonical artifactへ
+追加しません。
+
 ### 2.5 Deliverable Authoring
 
 責務:
@@ -217,7 +249,7 @@ authorization、要件確定、自分の考察、曖昧箇所確認、最終承�
 初期adapter category:
 
 - `source`: `local_file`、`direct_http`、`panopto`、`box`、`generic_ytdlp`を実装済み
-- `transcription`: captions, faster_whisper, optional_cloud
+- `transcription`: normalized captions、offline local faster-whisper（不足区間のみ）を実装済み
 - `vision`: contact_sheet/manual selection, optional model
 - `authoring`: report, summary
 - `export`: markdown, docx, pdf, html
@@ -239,6 +271,9 @@ network sourceは有効な`ACQUIRED` bundleをlocal検証して再利用し、�
 完全な`NORMALIZED` bundleの再実行は、保存済みtool version／executable SHA-256／capabilityを含むfingerprintと
 全artifactをlocal検証し、FFmpeg／ffprobe subprocessを起動せず再利用します。新規処理中はjob lockを保持せず、
 snapshot取得と公開直前のstate／raw hash再検証だけをlock下で行います。
+`TRANSCRIBED`／`EVIDENCE_READY`もprimary manifest、stage manifest、全content artifact、semantic fingerprint、
+lineageをfull verifyしてから再利用します。evidence semantic validationとprivate staging、FTS rebuildability確認中は
+transition log lockを保持せず、公開直前の短いlock区間内で全上流bundleのsemantic fingerprintとcontent hashをfull verifyします。
 
 ## 6. Failure behavior
 
