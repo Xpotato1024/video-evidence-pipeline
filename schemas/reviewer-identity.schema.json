@@ -1,0 +1,32 @@
+{
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/reviewer-identity.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A local CLI assertion, not an authenticated or signed identity.",
+  "properties": {
+    "assertion_method": {
+      "const": "cli_asserted",
+      "default": "cli_asserted",
+      "title": "Assertion Method",
+      "type": "string"
+    },
+    "cryptographically_verified": {
+      "const": false,
+      "default": false,
+      "title": "Cryptographically Verified",
+      "type": "boolean"
+    },
+    "identity": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Identity",
+      "type": "string"
+    }
+  },
+  "required": [
+    "identity"
+  ],
+  "title": "ReviewerIdentity",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

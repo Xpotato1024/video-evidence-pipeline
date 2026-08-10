@@ -194,7 +194,14 @@ pending requestのSkillは現在のcontent／eval／identityとの一致と`acti
 - user opinion marker
 - human-review checklist
 - human-review bundleの`is_approval: false`
+- target SHA／reviewer／basis／`--confirm`を要求するhuman-only CLI
+- self-hash chainを持つprivate append-only approval ledger
 - approval後の変更でapproval invalidation
+
+approval CLIのreviewer identityは利用者が明示するasserted lineageで、暗号学的authenticationではありません。
+AI executor、repository Skill、test fixture responseにはapproval APIを公開しません。承認後にdraft、audit、human-review、
+approval ledgerのbindingが変わった場合、transition logを巻き戻さず`APPROVAL_STALE`としてexportをfail closedします。
+Markdown adapterは承認済みdraft bytesを変形せず、外部送信を行いません。
 
 ## 3. Data classification
 

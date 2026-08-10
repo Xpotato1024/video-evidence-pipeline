@@ -217,19 +217,25 @@ backendが観測できないfinal hostとredirect countは`null`とし、推測�
 │  ├─ audits/vNNN/{audit-claims.jsonl,findings.json,claim-comparison.jsonl,agent-run.json}
 │  └─ revisions/vNNN/resolutions.jsonl
 ├─ human-review/vNNN/bundle.json       # review package; approval recordではない
+├─ approval/records.jsonl              # private append-only human approval ledger
+├─ delivery/staging/                    # Markdown export中だけ使用するprivate attempt
+├─ exports/
+│  └─ markdown/<approval-record-sha256>/{final.md,package-manifest.json}
 ├─ manifests/
 │  ├─ source-manifest.json
 │  ├─ media-manifest.json
 │  ├─ transcript-manifest.json
 │  ├─ evidence-manifest.json
 │  ├─ authoring/{draft-vNNN,audit-vNNN,revision-vNNN,human-review}.json
+│  ├─ approval-manifest.json
+│  ├─ export-manifest.json
 │  ├─ transitions.jsonl
 │  └─ stages/
 │     ├─ acquisition.json
 │     ├─ normalization.json
 │     ├─ transcription.json
 │     ├─ evidence.json
-│     └─ {authoring,audit,revision,human-review}-vNNN.json
+│     └─ {authoring,audit,revision,human-review}-vNNN.json, approval.json, export.json
 └─ logs/
 ```
 
@@ -249,10 +255,17 @@ map、revision history、approval target hashを束縛しますが、approval re
 
 approval recordは次を含みます。
 
-- approved draft path
-- approved content SHA-256
-- reviewer identity
-- approved_at
-- unresolved notes
+- job／job fingerprintと連続sequence
+- human-review bundle ArtifactRef／fingerprintとcurrent audit findings ArtifactRef／bundle fingerprint
+- approved draft version／ArtifactRef／content SHA-256
+- CLIでassertされたreviewer identityとそのassurance
+- approval basis、approved_at、unresolved notes
+- intent fingerprint、previous record SHA-256、record self SHA-256
 
-export時にdraft hashが一致しなければ失敗させます。
+approval ledgerはprivate／newline終端のappend-only JSONLで、v1 runtimeはstate graphに合わせて1 recordだけを許可します。
+record append後の停止はrecord自身をdurable markerとしてmanifestを再構築し、過去recordを上書きしません。
+reviewer identityは人間がCLIへ申告したlineageであり、OSまたは外部identity providerによる本人確認を意味しません。
+
+Markdown export artifactはapproved draftとbyte-for-byte同一で、package／primary manifestがapproval record、draft、
+human-review、audit、fixed evidence、adapter identity、export ArtifactRefを束縛します。export時にいずれかのhashが
+一致しなければ`APPROVAL_STALE`またはintegrity errorで失敗させます。

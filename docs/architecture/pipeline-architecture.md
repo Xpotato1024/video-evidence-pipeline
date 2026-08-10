@@ -27,9 +27,9 @@ related_documents: ["VEP-ARCH-CONTEXT", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-STATE", 
 中核は「動画からレポートを生成すること」ではなく、「動画から検証可能な証拠パッケージを構築し、その証拠から任意の成果物を生成すること」です。
 
 現在、Intake / Authorizationからevidence construction、bounded authoring／independent audit／revision、
-human-review packageまで実装済みです。実動作する直線経路は
-`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → EVIDENCE_READY → DRAFTED → AUDITED → HUMAN_REVIEW_READY`
-で、P0／P1が残る経路は最大2回のrevision後に`BLOCKED`です。human approval／exportは未実装です。
+human-review package、明示的人間approval、byte-exact Markdown exportまで実装済みです。実動作する直線経路は
+`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → EVIDENCE_READY → DRAFTED → AUDITED → HUMAN_REVIEW_READY → HUMAN_APPROVED → EXPORTED`
+で、P0／P1が残る経路は最大2回のrevision後に`BLOCKED`です。
 
 ## 2. 層
 
@@ -247,6 +247,11 @@ zero-width insertionだけは挿入点がanchor境界上または内部にある
 - 提出適否の判断
 - approved draft hashの記録
 
+`vep approve`はtarget SHA、reviewer、basis、`--confirm`を必須とするhuman laneのCLIです。AI executor／Skill／fixture
+semantic executorにapproval capabilityを与えません。承認時にcurrent draft、clean audit、fixed evidence、
+human-review bundleをfull verifyし、append-only approval recordへ完全に束縛してから`HUMAN_APPROVED`へ進めます。
+reviewer identityはCLIでassertされたlineageであり、暗号学的本人確認ではありません。
+
 ### 2.9 Export
 
 責務:
@@ -254,6 +259,10 @@ zero-width insertionだけは挿入点がanchor境界上または内部にある
 - approved hash検証
 - MarkdownからDOCX／PDF／HTML等へ変換
 - final package manifest作成
+
+v1のrequired adapterはMarkdownだけです。approved draftをbounded binary readし、decode／再encode、改行変換、header、
+timestampを加えずbyte-for-byte copyします。export package／primary manifestを検証してから`EXPORTED`へ進め、
+unsupported formatはsilent fallbackせず拒否します。
 
 ## 3. Processing lanes
 
@@ -298,7 +307,7 @@ network sourceは有効な`ACQUIRED` bundleをlocal検証して再利用し、�
 完全な`NORMALIZED` bundleの再実行は、保存済みtool version／executable SHA-256／capabilityを含むfingerprintと
 全artifactをlocal検証し、FFmpeg／ffprobe subprocessを起動せず再利用します。新規処理中はjob lockを保持せず、
 snapshot取得と公開直前のstate／raw hash再検証だけをlock下で行います。
-`TRANSCRIBED`／`EVIDENCE_READY`／authoring／audit／revision／human-reviewもprimary manifest、stage manifest、
+`TRANSCRIBED`／`EVIDENCE_READY`／authoring／audit／revision／human-review／approval／exportもprimary manifest、stage manifest、
 全content artifact、semantic fingerprint、lineageをfull verifyしてから再利用します。semantic validationとprivate
 staging中はtransition log lockを保持せず、公開直前の短いlock区間内でstate、authorization、job／fixed bundle、
 全履歴artifactのhashとsemantic bindingを再検証し、manifestとtransitionを最後にcommitします。
@@ -307,6 +316,10 @@ AgentRunRecordをdurable markerとして全content／request／response／lineag
 から同一manifestを再構築します。human-reviewでは先に公開したbundle自身をdurable markerとし、bundleの`created_at`
 からstage／primary manifestを決定的に再構築します。markerより前のpartial outputは同一contentなら再利用し、
 不一致ならfail closedします。
+approvalはappend済みrecord、exportは公開済みpackage manifestをdurable markerとし、primary manifestまたはtransition前の
+停止を元のtimestamp／fingerprintで復旧します。同一intent／approvalの再実行はfull verify後に再利用し、ledger行、
+artifact、transitionを重複させません。承認後のdraft／audit／human-review改変はstateを巻き戻さず
+`APPROVAL_STALE`としてexportを拒否します。
 
 ## 6. Failure behavior
 

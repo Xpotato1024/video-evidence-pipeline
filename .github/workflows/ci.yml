@@ -59,6 +59,10 @@ jobs:
           ffmpeg, ffprobe = FFmpegRunner().discover_identities(timeout_seconds=30,
           output_limit_bytes=4194304); print(ffmpeg.version); print(ffprobe.version);
           print(','.join(ffmpeg.capabilities))"
+      - name: Run required full synthetic pipeline E2E
+        run: uv run pytest -q tests/test_full_e2e.py
+        env:
+          VEP_REQUIRE_FFMPEG_TESTS: "1"
       - run: uv run pytest -q
         env:
           VEP_REQUIRE_FFMPEG_TESTS: "1"

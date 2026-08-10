@@ -58,8 +58,19 @@ from video_evidence_pipeline.authoring.pipeline import (
 from video_evidence_pipeline.authoring.pipeline import (
     create_attempt_directory as create_authoring_attempt_directory,
 )
+from video_evidence_pipeline.delivery import (
+    ApprovalResult,
+    ExportResult,
+    approve_or_recover,
+    ensure_approval_confirmation_resolved,
+    ensure_approved_draft_marker_free,
+    export_or_recover,
+    load_approval,
+    load_export,
+)
 from video_evidence_pipeline.domain.authoring import AuditDisposition, FixedEvidenceBundle
 from video_evidence_pipeline.domain.authorization import AuthorizationRecord
+from video_evidence_pipeline.domain.delivery import ReviewerIdentity
 from video_evidence_pipeline.domain.job import (
     AssignmentSpec,
     JobSpec,
@@ -214,7 +225,7 @@ def initialize_job(
     return workspace, job
 
 
-def validate_job(path: Path) -> dict[str, Any]:
+def _validate_job_unmapped(path: Path) -> dict[str, Any]:
     workspace, job, transitions, state = _load_context(path)
     if state is not JobState.CREATED:
         authorization = _authorization(workspace)
@@ -226,6 +237,8 @@ def validate_job(path: Path) -> dict[str, Any]:
         JobState.REVISION_REQUIRED,
         JobState.HUMAN_REVIEW_READY,
         JobState.BLOCKED,
+        JobState.HUMAN_APPROVED,
+        JobState.EXPORTED,
     }
     acquired_states = {
         JobState.ACQUIRED,
@@ -255,7 +268,26 @@ def validate_job(path: Path) -> dict[str, Any]:
                         transcription.segments,
                     )
                     if state in authoring_states:
-                        _load_authoring_state_integrity(workspace, job, state)
+                        try:
+                            fixed, history, human_review = _load_authoring_state_integrity(
+                                workspace, job, state
+                            )
+                        except VepError as exc:
+                            if state not in {JobState.HUMAN_APPROVED, JobState.EXPORTED}:
+                                raise
+                            raise integrity_error(
+                                "APPROVAL_STALE",
+                                "approval no longer matches verified upstream state",
+                            ) from exc
+                        if state in {JobState.HUMAN_APPROVED, JobState.EXPORTED}:
+                            draft, audit = history[-1]
+                            if audit is None or human_review is None:
+                                raise integrity_error(
+                                    "APPROVAL_STALE", "approval upstream is incomplete"
+                                )
+                            approval = load_approval(workspace, job, draft, audit, human_review)
+                            if state is JobState.EXPORTED:
+                                load_export(workspace, job, fixed, approval)
     return {
         "valid": True,
         "job_id": job.job_id,
@@ -263,6 +295,23 @@ def validate_job(path: Path) -> dict[str, Any]:
         "state": state.value,
         "workspace": workspace.root.name,
     }
+
+
+def validate_job(path: Path) -> dict[str, Any]:
+    _workspace, _job, _transitions, state = _load_context(path)
+    try:
+        return _validate_job_unmapped(path)
+    except VepError as exc:
+        if (
+            state in {JobState.HUMAN_APPROVED, JobState.EXPORTED}
+            and exc.code != "APPROVAL_STALE"
+            and not exc.code.startswith("EXPORT_")
+        ):
+            raise integrity_error(
+                "APPROVAL_STALE",
+                "approval no longer matches verified upstream state",
+            ) from exc
+        raise
 
 
 def authorize_job(
@@ -1085,13 +1134,166 @@ def _load_authoring_state_integrity(
         JobState.REVISION_REQUIRED: AuditDisposition.REVISION_REQUIRED,
         JobState.HUMAN_REVIEW_READY: AuditDisposition.HUMAN_REVIEW_READY,
         JobState.BLOCKED: AuditDisposition.BLOCKED,
+        JobState.HUMAN_APPROVED: AuditDisposition.HUMAN_REVIEW_READY,
+        JobState.EXPORTED: AuditDisposition.HUMAN_REVIEW_READY,
     }.get(state)
     if expected_disposition is not None and audit.manifest.disposition is not expected_disposition:
         raise integrity_error("AUDIT_BUNDLE_INVALID", "audit disposition does not match state")
     human_review = None
-    if state is JobState.HUMAN_REVIEW_READY:
+    if state in {
+        JobState.HUMAN_REVIEW_READY,
+        JobState.HUMAN_APPROVED,
+        JobState.EXPORTED,
+    }:
         human_review = load_human_review(workspace, job, fixed, draft, audit, history)
     return fixed, history, human_review
+
+
+def _approval_upstream(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    state: JobState,
+    *,
+    stale_code: bool,
+) -> tuple[FixedEvidenceBundle, DraftResult, AuditResult, HumanReviewResult]:
+    try:
+        fixed, history, human_review = _load_authoring_state_integrity(workspace, job, state)
+    except VepError as exc:
+        if not stale_code:
+            raise
+        raise integrity_error(
+            "APPROVAL_STALE", "approval no longer matches verified upstream state"
+        ) from exc
+    draft, audit = history[-1]
+    if audit is None or human_review is None:
+        raise integrity_error("APPROVAL_STALE", "approval upstream is incomplete")
+    return fixed, draft, audit, human_review
+
+
+def approve_job(
+    path: Path,
+    *,
+    approval_target_sha256: str,
+    reviewer: str,
+    basis: str,
+    confirm: bool,
+    unresolved_notes: list[str] | None = None,
+) -> ApprovalResult:
+    if not confirm:
+        raise state_error(
+            "APPROVAL_CONFIRMATION_REQUIRED",
+            "human approval requires explicit --confirm",
+        )
+    if not reviewer.strip():
+        raise state_error("APPROVAL_REVIEWER_REQUIRED", "reviewer identity must be explicit")
+    if not basis.strip():
+        raise state_error("APPROVAL_BASIS_REQUIRED", "approval basis must be explicit")
+    basis = basis.strip()
+    notes = list(unresolved_notes or [])
+    if any(not note.strip() for note in notes):
+        raise state_error("APPROVAL_NOTE_INVALID", "unresolved notes cannot be blank")
+    notes = sorted({note.strip() for note in notes})
+    reviewer_identity = ReviewerIdentity(identity=reviewer)
+
+    workspace = JobWorkspace.open(path)
+    with exclusive_append_lock(workspace.transitions_jsonl):
+        workspace, job, transitions, state = _load_context(path)
+        if state not in {
+            JobState.HUMAN_REVIEW_READY,
+            JobState.HUMAN_APPROVED,
+            JobState.EXPORTED,
+        }:
+            raise state_error(
+                "STATE_GATE_FAILED",
+                "job must be HUMAN_REVIEW_READY before approval",
+            )
+        try:
+            authorization = _authorization(workspace)
+            _require_current_authorization(job, transitions, authorization)
+        except VepError as exc:
+            if state in {JobState.HUMAN_APPROVED, JobState.EXPORTED} or (
+                workspace.approval_records_jsonl.exists()
+            ):
+                raise integrity_error(
+                    "APPROVAL_STALE", "approval no longer matches the current job"
+                ) from exc
+            raise
+        fixed, draft, audit, human_review = _approval_upstream(
+            workspace,
+            job,
+            state,
+            stale_code=state in {JobState.HUMAN_APPROVED, JobState.EXPORTED}
+            or workspace.approval_records_jsonl.exists(),
+        )
+        del fixed
+        if approval_target_sha256 != human_review.manifest.approval_target_sha256:
+            raise state_error(
+                "APPROVAL_TARGET_MISMATCH",
+                "approval target does not match the current human-review bundle",
+            )
+        ensure_approval_confirmation_resolved(workspace, draft, human_review)
+        result = approve_or_recover(
+            workspace,
+            job,
+            draft,
+            audit,
+            human_review,
+            reviewer=reviewer_identity,
+            basis=basis,
+            unresolved_notes=notes,
+            approved_at=datetime.now(UTC),
+        )
+        if state is JobState.HUMAN_REVIEW_READY:
+            _append_transition_locked(
+                workspace,
+                job,
+                from_state=JobState.HUMAN_REVIEW_READY,
+                to_state=JobState.HUMAN_APPROVED,
+                trigger="job.approve",
+            )
+        return result
+
+
+def export_job(path: Path) -> ExportResult:
+    workspace = JobWorkspace.open(path)
+    with exclusive_append_lock(workspace.transitions_jsonl):
+        workspace, job, transitions, state = _load_context(path)
+        if state not in {JobState.HUMAN_APPROVED, JobState.EXPORTED}:
+            raise state_error("STATE_GATE_FAILED", "job must be HUMAN_APPROVED before export")
+        if job.output.format != "markdown":
+            raise configuration_error(
+                "EXPORT_FORMAT_NOT_IMPLEMENTED",
+                "only the byte-exact markdown export format is implemented",
+            )
+        try:
+            authorization = _authorization(workspace)
+            _require_current_authorization(job, transitions, authorization)
+            fixed, draft, audit, human_review = _approval_upstream(
+                workspace, job, state, stale_code=True
+            )
+            approval = load_approval(workspace, job, draft, audit, human_review)
+        except VepError as exc:
+            raise integrity_error(
+                "APPROVAL_STALE", "approval no longer matches verified upstream state"
+            ) from exc
+        ensure_approved_draft_marker_free(workspace, approval.record.approved_draft_artifact)
+        if state is JobState.EXPORTED:
+            return load_export(workspace, job, fixed, approval)
+        result = export_or_recover(
+            workspace,
+            job,
+            fixed,
+            approval,
+            created_at=datetime.now(UTC),
+        )
+        _append_transition_locked(
+            workspace,
+            job,
+            from_state=JobState.HUMAN_APPROVED,
+            to_state=JobState.EXPORTED,
+            trigger="job.export",
+        )
+        return result
 
 
 def _authoring_context_ids(
@@ -1991,6 +2193,8 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
         JobState.REVISION_REQUIRED,
         JobState.HUMAN_REVIEW_READY,
         JobState.BLOCKED,
+        JobState.HUMAN_APPROVED,
+        JobState.EXPORTED,
     }
     downstream_acquired_states = {
         JobState.ACQUIRED,
@@ -2079,13 +2283,18 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
             evidence_status = {"status": "invalid", "error_code": exc.code}
             exit_code = int(exc.exit_code)
     authoring_status: dict[str, Any] = {"status": "not-applicable"}
+    fixed_evidence = None
+    delivery_history = None
+    delivery_human_review = None
     if state in authoring_states and evidence_status.get("status") == "valid":
         try:
-            _fixed, history, human_review = _load_authoring_state_integrity(
+            fixed_evidence, history, human_review = _load_authoring_state_integrity(
                 workspace,
                 job,
                 state,
             )
+            delivery_history = history
+            delivery_human_review = human_review
             latest_draft, latest_audit = history[-1]
             authoring_status = {
                 "status": "valid",
@@ -2106,6 +2315,59 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
         except VepError as exc:
             authoring_status = {"status": "invalid", "error_code": exc.code}
             exit_code = int(exc.exit_code)
+    approval_status: dict[str, Any] = {"status": "not-applicable"}
+    approval_result = None
+    if state in {JobState.HUMAN_APPROVED, JobState.EXPORTED}:
+        if (
+            authoring_status.get("status") != "valid"
+            or delivery_history is None
+            or delivery_human_review is None
+        ):
+            approval_status = {"status": "invalid", "error_code": "APPROVAL_STALE"}
+            exit_code = max(exit_code, 5)
+        else:
+            try:
+                delivery_draft, delivery_audit = delivery_history[-1]
+                if delivery_audit is None:
+                    raise integrity_error("APPROVAL_STALE", "approval audit is absent")
+                approval_result = load_approval(
+                    workspace,
+                    job,
+                    delivery_draft,
+                    delivery_audit,
+                    delivery_human_review,
+                )
+                approval_status = {
+                    "status": "valid",
+                    "approval_id": approval_result.record.approval_id,
+                    "approval_record_sha256": approval_result.record.record_sha256,
+                    "approved_draft_version": approval_result.record.approved_draft_version,
+                    "approval_target_sha256": approval_result.record.approval_target_sha256,
+                    "reviewer_assertion_method": (approval_result.record.reviewer.assertion_method),
+                    "reviewer_cryptographically_verified": False,
+                }
+            except VepError:
+                approval_status = {"status": "invalid", "error_code": "APPROVAL_STALE"}
+                exit_code = max(exit_code, 5)
+    export_status: dict[str, Any] = {"status": "not-applicable"}
+    if state is JobState.EXPORTED:
+        if approval_result is None or fixed_evidence is None:
+            export_status = {"status": "invalid", "error_code": "APPROVAL_STALE"}
+            exit_code = max(exit_code, 5)
+        else:
+            try:
+                export_result = load_export(workspace, job, fixed_evidence, approval_result)
+                export_status = {
+                    "status": "valid",
+                    "format": export_result.manifest.format,
+                    "byte_exact": export_result.manifest.byte_exact,
+                    "export_fingerprint": export_result.manifest.export_fingerprint,
+                    "final_sha256": export_result.manifest.final_artifact.content_sha256,
+                    "final_size_bytes": export_result.manifest.final_artifact.size_bytes,
+                }
+            except VepError as exc:
+                export_status = {"status": "invalid", "error_code": exc.code}
+                exit_code = int(exc.exit_code)
     return (
         {
             "job_id": job.job_id,
@@ -2117,6 +2379,8 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
             "transcription_integrity": transcription_status,
             "evidence_integrity": evidence_status,
             "authoring_integrity": authoring_status,
+            "approval_integrity": approval_status,
+            "export_integrity": export_status,
         },
         exit_code,
     )

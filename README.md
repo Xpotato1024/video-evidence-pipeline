@@ -8,10 +8,10 @@
 > `local_file`／`direct_http`／`generic_ytdlp`／`panopto`／`box`による
 > acquisition、system FFmpeg／ffprobeによるmedia normalization、caption-first transcription、
 > provider-neutralなevidence／authoring／independent-audit／revision prepare／import、private SQLite FTS5
-> search、人間確認package作成です。直線経路は
-> `CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → EVIDENCE_READY → DRAFTED → AUDITED → HUMAN_REVIEW_READY`、
+> search、人間確認package、明示的人間approval、byte-exact Markdown exportです。直線経路は
+> `CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → EVIDENCE_READY → DRAFTED → AUDITED → HUMAN_REVIEW_READY → HUMAN_APPROVED → EXPORTED`、
 > material findingがある経路は最大2回の`REVISION_REQUIRED → DRAFTED → AUDITED`を経て、未解消なら
-> `BLOCKED`です。human approval／exportは未実装です。
+> `BLOCKED`です。DOCX／PDF／HTML exportは未実装です。
 
 ## Quickstart
 
@@ -41,6 +41,13 @@ uv run vep evidence prepare .local/jobs/demo-report
 uv run vep evidence import .local/jobs/demo-report --response /path/to/response.json
 uv run vep index build .local/jobs/demo-report
 uv run vep search .local/jobs/demo-report "検索語" --limit 20
+# author／audit（必要ならrevision）のvalidated exchange後、表示されたtarget SHAを人間が確認する
+uv run vep approve .local/jobs/demo-report \
+  --approval-target-sha256 <reviewed-draft-sha256> \
+  --reviewer "local-reviewer" \
+  --basis "reviewed the human-review package" \
+  --confirm
+uv run vep export .local/jobs/demo-report
 uv run vep job status .local/jobs/demo-report
 ```
 
@@ -56,6 +63,8 @@ authoring／audit／revisionの`external_exchange` public production importは�
 `instruction-only`です。`analyze-video-evidence`と`prepare-human-review`はdraftのままで、このproduction
 routeには使用しません。allowlist内のSkillがdraftならimportは`DRAFT_SKILL_FORBIDDEN`でfail closedします。
 synthetic fixture実行は内部test routeだけです。
+`vep approve`はAI／Skill実行ではなく、対象SHA、reviewer、basis、`--confirm`を明示する人間操作です。
+reviewer identityはlocal CLIの自己申告lineageであり、暗号学的な本人確認ではありません。
 
 ## Pipeline
 
@@ -117,6 +126,6 @@ CIは実データや実credentialを使用しません。
 
 ## Status
 
-- Implemented: core contracts、generated Schema、CLI、local workspace、local／network acquisition、media normalization、transcription、evidence ledger、private FTS5 cache、bounded authoring／independent audit／revision、人間確認package
-- Current state path: `… → EVIDENCE_READY → DRAFTED → AUDITED → HUMAN_REVIEW_READY`、または最大2回のrevision後に`BLOCKED`
-- Next: hash-bound human approval／export（親ロードマップの後続Issue）
+- Implemented: core contracts、generated Schema、CLI、local workspace、local／network acquisition、media normalization、transcription、evidence ledger、private FTS5 cache、bounded authoring／independent audit／revision、人間確認package、hash-bound human approval、byte-exact Markdown export
+- Current state path: `… → EVIDENCE_READY → DRAFTED → AUDITED → HUMAN_REVIEW_READY → HUMAN_APPROVED → EXPORTED`、または最大2回のrevision後に`BLOCKED`
+- Next: ownerによるstacked Draft PRの監査とrootから順のmerge

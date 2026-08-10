@@ -1,0 +1,165 @@
+{
+  "$defs": {
+    "ArtifactRef": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "artifact_type": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Artifact Type",
+          "type": "string"
+        },
+        "content_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "relative_storage_path": {
+          "title": "Relative Storage Path",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "artifact_type",
+        "content_sha256",
+        "size_bytes",
+        "relative_storage_path"
+      ],
+      "title": "ArtifactRef",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/approval-manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "approval_id": {
+      "pattern": "^approval-[0-9a-f]{16}$",
+      "title": "Approval Id",
+      "type": "string"
+    },
+    "approval_intent_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Approval Intent Fingerprint",
+      "type": "string"
+    },
+    "approval_record_artifact": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "approval_record_sequence": {
+      "minimum": 1,
+      "title": "Approval Record Sequence",
+      "type": "integer"
+    },
+    "approval_record_sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Approval Record Sha256",
+      "type": "string"
+    },
+    "approval_target_sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Approval Target Sha256",
+      "type": "string"
+    },
+    "approved_draft_artifact": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "approved_draft_version": {
+      "pattern": "^v[0-9]{3}$",
+      "title": "Approved Draft Version",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "current_audit_bundle_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Current Audit Bundle Fingerprint",
+      "type": "string"
+    },
+    "current_audit_findings_artifact": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "human_review_artifact": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "human_review_bundle_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Human Review Bundle Fingerprint",
+      "type": "string"
+    },
+    "job_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Job Fingerprint",
+      "type": "string"
+    },
+    "job_id": {
+      "maxLength": 63,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+      "title": "Job Id",
+      "type": "string"
+    },
+    "manifest_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Manifest Fingerprint",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "job_id",
+    "job_fingerprint",
+    "approval_id",
+    "approval_record_sequence",
+    "approval_record_sha256",
+    "approval_record_artifact",
+    "approval_intent_fingerprint",
+    "human_review_bundle_fingerprint",
+    "human_review_artifact",
+    "current_audit_bundle_fingerprint",
+    "current_audit_findings_artifact",
+    "approved_draft_version",
+    "approved_draft_artifact",
+    "approval_target_sha256",
+    "created_at",
+    "manifest_fingerprint"
+  ],
+  "title": "ApprovalManifest",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

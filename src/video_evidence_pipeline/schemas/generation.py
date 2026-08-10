@@ -33,6 +33,14 @@ from video_evidence_pipeline.domain.authoring import (
     SkillSnapshot,
 )
 from video_evidence_pipeline.domain.authorization import AuthorizationRecord
+from video_evidence_pipeline.domain.delivery import (
+    ApprovalManifest,
+    ApprovalRecord,
+    ExportAdapterIdentity,
+    ExportManifest,
+    ExportPackageManifest,
+    ReviewerIdentity,
+)
 from video_evidence_pipeline.domain.evidence import (
     AmbiguityLedger,
     AmbiguityRecord,
@@ -107,6 +115,12 @@ SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "revision-manifest.schema.json": RevisionManifest,
     "human-review-bundle.schema.json": HumanReviewBundle,
     "human-review-manifest.schema.json": HumanReviewManifest,
+    "reviewer-identity.schema.json": ReviewerIdentity,
+    "approval-record.schema.json": ApprovalRecord,
+    "approval-manifest.schema.json": ApprovalManifest,
+    "export-adapter-identity.schema.json": ExportAdapterIdentity,
+    "export-package-manifest.schema.json": ExportPackageManifest,
+    "export-manifest.schema.json": ExportManifest,
     "source-manifest.schema.json": SourceManifest,
     "stage-manifest.schema.json": StageManifest,
     "transition-record.schema.json": TransitionRecord,

@@ -86,6 +86,11 @@ class JobWorkspace:
             root / "authoring/audits",
             root / "authoring/revisions",
             root / "human-review",
+            root / "approval",
+            root / "delivery",
+            root / "delivery/staging",
+            root / "exports",
+            root / "exports/markdown",
             root / "manifests",
             root / "manifests/authoring",
             root / "manifests/stages",
@@ -198,6 +203,30 @@ class JobWorkspace:
     @property
     def human_review_manifest_json(self) -> Path:
         return self.safe_path("manifests/authoring/human-review.json")
+
+    @property
+    def approval_records_jsonl(self) -> Path:
+        return self.safe_path("approval/records.jsonl")
+
+    @property
+    def approval_manifest_json(self) -> Path:
+        return self.safe_path("manifests/approval-manifest.json")
+
+    @property
+    def approval_stage_manifest_json(self) -> Path:
+        return self.safe_path("manifests/stages/approval.json")
+
+    @property
+    def delivery_staging_root(self) -> Path:
+        return self.safe_path("delivery/staging")
+
+    @property
+    def export_manifest_json(self) -> Path:
+        return self.safe_path("manifests/export-manifest.json")
+
+    @property
+    def export_stage_manifest_json(self) -> Path:
+        return self.safe_path("manifests/stages/export.json")
 
     @property
     def transitions_jsonl(self) -> Path:

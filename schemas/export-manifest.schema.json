@@ -1,0 +1,201 @@
+{
+  "$defs": {
+    "ArtifactRef": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "artifact_type": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Artifact Type",
+          "type": "string"
+        },
+        "content_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "relative_storage_path": {
+          "title": "Relative Storage Path",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "artifact_type",
+        "content_sha256",
+        "size_bytes",
+        "relative_storage_path"
+      ],
+      "title": "ArtifactRef",
+      "type": "object"
+    },
+    "ExportAdapterIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "adapter",
+          "default": "adapter",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "const": "markdown-byte-exact",
+          "default": "markdown-byte-exact",
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version"
+      ],
+      "title": "ExportAdapterIdentity",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/export-manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "adapter": {
+      "$ref": "#/$defs/ExportAdapterIdentity"
+    },
+    "approval_record_artifact": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "approval_record_sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Approval Record Sha256",
+      "type": "string"
+    },
+    "approved_draft_artifact": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "approved_draft_version": {
+      "pattern": "^v[0-9]{3}$",
+      "title": "Approved Draft Version",
+      "type": "string"
+    },
+    "audit_bundle_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Audit Bundle Fingerprint",
+      "type": "string"
+    },
+    "byte_exact": {
+      "const": true,
+      "default": true,
+      "title": "Byte Exact",
+      "type": "boolean"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "export_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Export Fingerprint",
+      "type": "string"
+    },
+    "final_artifact": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "fixed_evidence_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Fixed Evidence Fingerprint",
+      "type": "string"
+    },
+    "format": {
+      "const": "markdown",
+      "default": "markdown",
+      "title": "Format",
+      "type": "string"
+    },
+    "human_review_artifact": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "human_review_bundle_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Human Review Bundle Fingerprint",
+      "type": "string"
+    },
+    "job_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Job Fingerprint",
+      "type": "string"
+    },
+    "job_id": {
+      "maxLength": 63,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+      "title": "Job Id",
+      "type": "string"
+    },
+    "package_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Package Fingerprint",
+      "type": "string"
+    },
+    "package_manifest_artifact": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "job_id",
+    "job_fingerprint",
+    "approval_record_sha256",
+    "approval_record_artifact",
+    "approved_draft_version",
+    "approved_draft_artifact",
+    "human_review_bundle_fingerprint",
+    "human_review_artifact",
+    "audit_bundle_fingerprint",
+    "fixed_evidence_fingerprint",
+    "final_artifact",
+    "package_manifest_artifact",
+    "package_fingerprint",
+    "adapter",
+    "created_at",
+    "export_fingerprint"
+  ],
+  "title": "ExportManifest",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

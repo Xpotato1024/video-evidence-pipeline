@@ -786,6 +786,15 @@ def test_unimplemented_transition_is_rejected_before_integrity_status(tmp_path: 
         occurred_at=records[-1].occurred_at,
         job_fingerprint=records[-1].job_fingerprint,
     )
+    blocked = TransitionRecord(
+        sequence=11,
+        job_id="demo-report",
+        from_state=human_approved.to_state,
+        to_state="BLOCKED",
+        trigger="tampered.unimplemented",
+        occurred_at=records[-1].occurred_at,
+        job_fingerprint=records[-1].job_fingerprint,
+    )
     with transitions_path.open("ab") as handle:
         handle.write((normalized.model_dump_json() + "\n").encode())
         handle.write((transcribed.model_dump_json() + "\n").encode())
@@ -794,6 +803,7 @@ def test_unimplemented_transition_is_rejected_before_integrity_status(tmp_path: 
         handle.write((audited.model_dump_json() + "\n").encode())
         handle.write((human_review_ready.model_dump_json() + "\n").encode())
         handle.write((human_approved.model_dump_json() + "\n").encode())
+        handle.write((blocked.model_dump_json() + "\n").encode())
     artifact = result.source_manifest.artifact_record.artifact
     (job_path / artifact.relative_storage_path).write_bytes(b"tampered")
 

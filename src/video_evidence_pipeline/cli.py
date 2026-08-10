@@ -19,8 +19,10 @@ from video_evidence_pipeline.acquisition.runtime import (
 )
 from video_evidence_pipeline.application import (
     acquire_job,
+    approve_job,
     authorize_job,
     build_search_index_job,
+    export_job,
     import_audit_job,
     import_authoring_job,
     import_evidence_job,
@@ -234,6 +236,74 @@ def status(
     _emit({"ok": exit_code == 0, **result}, json_output=json_output)
     if exit_code:
         raise typer.Exit(code=exit_code)
+
+
+@app.command("approve")
+def approve(
+    workspace: Path,
+    approval_target_sha256: Annotated[str, typer.Option("--approval-target-sha256")],
+    reviewer: Annotated[str, typer.Option("--reviewer")],
+    basis: Annotated[str, typer.Option("--basis")],
+    confirm: Annotated[bool, typer.Option("--confirm")] = False,
+    unresolved_note: Annotated[
+        list[str] | None,
+        typer.Option("--unresolved-note", help="Repeat for each unresolved review note."),
+    ] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    result = _run(
+        lambda: approve_job(
+            workspace,
+            approval_target_sha256=approval_target_sha256,
+            reviewer=reviewer,
+            basis=basis,
+            confirm=confirm,
+            unresolved_notes=unresolved_note,
+        ),
+        json_output=json_output,
+    )
+    status_payload, _exit_code = _run(
+        lambda: job_status(workspace),
+        json_output=json_output,
+    )
+    _emit(
+        {
+            "ok": True,
+            "job_id": result.record.job_id,
+            "state": status_payload["stored_state"],
+            "approval_id": result.record.approval_id,
+            "approval_record_sha256": result.record.record_sha256,
+            "approved_draft_version": result.record.approved_draft_version,
+            "approval_target_sha256": result.record.approval_target_sha256,
+            "reviewer_assertion_method": result.record.reviewer.assertion_method,
+            "reviewer_cryptographically_verified": False,
+            "reused": result.reused,
+        },
+        json_output=json_output,
+    )
+
+
+@app.command("export")
+def export_delivery(
+    workspace: Path,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    result = _run(lambda: export_job(workspace), json_output=json_output)
+    _emit(
+        {
+            "ok": True,
+            "job_id": result.manifest.job_id,
+            "state": "EXPORTED",
+            "format": result.manifest.format,
+            "byte_exact": result.manifest.byte_exact,
+            "approval_record_sha256": result.manifest.approval_record_sha256,
+            "export_fingerprint": result.manifest.export_fingerprint,
+            "final_sha256": result.manifest.final_artifact.content_sha256,
+            "final_size_bytes": result.manifest.final_artifact.size_bytes,
+            "reused": result.reused,
+        },
+        json_output=json_output,
+    )
 
 
 @app.command("acquire")
