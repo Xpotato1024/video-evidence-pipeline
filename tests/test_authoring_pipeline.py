@@ -1418,7 +1418,7 @@ def test_human_review_bundle_crash_recovery_is_deterministic_and_rejects_mismatc
     assert [item.to_state for item in transitions].count(JobState.HUMAN_REVIEW_READY) == 1
     assert validate_job(workspace.root)["state"] == JobState.HUMAN_REVIEW_READY.value
 
-    mismatch_root = tmp_path / "mismatch"
+    mismatch_root = tmp_path / "m"
     mismatch_root.mkdir()
     mismatch_workspace, _draft = _publish_initial_draft(
         mismatch_root, "issue15-human-review-orphan-mismatch"

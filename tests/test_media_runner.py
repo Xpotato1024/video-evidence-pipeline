@@ -104,6 +104,33 @@ def test_runner_uses_fixed_argv_no_shell_and_disabled_stdin(tmp_path: Path) -> N
     assert result.stdout == b"ok"
 
 
+def test_runner_prefers_configured_pinned_bin_dir(monkeypatch, tmp_path: Path) -> None:
+    bin_dir = tmp_path / "pinned-bin"
+    bin_dir.mkdir()
+    ffmpeg = bin_dir / "ffmpeg.exe"
+    ffprobe = bin_dir / "ffprobe.exe"
+    ffmpeg.write_bytes(b"pinned ffmpeg executable")
+    ffprobe.write_bytes(b"pinned ffprobe executable")
+    observed: dict[str, object] = {}
+
+    def factory(argv: list[str], **kwargs: object) -> FakeProcess:
+        observed["argv"] = argv
+        observed.update(kwargs)
+        return FakeProcess()
+
+    monkeypatch.setenv("VEP_FFMPEG_BIN_DIR", str(bin_dir))
+    runner = FFmpegRunner(popen_factory=factory)
+    runner.run(
+        "ffmpeg",
+        ["-version"],
+        timeout_seconds=1,
+        stdout_limit_bytes=1024,
+        stderr_limit_bytes=1024,
+    )
+
+    assert Path(str(observed["argv"][0])) == ffmpeg
+
+
 def test_runner_bounds_both_output_streams_while_draining(tmp_path: Path) -> None:
     observed: dict[str, object] = {}
     runner = runner_with_process(

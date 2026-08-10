@@ -7,7 +7,7 @@ status: draft
 canonical: true
 canonical_for: pipeline-architecture
 created_at: 2026-08-06T16:07:00+09:00
-updated_at: 2026-08-10T02:00:00+09:00
+updated_at: 2026-08-10T18:18:37+09:00
 authors:
   - Xpotato1024
   - OpenAI ChatGPT
@@ -125,6 +125,16 @@ normalizable-text allowlistのembedded subtitle codecは`subrip`／`srt`／`text
 `mov_text`などstyleまたはcontainer表現を安全にnormalizationできないcodecはunsupportedとして記録します。cue JSONLは
 FFmpeg WebVTT transcodeから得るnormalized decoded cue textであり、`raw_text_preserved`は常にfalseです。raw media
 bytesはimmutableのままですが、SRT／WebVTTのpresentationやcontrol markupを含むcue textはexact preservationを約束しません。
+
+### 2.3.1 FFmpeg toolchain pin
+
+Windows local execution uses the versioned full build described by
+`tools/ffmpeg-toolchain.json`; `scripts/install_ffmpeg.ps1` verifies the
+archive SHA-256 and both executable SHA-256 values before installation. The
+installer sets `VEP_FFMPEG_BIN_DIR`, and the runner uses that directory before
+falling back to PATH. The existing capability discovery and per-run
+executable SHA-256 pin remain mandatory, so an unexpected replacement still
+fails closed.
 
 ### 2.4 Evidence Construction
 

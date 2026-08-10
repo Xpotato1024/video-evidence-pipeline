@@ -15,6 +15,21 @@
 
 ## Quickstart
 
+### Pinned FFmpeg/ffprobe (Windows)
+
+Media normalization requires both `ffmpeg` and `ffprobe`. Install the pinned
+Windows build and verify its archive and executable SHA-256 values with:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_ffmpeg.ps1
+```
+
+The version, download URL, archive hash, executable hashes, and the
+`VEP_FFMPEG_BIN_DIR` selection are maintained in
+[`tools/ffmpeg-toolchain.json`](tools/ffmpeg-toolchain.json). Use
+`-VerifyOnly` to re-check an existing installation without downloading or
+changing PATH.
+
 Python 3.12と`uv`を用意し、認可済みのlocal sourceに対して次を実行します。
 
 ```bash

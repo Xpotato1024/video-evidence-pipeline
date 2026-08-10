@@ -7,7 +7,7 @@ status: active
 canonical: true
 canonical_for: ci-quality-gates
 created_at: 2026-08-06T16:28:00+09:00
-updated_at: 2026-08-10T02:00:00+09:00
+updated_at: 2026-08-10T18:18:37+09:00
 authors: ["Xpotato1024", "OpenAI ChatGPT"]
 owners: ["Xpotato1024"]
 reviewers: []
@@ -45,7 +45,7 @@ GitHubプランが要件を満たした時点で、`lint`、`tests`、`repositor
 
 ## 3. 検査内容
 
-`lint`はRuffのlint／format、`tests`はUbuntu package repositoryからsystem FFmpeg／ffprobeを明示導入し、
+`lint`はRuffのlint／format、`tests`はUbuntu package repositoryからFFmpeg／ffprobeを明示導入し、
 capability確認とsynthetic mediaだけを使う実変換integrationを必須化し、
 `repository-validation`は実リポジトリ全体の次を検査します。
 
@@ -86,6 +86,11 @@ ASR package／model／network downloadはCIへ要求せず、ASR経路はinjecte
 ActionsはNode 24対応版を完全commit SHAでpinし、Dependabotが更新候補を作成します。
 
 ## 5. Local parity
+
+Windows local runs must use the pinned toolchain manifest and installer. CI's
+Ubuntu package installation remains a separate platform provisioning step; its
+capability discovery is still a required gate and must not be treated as
+evidence that a local Windows installation exists.
 
 ```bash
 uv sync --locked --all-groups

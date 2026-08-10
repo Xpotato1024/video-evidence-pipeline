@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import stat
 import subprocess
@@ -111,6 +112,15 @@ class _BoundedCapture:
 
 
 def _system_executable(name: ToolName) -> str:
+    configured_bin_dir = os.environ.get("VEP_FFMPEG_BIN_DIR")
+    if configured_bin_dir is not None:
+        if not configured_bin_dir or not Path(configured_bin_dir).is_absolute():
+            raise configuration_error(
+                "MEDIA_TOOL_INVALID", "configured media tool directory is invalid"
+            )
+        filename = f"{name}.exe" if os.name == "nt" else name
+        return _validate_executable_path(name, Path(configured_bin_dir) / filename)
+
     resolved = shutil.which(name)
     if resolved is None:
         raise configuration_error(

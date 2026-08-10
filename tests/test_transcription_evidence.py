@@ -220,7 +220,7 @@ def _synthetic_captioned_source(root: Path) -> Path:
 def _application_transcribed_job(
     tmp_path: Path, job_id: str
 ) -> tuple[JobWorkspace, TranscriptionResult]:
-    repository = tmp_path / "repository"
+    repository = tmp_path / "r"
     repository.mkdir()
     source = _synthetic_captioned_source(repository)
     workspace, _job_value = initialize_job(
