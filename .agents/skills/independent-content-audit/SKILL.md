@@ -5,14 +5,17 @@ description: fresh contextで成果物の主張を再抽出し、証拠・要件
 # independent-content-audit
 
 
-## Status guard
+## Execution boundary
 
-このSkillはdraftであり、audit bundle生成とSchema実装前は実運用しない。
+このSkillは明示選択されたfresh-context semantic responseだけを生成するinstruction-only contractである。
+request検証、author claimとの差分生成、workspace書込み、artifact公開、state transitionはdeterministic
+executorだけが行う。外部API利用はjob authorizationが明示的に許可する場合に限る。
 
 ## Independence requirements
 
 - authorと別のexecution context
 - author private reasoningを入力しない
+- author claim／run／prompt historyを入力しない
 - source evidenceへ直接アクセス
 
 ## Inputs
@@ -31,8 +34,9 @@ description: fresh contextで成果物の主張を再抽出し、証拠・要件
 
 1. 本文から主張を独自に抽出する。
 2. evidence、timestamp、requirementへ照合する。
-3. author claim ledgerと最後に差分比較する。
-4. P0／P1／P2へ分類し、本文は変更しない。
+3. unsupported material claimをP1以上として記録する。
+4. supportedで要件を満たすclean draftへP0／P1を作らない。
+5. P0／P1／P2へ分類し、本文は変更しない。
 
 ## Stop conditions
 
@@ -44,4 +48,6 @@ description: fresh contextで成果物の主張を再抽出し、証拠・要件
 
 - authorの自己評価を根拠に合格させる
 - 監査と修正を同時に行う
+- author historyまたはclaim ledgerを独立監査の入力として要求する
+- workspace、Git、GitHub、外部serviceへ書込む
 

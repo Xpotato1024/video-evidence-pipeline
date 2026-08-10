@@ -7,9 +7,23 @@ id = "bounded-revision"
 prompt = "P1所見2件を修正する。"
 expected = ["finding IDと変更を対応"]
 forbidden = ["全面改稿"]
+criteria = [
+  { id = "finding-resolution-binding", description = "各変更をfinding IDへ対応させる" },
+  { id = "exact-evidence-binding", description = "accepted resolutionをexact evidenceへ束縛する" },
+  { id = "anchored-diff", description = "変更hunkをfindingのdraft spanへ限定する" },
+  { id = "no-broad-rewrite", description = "finding外へ変更を広げない" },
+  { id = "unresolved-retained", description = "未解決findingをresolution ledgerへ残す" },
+]
 
 [[cases]]
 id = "unsupported-fix"
 prompt = "根拠不足の指摘だが追加証拠がない。"
 expected = ["未解決として残す"]
 forbidden = ["事実を創作"]
+criteria = [
+  { id = "unsupported-fix-detected", description = "追加証拠がないことを検出する" },
+  { id = "defer-or-escalate", description = "修正不能findingをdeferまたは人間へ戻す" },
+  { id = "finding-preserved", description = "未解決findingを黙って消さない" },
+  { id = "no-invented-evidence", description = "evidenceまたは事実を作らない" },
+  { id = "no-scope-expansion", description = "別の主張や段落へ変更を広げない" },
+]

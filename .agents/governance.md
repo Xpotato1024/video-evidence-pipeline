@@ -62,6 +62,17 @@ Skill本文へ再実装しません。Skillの正本一覧は`skill-system.toml`
 各active/draft Skillは`.agents/skill-evals/<skill-id>.toml`を持ちます。evalは最低2ケースを
 含み、正常系だけでなく、権限不足、証拠不足、独立性不足等の拒否・停止条件を評価します。
 
+各caseは5個のmachine-readableなbinary criterionを持ち、1 criterionを1点として採点します。
+criterionは観測された結果またはSkill契約が条件を満たす場合だけpassとし、印象による部分点を
+付けません。caseは全criterionがpassし、`forbidden`の行動が1件も観測されない場合だけpassです。
+2 caseの標準evalは10点満点で、合計点はcase scoreの和として再計算します。
+
+active化には点数だけでなく、全case pass、P0=0、P1=0、必要artifactの実在、side-effect boundary、
+Skill本文とeval定義のSHA-256へ束縛した評価結果、評価対象commit、evaluator identity／method／日時、
+finding summary、owner reviewを要求します。評価結果はeval定義と自己参照させず、
+`.agents/skill-eval-results/<skill-id>.toml`へ分離します。active Skillの評価結果がcurrent Skill本文または
+eval定義と一致しない場合はstaleとしてrepository validationを失敗させます。
+
 ## 7. Provider adapter
 
 AI固有の入口は共通ポリシーを上書きしません。vendor固有機能を利用する場合も、Skill ID、
