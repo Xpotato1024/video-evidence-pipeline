@@ -214,6 +214,16 @@ def _supporting_catalog(
     pairs: list[tuple[ArtifactRef, SourceRef]] = []
     for record in manifest.inputs:
         if record.kind.value == "pdf":
+            pairs.append(
+                (
+                    record.original_artifact,
+                    SourceRef(
+                        kind=SourceRefKind.APPROVED_ARTIFACT,
+                        ref_id=record.original_artifact.artifact_id,
+                        content_sha256=record.original_artifact.content_sha256,
+                    ),
+                )
+            )
             if record.canonical_text_artifact is not None:
                 pairs.append(
                     (

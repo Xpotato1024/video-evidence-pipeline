@@ -148,7 +148,7 @@ def _cheap_pdf_text(payload: bytes) -> bytes | None:
     return (text + "\n").encode("utf-8") if text else None
 
 
-def _render_first_pdf_page(workspace: JobWorkspace, source: Path) -> bytes | None:
+def _render_first_pdf_page(workspace: JobWorkspace, payload: bytes) -> bytes | None:
     executable = shutil.which("pdftoppm")
     if executable is None:
         return None
@@ -156,6 +156,8 @@ def _render_first_pdf_page(workspace: JobWorkspace, source: Path) -> bytes | Non
     ensure_private_directory(root)
     try:
         with tempfile.TemporaryDirectory(dir=root) as temporary:
+            source = Path(temporary) / "source.pdf"
+            source.write_bytes(payload)
             base = Path(temporary) / "page"
             completed = subprocess.run(
                 [
@@ -166,7 +168,7 @@ def _render_first_pdf_page(workspace: JobWorkspace, source: Path) -> bytes | Non
                     "1",
                     "-singlefile",
                     "-png",
-                    str(source.absolute()),
+                    str(source),
                     str(base),
                 ],
                 stdin=subprocess.DEVNULL,
@@ -249,7 +251,7 @@ def _records(workspace: JobWorkspace, job: JobSpec) -> list[SupportingInputRecor
                     directory="text",
                     filename="embedded-text.txt",
                 )
-            page = _render_first_pdf_page(workspace, source)
+            page = _render_first_pdf_page(workspace, payload)
             if page is None:
                 warnings.append("PDF_PAGE_RENDER_UNAVAILABLE")
             else:

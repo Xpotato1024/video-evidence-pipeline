@@ -7,6 +7,8 @@ import pytest
 from pydantic import ValidationError
 
 import video_evidence_pipeline.media.normalization as normalization_module
+import video_evidence_pipeline.supporting as supporting_module
+import video_evidence_pipeline.transcription.refinement as refinement_module
 from video_evidence_pipeline.application import (
     acquire_job,
     authorize_job,
@@ -17,6 +19,7 @@ from video_evidence_pipeline.application import (
 )
 from video_evidence_pipeline.domain.artifacts import ArtifactRef
 from video_evidence_pipeline.domain.evidence import (
+    ATOMIC_PROPOSITION_RULE,
     EvidenceConfidence,
     EvidenceRecord,
     InterpretationLevel,
@@ -65,6 +68,7 @@ from video_evidence_pipeline.domain.transcription import (
     TranscriptSource,
 )
 from video_evidence_pipeline.errors import VepError
+from video_evidence_pipeline.evidence import pipeline as evidence_module
 from video_evidence_pipeline.media.normalization import (
     AudioProbeInfo,
     process_media,
@@ -476,10 +480,22 @@ def test_supplied_transcript_refines_separately_and_rejects_ungrounded_merge(
     )
 
     assert result.segments[0].normalized_text == "創立100周年"
+    assert "5月31日" not in result.segments[0].normalized_text
     assert loaded.segments == result.segments
     assert transcript.segments[0].normalized_text == "100周年"
     assert workspace.safe_path(raw.relative_storage_path).read_bytes() == raw_bytes
     assert loaded.ambiguities[0].segment_id == "T000002"
+    evidence_request = evidence_module._expected_request(
+        workspace,
+        job,
+        media,
+        refinement_module.evidence_transcript_projection(transcript.transcript_manifest, loaded),
+        loaded.segments,
+        created_at=_NOW,
+    )
+    assert evidence_request.analyzer_contract.atomic_proposition_contract == (
+        ATOMIC_PROPOSITION_RULE
+    )
 
 
 def test_evidence_record_keeps_one_structural_proposition_line_and_notes_non_video() -> None:
@@ -514,11 +530,22 @@ def test_evidence_record_keeps_one_structural_proposition_line_and_notes_non_vid
         )
 
 
-def test_pdf_and_image_supporting_inputs_keep_validated_originals(tmp_path: Path) -> None:
+def test_pdf_and_image_supporting_inputs_keep_validated_originals(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     image = tmp_path / "support.png"
     image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"bounded-image-fixture")
     pdf = tmp_path / "support.pdf"
-    pdf.write_bytes(b"%PDF-1.4\n(embedded support) Tj\n%%EOF\n")
+    pdf_payload = b"%PDF-1.4\n(embedded support) Tj\n%%EOF\n"
+    pdf.write_bytes(pdf_payload)
+    rendered_payloads: list[bytes] = []
+
+    def render_snapshot(_workspace: JobWorkspace, payload: bytes) -> None:
+        rendered_payloads.append(payload)
+        pdf.write_bytes(b"%PDF-1.4\n(replaced after snapshot) Tj\n%%EOF\n")
+        return None
+
+    monkeypatch.setattr(supporting_module, "_render_first_pdf_page", render_snapshot)
     job = JobSpec(
         job_id="supporting-kinds-job",
         created_at=_NOW,
@@ -541,12 +568,24 @@ def test_pdf_and_image_supporting_inputs_keep_validated_originals(tmp_path: Path
     ]
     assert manifest.inputs[0].original_artifact.artifact_type == "supporting_image_original"
     assert manifest.inputs[1].canonical_text_artifact is not None
+    assert rendered_payloads == [pdf_payload]
+    assert (
+        workspace.safe_path(manifest.inputs[1].original_artifact.relative_storage_path).read_bytes()
+        == pdf_payload
+    )
     assert (
         workspace.safe_path(
             manifest.inputs[1].canonical_text_artifact.relative_storage_path
         ).read_text(encoding="utf-8")
         == "embedded support\n"
     )
+    raw = _raw_artifact(workspace, b"support-catalog")
+    refinement_refs = refinement_module._source_catalog(_transcript_media(job, raw), (), manifest)[
+        1
+    ]
+    evidence_refs = evidence_module._supporting_catalog(workspace, job)[1]
+    assert any(item.kind is SourceRefKind.APPROVED_ARTIFACT for item in refinement_refs)
+    assert any(item.kind is SourceRefKind.APPROVED_ARTIFACT for item in evidence_refs)
 
     invalid_image = tmp_path / "invalid.png"
     invalid_image.write_bytes(b"not-an-image")

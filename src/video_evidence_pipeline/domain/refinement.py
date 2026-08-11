@@ -66,6 +66,7 @@ class RefinementEdit(StrictModel):
     @model_validator(mode="after")
     def semantic_edits_require_non_transcript_grounding(self) -> Self:
         supporting_kinds = {
+            SourceRefKind.APPROVED_ARTIFACT,
             SourceRefKind.FRAME,
             SourceRefKind.PDF_TEXT,
             SourceRefKind.PDF_PAGE,

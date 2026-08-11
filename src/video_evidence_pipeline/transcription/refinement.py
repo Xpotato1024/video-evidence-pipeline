@@ -166,6 +166,13 @@ def _source_catalog(
         for record in supporting.inputs:
             artifacts.append(record.original_artifact)
             if record.kind.value == "pdf":
+                refs.append(
+                    SourceRef(
+                        kind=SourceRefKind.APPROVED_ARTIFACT,
+                        ref_id=record.original_artifact.artifact_id,
+                        content_sha256=record.original_artifact.content_sha256,
+                    )
+                )
                 if record.canonical_text_artifact is not None:
                     artifacts.append(record.canonical_text_artifact)
                     refs.append(
