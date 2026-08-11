@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import getpass
+import shutil
 import stat
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -116,6 +117,7 @@ from video_evidence_pipeline.errors import (
     VepError,
     configuration_error,
     integrity_error,
+    io_error,
     state_error,
 )
 from video_evidence_pipeline.evidence.pipeline import (
@@ -161,7 +163,7 @@ from video_evidence_pipeline.storage.atomic import (
     read_json_model,
 )
 from video_evidence_pipeline.storage.jsonl import append_jsonl, exclusive_append_lock, read_jsonl
-from video_evidence_pipeline.storage.layout import JobWorkspace
+from video_evidence_pipeline.storage.layout import JobWorkspace, is_link_or_junction
 from video_evidence_pipeline.storage.locking import exclusive_file_lock
 from video_evidence_pipeline.storage.permissions import ensure_private_directory
 from video_evidence_pipeline.supporting import load_supporting_inputs, supporting_fingerprint
@@ -309,7 +311,45 @@ def _load_recovery_manifest(workspace: JobWorkspace, job: JobSpec) -> RecoveryMa
             "RECOVERY_MANIFEST_MISMATCH",
             "recovery manifest does not match the child job",
         )
+    parent = _recovery_parent(workspace.jobs_root / manifest.parent_job_id)
+    authorization = _authorization(workspace)
+    if (
+        manifest.parent_job_fingerprint != job_fingerprint(parent.job)
+        or manifest.parent_final_draft_sha256 != parent.final_draft_sha256
+        or manifest.parent_audit_bundle_fingerprint != parent.audit_bundle_fingerprint
+        or tuple(manifest.parent_finding_ids) != parent.finding_ids
+        or manifest.recovery_basis != authorization.authorization_basis
+        or manifest.created_at != authorization.confirmed_at
+    ):
+        raise integrity_error(
+            "RECOVERY_PROVENANCE_MISMATCH",
+            "recovery provenance does not match its immutable parent and child authorization",
+        )
     return manifest
+
+
+def _discard_failed_recovery_child(child: JobWorkspace) -> None:
+    root = child.root.absolute()
+    jobs_root = child.jobs_root.absolute()
+    try:
+        relative = root.relative_to(jobs_root)
+    except ValueError as exc:
+        raise integrity_error(
+            "RECOVERY_CHILD_CLEANUP_REFUSED",
+            "failed recovery child is outside the jobs root",
+        ) from exc
+    if len(relative.parts) != 1 or is_link_or_junction(root):
+        raise integrity_error(
+            "RECOVERY_CHILD_CLEANUP_REFUSED",
+            "failed recovery child cannot be removed safely",
+        )
+    try:
+        shutil.rmtree(root)
+    except OSError as exc:
+        raise io_error(
+            "RECOVERY_CHILD_CLEANUP_FAILED",
+            "failed recovery child could not be removed",
+        ) from exc
 
 
 def _recovery_media_artifacts(media) -> tuple[ArtifactRef, ...]:
@@ -486,6 +526,7 @@ def recover_job(
     child_data.update({"job_id": new_job_id, "created_at": datetime.now(UTC)})
     child_job = JobSpec.model_validate(child_data)
     child_fingerprint = job_fingerprint(child_job)
+    recorded_at = datetime.now(UTC)
     recovery = RecoveryManifest(
         parent_job_id=qualified.job.job_id,
         parent_job_fingerprint=job_fingerprint(qualified.job),
@@ -495,23 +536,8 @@ def recover_job(
         recovery_basis=basis,
         child_job_id=child_job.job_id,
         child_job_fingerprint=child_fingerprint,
-        created_at=datetime.now(UTC),
+        created_at=recorded_at,
     )
-    child = JobWorkspace.create(qualified.workspace.jobs_root.parent.parent, child_job.job_id)
-    atomic_write_new_bytes(child.job_yaml, job_to_yaml(child_job).encode("utf-8"), private=True)
-    append_jsonl(
-        child.transitions_jsonl,
-        TransitionRecord(
-            sequence=1,
-            job_id=child_job.job_id,
-            from_state=None,
-            to_state=JobState.CREATED,
-            trigger="job.init",
-            occurred_at=datetime.now(UTC),
-            job_fingerprint=child_fingerprint,
-        ),
-    )
-
     child_source = qualified.source.model_copy(
         update={
             "job_id": child_job.job_id,
@@ -545,30 +571,6 @@ def recover_job(
         if qualified.supporting is not None
         else None
     )
-    _copy_recovery_artifacts(
-        qualified.workspace,
-        child,
-        (
-            qualified.source.artifact_record.artifact,
-            *_recovery_media_artifacts(qualified.media.media_manifest),
-            qualified.transcript.transcript_manifest.segments_artifact,
-            *(
-                _recovery_supporting_artifacts(qualified.supporting)
-                if qualified.supporting is not None
-                else ()
-            ),
-        ),
-    )
-    atomic_write_json(child.source_manifest_json, child_source, private=True)
-    atomic_write_json(child.acquisition_manifest_json, child_source_stage, private=True)
-    atomic_write_json(child.media_manifest_json, child_media, private=True)
-    atomic_write_json(child.normalization_manifest_json, child_media_stage, private=True)
-    atomic_write_json(child.transcript_manifest_json, child_transcript, private=True)
-    atomic_write_json(child.transcription_stage_manifest_json, child_transcript_stage, private=True)
-    if child_supporting is not None:
-        atomic_write_json(child.supporting_manifest_json, child_supporting, private=True)
-    atomic_write_json(child.recovery_manifest_json, recovery, private=True)
-
     authorization = AuthorizationRecord(
         job_id=child_job.job_id,
         job_fingerprint=child_fingerprint,
@@ -577,41 +579,95 @@ def recover_job(
         allow_local_processing=qualified.authorization.allow_local_processing,
         allow_network_acquisition=qualified.authorization.allow_network_acquisition,
         allow_external_api=qualified.authorization.allow_external_api,
-        confirmed_at=datetime.now(UTC),
+        confirmed_at=recorded_at,
         confirmer_identity=getpass.getuser() or "local-user",
     )
-    atomic_write_json(child.authorization_json, authorization, private=True)
-    with exclusive_append_lock(child.transitions_jsonl):
-        _append_transition_locked(
-            child,
-            child_job,
-            from_state=JobState.CREATED,
-            to_state=JobState.AUTHORIZED,
-            trigger="recovery.authorize",
+    artifacts = (
+        qualified.source.artifact_record.artifact,
+        *_recovery_media_artifacts(qualified.media.media_manifest),
+        qualified.transcript.transcript_manifest.segments_artifact,
+        *(
+            _recovery_supporting_artifacts(qualified.supporting)
+            if qualified.supporting is not None
+            else ()
+        ),
+    )
+    jobs_root = qualified.workspace.jobs_root
+    pending_child = JobWorkspace(root=jobs_root / child_job.job_id, jobs_root=jobs_root)
+    target_was_absent = not pending_child.root.exists()
+    child = pending_child
+    child_created = False
+    try:
+        child = JobWorkspace.create(qualified.workspace.jobs_root.parent.parent, child_job.job_id)
+        child_created = True
+        atomic_write_new_bytes(
+            child.job_yaml,
+            job_to_yaml(child_job).encode("utf-8"),
+            private=True,
         )
-        _append_transition_locked(
-            child,
-            child_job,
-            from_state=JobState.AUTHORIZED,
-            to_state=JobState.ACQUIRED,
-            trigger="recovery.reuse-source",
+        append_jsonl(
+            child.transitions_jsonl,
+            TransitionRecord(
+                sequence=1,
+                job_id=child_job.job_id,
+                from_state=None,
+                to_state=JobState.CREATED,
+                trigger="job.init",
+                occurred_at=datetime.now(UTC),
+                job_fingerprint=child_fingerprint,
+            ),
         )
-        _append_transition_locked(
-            child,
-            child_job,
-            from_state=JobState.ACQUIRED,
-            to_state=JobState.NORMALIZED,
-            trigger="recovery.reuse-normalization",
+        _copy_recovery_artifacts(qualified.workspace, child, artifacts)
+        atomic_write_json(child.source_manifest_json, child_source, private=True)
+        atomic_write_json(child.acquisition_manifest_json, child_source_stage, private=True)
+        atomic_write_json(child.media_manifest_json, child_media, private=True)
+        atomic_write_json(child.normalization_manifest_json, child_media_stage, private=True)
+        atomic_write_json(child.transcript_manifest_json, child_transcript, private=True)
+        atomic_write_json(
+            child.transcription_stage_manifest_json,
+            child_transcript_stage,
+            private=True,
         )
-        _append_transition_locked(
-            child,
-            child_job,
-            from_state=JobState.NORMALIZED,
-            to_state=JobState.TRANSCRIBED,
-            trigger="recovery.reuse-transcript",
-        )
-    _load_recovery_manifest(child, child_job)
-    validate_job(child.root)
+        if child_supporting is not None:
+            atomic_write_json(child.supporting_manifest_json, child_supporting, private=True)
+        atomic_write_json(child.recovery_manifest_json, recovery, private=True)
+        atomic_write_json(child.authorization_json, authorization, private=True)
+        with exclusive_append_lock(child.transitions_jsonl):
+            _append_transition_locked(
+                child,
+                child_job,
+                from_state=JobState.CREATED,
+                to_state=JobState.AUTHORIZED,
+                trigger="recovery.authorize",
+            )
+            _append_transition_locked(
+                child,
+                child_job,
+                from_state=JobState.AUTHORIZED,
+                to_state=JobState.ACQUIRED,
+                trigger="recovery.reuse-source",
+            )
+            _append_transition_locked(
+                child,
+                child_job,
+                from_state=JobState.ACQUIRED,
+                to_state=JobState.NORMALIZED,
+                trigger="recovery.reuse-normalization",
+            )
+            _append_transition_locked(
+                child,
+                child_job,
+                from_state=JobState.NORMALIZED,
+                to_state=JobState.TRANSCRIBED,
+                trigger="recovery.reuse-transcript",
+            )
+        _load_recovery_manifest(child, child_job)
+        validate_job(child.root)
+    except Exception as exc:
+        create_conflict = isinstance(exc, VepError) and exc.code == "JOB_EXISTS"
+        if child_created or (target_was_absent and child.root.exists() and not create_conflict):
+            _discard_failed_recovery_child(child)
+        raise
     return RecoveryResult(workspace=child, job=child_job, manifest=recovery)
 
 

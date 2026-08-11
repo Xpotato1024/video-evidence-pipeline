@@ -18,6 +18,8 @@ from test_transcription_evidence import _synthetic_captioned_source
 from test_transcription_evidence import _write_response as _write_evidence_response
 from typer.testing import CliRunner
 
+import video_evidence_pipeline.application as application_module
+import video_evidence_pipeline.storage.layout as layout_module
 from video_evidence_pipeline.acquisition.box import BoxAdapter
 from video_evidence_pipeline.acquisition.bundle import verify_acquired_bundle
 from video_evidence_pipeline.acquisition.runtime import AcquisitionRuntimeConfig
@@ -465,6 +467,82 @@ def test_recovery_rejects_a_blocked_parent_with_another_material_category(tmp_pa
 
     assert captured.value.code == "RECOVERY_PARENT_NOT_ELIGIBLE"
     assert not (parent.jobs_root / "d").exists()
+
+
+def test_recovery_copy_failure_removes_partial_child_and_allows_same_id_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent, _blocked = _blocked_parent(tmp_path, "retryp", category="content-integrity")
+    parent_before = _file_bytes(parent.root)
+    original_ensure = layout_module.ensure_private_directory
+    original_copy = application_module.atomic_copy_exclusive
+    copy_count = 0
+
+    def fail_child_directory(path, *args, **kwargs):
+        if path.name == "authorization" and path.parent.name == "retryc":
+            raise RuntimeError("synthetic recovery directory failure")
+        return original_ensure(path, *args, **kwargs)
+
+    monkeypatch.setattr(layout_module, "ensure_private_directory", fail_child_directory)
+    with pytest.raises(RuntimeError, match="recovery directory failure"):
+        recover_job(
+            parent.root,
+            "retryc",
+            confirm=True,
+            basis="retry the same child after a bounded directory failure",
+        )
+    assert not (parent.jobs_root / "retryc").exists()
+    assert _file_bytes(parent.root) == parent_before
+    monkeypatch.setattr(layout_module, "ensure_private_directory", original_ensure)
+
+    def fail_second_copy(*args, **kwargs):
+        nonlocal copy_count
+        copy_count += 1
+        if copy_count == 2:
+            raise RuntimeError("synthetic recovery copy failure")
+        return original_copy(*args, **kwargs)
+
+    monkeypatch.setattr(application_module, "atomic_copy_exclusive", fail_second_copy)
+    with pytest.raises(RuntimeError, match="recovery copy failure"):
+        recover_job(
+            parent.root,
+            "retryc",
+            confirm=True,
+            basis="retry the same child after a bounded copy failure",
+        )
+    assert not (parent.jobs_root / "retryc").exists()
+    assert _file_bytes(parent.root) == parent_before
+
+    monkeypatch.setattr(application_module, "atomic_copy_exclusive", original_copy)
+    recovered = recover_job(
+        parent.root,
+        "retryc",
+        confirm=True,
+        basis="retry the same child after a bounded copy failure",
+    )
+    assert validate_job(recovered.workspace.root)["state"] == JobState.TRANSCRIBED.value
+    assert _file_bytes(parent.root) == parent_before
+
+
+def test_recovery_provenance_tamper_is_rejected_against_the_parent(tmp_path: Path) -> None:
+    parent, _blocked = _blocked_parent(tmp_path, "tamperp", category="content-integrity")
+    recovered = recover_job(
+        parent.root,
+        "tamperc",
+        confirm=True,
+        basis="preserve the immutable parent provenance",
+    )
+    payload = json.loads(recovered.workspace.recovery_manifest_json.read_text("utf-8"))
+    payload["parent_final_draft_sha256"] = "0" * 64
+    recovered.workspace.recovery_manifest_json.write_text(
+        json.dumps(payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(VepError) as captured:
+        validate_job(recovered.workspace.root)
+    assert captured.value.code == "RECOVERY_PROVENANCE_MISMATCH"
 
 
 def test_recovery_rebinds_a_box_source_without_reacquisition(
