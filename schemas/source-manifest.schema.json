@@ -3,6 +3,17 @@
     "AcquisitionEvidence": {
       "additionalProperties": false,
       "properties": {
+        "acquisition_mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AcquisitionMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "actual_acquired_size": {
           "minimum": 1,
           "title": "Actual Acquired Size",
@@ -56,6 +67,17 @@
         "http_status_category": {
           "$ref": "#/$defs/HttpStatusCategory"
         },
+        "merger": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "obtained_at": {
           "format": "date-time",
           "title": "Obtained At",
@@ -94,6 +116,14 @@
           "default": null,
           "title": "Response Content Type"
         },
+        "selected_formats": {
+          "items": {
+            "$ref": "#/$defs/YtdlpFormatEvidence"
+          },
+          "maxItems": 2,
+          "title": "Selected Formats",
+          "type": "array"
+        },
         "transport": {
           "maxLength": 64,
           "minLength": 1,
@@ -126,6 +156,14 @@
       ],
       "title": "AcquisitionEvidence",
       "type": "object"
+    },
+    "AcquisitionMode": {
+      "enum": [
+        "progressive",
+        "adaptive-merged"
+      ],
+      "title": "AcquisitionMode",
+      "type": "string"
     },
     "ArtifactRecord": {
       "additionalProperties": false,
@@ -294,6 +332,88 @@
       ],
       "title": "SourceKind",
       "type": "string"
+    },
+    "ToolIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 128,
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "executable_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Executable Sha256",
+          "type": "string"
+        },
+        "name": {
+          "enum": [
+            "ffmpeg",
+            "ffprobe"
+          ],
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "executable_sha256"
+      ],
+      "title": "ToolIdentity",
+      "type": "object"
+    },
+    "YtdlpFormatEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "audio_codec": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._+-]+$",
+          "title": "Audio Codec",
+          "type": "string"
+        },
+        "format_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._+-]+$",
+          "title": "Format Id",
+          "type": "string"
+        },
+        "protocol": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._+-]+$",
+          "title": "Protocol",
+          "type": "string"
+        },
+        "video_codec": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._+-]+$",
+          "title": "Video Codec",
+          "type": "string"
+        }
+      },
+      "required": [
+        "format_id",
+        "video_codec",
+        "audio_codec",
+        "protocol"
+      ],
+      "title": "YtdlpFormatEvidence",
+      "type": "object"
     }
   },
   "$id": "https://schemas.video-evidence-pipeline.local/v1/source-manifest.schema.json",

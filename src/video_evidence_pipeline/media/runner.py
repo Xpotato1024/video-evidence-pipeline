@@ -281,6 +281,28 @@ class FFmpegRunner:
                 "MEDIA_TOOL_IDENTITY_CHANGED", "media tool changed during normalization"
             )
 
+    def pinned_bin_directory(self, ffmpeg: ToolIdentity, ffprobe: ToolIdentity) -> Path:
+        """Return the validated common bin directory for a pinned FFmpeg toolchain."""
+        self.revalidate_pinned_identities(ffmpeg, ffprobe)
+        parents = {Path(path).parent for path in self._executables.values()}
+        if len(parents) != 1:
+            raise configuration_error(
+                "MEDIA_TOOL_INVALID", "media tools must share one validated bin directory"
+            )
+        directory = parents.pop()
+        try:
+            if (
+                not directory.is_absolute()
+                or not directory.is_dir()
+                or _path_contains_link_or_junction(directory)
+            ):
+                raise OSError("media tool directory is invalid")
+        except OSError:
+            raise configuration_error(
+                "MEDIA_TOOL_INVALID", "media tool directory could not be verified"
+            ) from None
+        return directory
+
     def _revalidate_launch_identity(self, tool: ToolName) -> None:
         """Hash at both subprocess edges once identities have been pinned."""
         if self._pinned_snapshots is None:
@@ -405,18 +427,25 @@ class FFmpegRunner:
         *,
         timeout_seconds: float,
         output_limit_bytes: int,
+        remaining_seconds: Callable[[], float] | None = None,
     ) -> tuple[ToolIdentity, ToolIdentity]:
+        def bounded_timeout() -> float:
+            if remaining_seconds is None:
+                return timeout_seconds
+            return min(timeout_seconds, remaining_seconds())
+
+        bounded_timeout()
         initial_snapshots = self._snapshots()
         ffmpeg_version = self._identity_version(
-            "ffmpeg", timeout_seconds=timeout_seconds, output_limit_bytes=output_limit_bytes
+            "ffmpeg", timeout_seconds=bounded_timeout(), output_limit_bytes=output_limit_bytes
         )
         ffprobe_version = self._identity_version(
-            "ffprobe", timeout_seconds=timeout_seconds, output_limit_bytes=output_limit_bytes
+            "ffprobe", timeout_seconds=bounded_timeout(), output_limit_bytes=output_limit_bytes
         )
         encoder_result = self.run_checked(
             "ffmpeg",
             ["-hide_banner", "-encoders"],
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=bounded_timeout(),
             stdout_limit_bytes=output_limit_bytes,
             stderr_limit_bytes=output_limit_bytes,
             require_complete_stdout=True,
@@ -424,7 +453,7 @@ class FFmpegRunner:
         filter_result = self.run_checked(
             "ffmpeg",
             ["-hide_banner", "-filters"],
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=bounded_timeout(),
             stdout_limit_bytes=output_limit_bytes,
             stderr_limit_bytes=output_limit_bytes,
             require_complete_stdout=True,
@@ -432,7 +461,7 @@ class FFmpegRunner:
         protocol_result = self.run_checked(
             "ffmpeg",
             ["-hide_banner", "-protocols"],
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=bounded_timeout(),
             stdout_limit_bytes=output_limit_bytes,
             stderr_limit_bytes=output_limit_bytes,
             require_complete_stdout=True,
@@ -440,7 +469,7 @@ class FFmpegRunner:
         muxer_result = self.run_checked(
             "ffmpeg",
             ["-hide_banner", "-muxers"],
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=bounded_timeout(),
             stdout_limit_bytes=output_limit_bytes,
             stderr_limit_bytes=output_limit_bytes,
             require_complete_stdout=True,
@@ -448,7 +477,7 @@ class FFmpegRunner:
         ffmpeg_full_help = self.run_checked(
             "ffmpeg",
             ["-hide_banner", "-h", "full"],
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=bounded_timeout(),
             stdout_limit_bytes=output_limit_bytes,
             stderr_limit_bytes=output_limit_bytes,
             require_complete_stdout=True,
@@ -457,7 +486,7 @@ class FFmpegRunner:
         ffprobe_full_help = self.run_checked(
             "ffprobe",
             ["-hide_banner", "-h", "full"],
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=bounded_timeout(),
             stdout_limit_bytes=output_limit_bytes,
             stderr_limit_bytes=output_limit_bytes,
             require_complete_stdout=True,
@@ -495,6 +524,7 @@ class FFmpegRunner:
                 "required media decoder limits are unavailable",
             )
         final_snapshots = self._snapshots()
+        bounded_timeout()
         if final_snapshots != initial_snapshots:
             raise configuration_error(
                 "MEDIA_TOOL_IDENTITY_CHANGED", "media tool changed during capability discovery"

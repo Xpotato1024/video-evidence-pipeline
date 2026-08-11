@@ -175,6 +175,12 @@ credential mode、warningsを保持します。full URL、query、redirect Locat
 生のyt-dlp出力は保持しません。
 backendが観測できないfinal hostとredirect countは`null`とし、推測値へ置き換えません。
 
+yt-dlp取得は`progressive`または`adaptive-merged`を記録します。selected formatごとにformat ID、video codec、
+audio codec、protocolを保持し、adaptive mergeではstream-copyに使用したFFmpegのversion／executable SHA-256／
+capabilitiesをmerger identityとして保持します。componentのremote URLとsigned URLは保持しません。
+`ArtifactRecord`のSHA-256／sizeは統合後final artifactのidentityであり、remote originalや各componentのhashを
+表すものではありません。統合前componentを単一remote originalとして扱いません。
+
 ## 7. Storage layout
 
 `HUMAN_REVIEW_READY`／`BLOCKED`までの実装済みローカル配置:

@@ -12,7 +12,11 @@ from video_evidence_pipeline.domain.hashing import sha256_file
 from video_evidence_pipeline.domain.media import ToolIdentity
 from video_evidence_pipeline.errors import VepError
 from video_evidence_pipeline.media import runner as media_runner
-from video_evidence_pipeline.media.runner import FFmpegRunner, _has_required_decode_limits
+from video_evidence_pipeline.media.runner import (
+    FFmpegRunner,
+    ToolRunResult,
+    _has_required_decode_limits,
+)
 
 
 class FakeProcess:
@@ -83,6 +87,63 @@ def _pinned_identities(tmp_path: Path) -> tuple[ToolIdentity, ToolIdentity]:
             capabilities=[],
         ),
     )
+
+
+def test_identity_discovery_recomputes_absolute_deadline_for_every_tool_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observed_timeouts: list[float] = []
+    runner = runner_with_process(FakeProcess(), {}, tmp_path)
+
+    def identity_version(_tool: str, *, timeout_seconds: float, output_limit_bytes: int) -> str:
+        assert output_limit_bytes == 4096
+        observed_timeouts.append(timeout_seconds)
+        return "synthetic version"
+
+    def run_checked(
+        _tool: str,
+        arguments: list[str],
+        *,
+        timeout_seconds: float,
+        **_kwargs: object,
+    ) -> ToolRunResult:
+        observed_timeouts.append(timeout_seconds)
+        command = " ".join(arguments)
+        payload = {
+            "-hide_banner -encoders": (
+                b" V..... libx264\n A..... pcm_s16le\n V..... png\n S..... webvtt\n"
+            ),
+            "-hide_banner -filters": (
+                b" ... format\n ... pad\n ... scale\n ... select\n ... showinfo\n"
+            ),
+            "-hide_banner -protocols": b"Input:\nfile\n",
+            "-hide_banner -muxers": b" E image2\n E mp4\n E wav\n E webvtt\n",
+            "-hide_banner -h full": (
+                b"-max_pixels <int64> E......... Maximum number of pixels\n"
+                b"-max_samples <int64> E......... Maximum number of samples\n"
+            ),
+        }[command]
+        return ToolRunResult(
+            argv=tuple(arguments),
+            returncode=0,
+            stdout=payload,
+            stderr=b"",
+            stdout_truncated=False,
+            stderr_truncated=False,
+            elapsed_seconds=0,
+        )
+
+    monkeypatch.setattr(runner, "_identity_version", identity_version)
+    monkeypatch.setattr(runner, "run_checked", run_checked)
+    remaining = iter(float(value) for value in range(30, 20, -1))
+
+    runner.discover_identities(
+        timeout_seconds=60,
+        output_limit_bytes=4096,
+        remaining_seconds=remaining.__next__,
+    )
+
+    assert observed_timeouts == [29, 28, 27, 26, 25, 24, 23, 22]
 
 
 def test_runner_uses_fixed_argv_no_shell_and_disabled_stdin(tmp_path: Path) -> None:
@@ -324,6 +385,30 @@ def test_runner_rejects_executable_replacement_after_pinning(tmp_path: Path) -> 
 
     with pytest.raises(VepError) as captured:
         runner.revalidate_pinned_identities(ffmpeg, ffprobe)
+
+    assert captured.value.code == "MEDIA_TOOL_IDENTITY_CHANGED"
+
+
+def test_runner_exposes_only_revalidated_common_pinned_bin_directory(tmp_path: Path) -> None:
+    observed: dict[str, object] = {}
+    runner = runner_with_process(FakeProcess(), observed, tmp_path)
+    ffmpeg, ffprobe = _pinned_identities(tmp_path)
+    runner.pin_identities(ffmpeg, ffprobe)
+
+    assert runner.pinned_bin_directory(ffmpeg, ffprobe) == tmp_path
+
+
+def test_runner_rejects_replacement_before_exposing_pinned_bin_directory(
+    tmp_path: Path,
+) -> None:
+    observed: dict[str, object] = {}
+    runner = runner_with_process(FakeProcess(), observed, tmp_path)
+    ffmpeg, ffprobe = _pinned_identities(tmp_path)
+    runner.pin_identities(ffmpeg, ffprobe)
+    (tmp_path / "ffprobe").write_bytes(b"replacement executable")
+
+    with pytest.raises(VepError) as captured:
+        runner.pinned_bin_directory(ffmpeg, ffprobe)
 
     assert captured.value.code == "MEDIA_TOOL_IDENTITY_CHANGED"
 

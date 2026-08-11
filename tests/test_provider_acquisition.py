@@ -19,6 +19,7 @@ from video_evidence_pipeline.acquisition.runtime import (
 from video_evidence_pipeline.application import acquire_job, authorize_job, initialize_job
 from video_evidence_pipeline.domain.hashing import sha256_bytes
 from video_evidence_pipeline.domain.job import SourceKind, load_job_yaml
+from video_evidence_pipeline.domain.media import ToolIdentity
 from video_evidence_pipeline.errors import VepError
 from video_evidence_pipeline.storage.layout import JobWorkspace
 
@@ -31,6 +32,23 @@ BOX_SHARED_LINK = "https://acme.ent.box.com/s/syntheticsharedtoken"
 
 def public_resolver(_host: str, _port: int) -> list[str]:
     return ["93.184.216.34"]
+
+
+class SyntheticYtdlpToolchain:
+    def __init__(self, root: Path) -> None:
+        self.ffmpeg_location = root.resolve()
+        self.ffmpeg_identity = ToolIdentity(
+            name="ffmpeg",
+            version="8.1.2-synthetic",
+            executable_sha256="1" * 64,
+            capabilities=[],
+        )
+
+    def validate_final(self, _path: Path, _deadline: object) -> None:
+        return None
+
+    def revalidate(self) -> None:
+        return None
 
 
 def initialized_authorized_job(tmp_path: Path, kind: SourceKind, locator: str) -> JobWorkspace:
@@ -359,6 +377,22 @@ def test_panopto_explicit_browser_cookie_fallback_uses_hardened_runner(tmp_path:
         captured["kwargs"] = kwargs
         directory = Path(argv[argv.index("--paths") + 1])
         (directory / "source.mp4").write_bytes(b"fallback media")
+        lineage = Path(argv[argv.index("--print-to-file") + 2])
+        lineage.write_text(
+            json.dumps(
+                {
+                    "final": {
+                        "format_id": "22",
+                        "vcodec": "avc1.640028",
+                        "acodec": "mp4a.40.2",
+                        "protocol": "https",
+                    },
+                    "components": [],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         return subprocess.CompletedProcess(argv, 0)
 
     workspace = initialized_authorized_job(tmp_path, SourceKind.PANOPTO, PANOPTO_VIEWER)
@@ -367,7 +401,13 @@ def test_panopto_explicit_browser_cookie_fallback_uses_hardened_runner(tmp_path:
         panopto_ytdlp_fallback=True,
         maximum_download_bytes=1024,
     )
-    adapter = PanoptoAdapter(runtime, resolver=public_resolver, runner=runner)
+    toolchain = SyntheticYtdlpToolchain(tmp_path)
+    adapter = PanoptoAdapter(
+        runtime,
+        resolver=public_resolver,
+        runner=runner,
+        toolchain_factory=lambda _deadline: toolchain,
+    )
     result = acquire_job(workspace.root, runtime, adapter)
     argv = captured["argv"]
     assert isinstance(argv, list)

@@ -23,12 +23,15 @@ from video_evidence_pipeline.domain.job import JobSpec, SourceKind, job_fingerpr
 from video_evidence_pipeline.domain.locators import locator_fingerprint
 from video_evidence_pipeline.domain.manifests import (
     AcquisitionEvidence,
+    AcquisitionMode,
     CredentialMode,
     HttpStatusCategory,
     SourceManifest,
     StageManifest,
     StageStatus,
+    YtdlpFormatEvidence,
 )
+from video_evidence_pipeline.domain.media import ToolIdentity
 from video_evidence_pipeline.domain.state import JobState
 from video_evidence_pipeline.errors import integrity_error, io_error
 from video_evidence_pipeline.storage.atomic import (
@@ -58,6 +61,9 @@ class AcquisitionEvidenceDraft:
     response_content_type: str | None
     declared_content_length: int | None
     credential_mode: CredentialMode
+    acquisition_mode: AcquisitionMode | None = None
+    selected_formats: tuple[YtdlpFormatEvidence, ...] = ()
+    merger: ToolIdentity | None = None
     warnings: tuple[str, ...] = ()
 
 
@@ -281,6 +287,7 @@ def publish_staged_source(
             version=__version__,
         )
         evidence_data = asdict(staged.evidence)
+        evidence_data["selected_formats"] = list(staged.evidence.selected_formats)
         evidence_data["warnings"] = list(staged.evidence.warnings)
         evidence = AcquisitionEvidence(
             **evidence_data,

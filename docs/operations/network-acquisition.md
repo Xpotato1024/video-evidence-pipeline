@@ -67,8 +67,10 @@ networkへ接続しません。source manifest公開後の停止はstage manifes
 再取得が必要な場合は新jobを作成します。`local_file`の再probeとcontent-change detectionは維持します。
 
 source manifestのredacted evidenceにはadapter、transport／backend／version、取得時刻、requested／final host、
-redirect count、HTTP status category、content type、declared length、actual size、credential mode、warningsだけを
-保存します。full URL、query、credential identity／value、生のyt-dlp stdout／stderrは保存しません。
+redirect count、HTTP status category、content type、declared length、actual size、credential mode、warningsを
+保存します。yt-dlpではさらにacquisition mode、selected format ID／codec／protocolと、adaptive merge時の
+FFmpeg identity／version／SHA-256を保存します。full URL、query、component URL、credential identity／value、
+生のyt-dlp stdout／stderrは保存しません。
 yt-dlp backendがfinal host／redirect countを観測できない場合は`null`を保存し、warningで未観測を明示します。
 
 ## direct HTTP
@@ -88,14 +90,28 @@ raw mediaとして成功扱いしません。media validityの最終確認は後
 ## yt-dlp
 
 `generic_ytdlp`とPanopto fallbackは固定argvのrunnerだけを使用します。shell、user config、playlist、plugin、
-remote component、JS runtime、cache、update、sidecar、subtitle、thumbnail、metadata embedding、netrcを無効化し、
-単一fileでaudio／videoを含むformatに限定します。任意引数、external downloader、postprocessorを受け付けません。
+remote component、JS runtime、cache、update、sidecar、subtitle、thumbnail、metadata embeddingを無効化します。
+netrcは`--ignore-config`、yt-dlpの`usenetrc=false`既定値、VEPが`--netrc`／`--netrc-location`／`--netrc-cmd`を
+渡さない境界で無効です。存在しないnegative optionは使用しません。任意引数、external downloader、
+format selector、postprocessorを受け付けません。
+
+format selectorは固定の`bv*+ba/b`です。combined A/Vがあれば1 formatを使用し、なければvideo-only 1 streamと
+audio-only 1 streamだけを取得し、yt-dlpのFFmpeg mergerによるstream copyで1 logical A/V artifactへ統合します。
+video／audio multistreamとcomponent残存は許可しません。yt-dlpへ渡す`--ffmpeg-location`は、VEP media runnerが
+version／capability／executable SHA-256を検証してpinしたFFmpeg／ffprobe共通のabsolute bin directoryです。
+PATH上の別FFmpegへfallbackせず、実行後と公開前にidentity replacementを再検査します。
+
 outputはprivate staging内のexactly one regular non-link fileだけを許可します。stdout／stderrはuser outputへ
 転送しません。browser cookieは明示時だけ使用し、Cookie file exportは標準経路にしません。
 全通信は内部のHTTPS-only local proxyを固定指定し、各`CONNECT`先をpublic-address検査して検証済みIPへpinします。
 plain HTTP、private／link-local destination、DNS rebindingをproxyで拒否し、subprocess全体にもdeadlineを設定します。
 
-production runnerはstaging内の生成bytesをprocess実行中も監視し、`--max-filesize`で長さ不明responseを判定できない場合も上限超過時にprocessを停止します。終了後のregular file／non-zero／maximum bytes検証も独立して行います。
+production runnerはstaging内の生成bytesをprocess実行中も監視し、`--max-filesize`で長さ不明responseを判定できない場合も上限超過時にprocessを停止します。final、video component、audio componentはそれぞれ
+`maximum_download_bytes`以下とし、media staging合計はその3倍以下、固定lineage sidecarは16 KiB以下です。
+3倍はadaptive merge中に同時存在し得る2 componentとgrowing finalを各1本だけ許す明示上限であり、追加fileの
+ための余白ではありません。超過、timeout、subprocess failureではterminate後に必要ならkillし、partialを削除します。
+終了後はlineageを検証・除去し、finalがworkspace内のregular non-link／non-zero／maximum bytes以下で、
+video 1 streamとaudio 1 streamを持ち、unexpected file／directoryがないことを独立検証します。
 
 provider metadata responseは完全なHTTP 200、identity encoding、JSON media type、1 MiB以内かつ一致する`Content-Length`を要求し、`Content-Range`を拒否します。
 
