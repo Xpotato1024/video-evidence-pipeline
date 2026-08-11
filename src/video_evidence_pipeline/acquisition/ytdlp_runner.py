@@ -153,6 +153,10 @@ def default_ytdlp_toolchain(deadline: AcquisitionDeadline) -> YtdlpToolchain:
     except VepError as exc:
         if exc.code == "NETWORK_TIMEOUT":
             raise
+        if exc.code == "MEDIA_TOOL_TIMEOUT":
+            # A discovery subprocess can consume the exact remaining absolute
+            # budget. Preserve deadline exhaustion rather than reclassifying it.
+            deadline.remaining()
         toolchain_error = configuration_error(
             "YTDLP_TOOLCHAIN_INVALID", "yt-dlp requires a validated media toolchain"
         )

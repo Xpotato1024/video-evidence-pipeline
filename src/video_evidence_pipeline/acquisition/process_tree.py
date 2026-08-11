@@ -252,6 +252,11 @@ class ManagedProcessTree:
     def close(self) -> None:
         if self._closed:
             return
+        if self._production_tree and os.name != "nt":
+            # A successful yt-dlp root exit must not leave an orphaned merger
+            # writing to staging after output validation begins.
+            with suppress(OSError):
+                os.killpg(self._process.pid, signal.SIGKILL)
         if self._windows_job is not None:
             self._windows_job.close()
             self._windows_job = None

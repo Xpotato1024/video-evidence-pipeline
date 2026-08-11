@@ -12,9 +12,11 @@ from urllib.parse import urlsplit
 import pytest
 from yt_dlp.options import create_parser
 
+from video_evidence_pipeline.acquisition import ytdlp_runner
 from video_evidence_pipeline.acquisition.generic_ytdlp import GenericYtdlpAdapter
 from video_evidence_pipeline.acquisition.https_proxy import validating_https_proxy
 from video_evidence_pipeline.acquisition.runtime import (
+    AcquisitionDeadline,
     AcquisitionRuntimeConfig,
     BrowserCookieSource,
 )
@@ -23,12 +25,34 @@ from video_evidence_pipeline.acquisition.ytdlp_runner import hardened_argv, run_
 from video_evidence_pipeline.application import acquire_job, authorize_job, initialize_job
 from video_evidence_pipeline.domain.job import SourceKind, load_job_yaml
 from video_evidence_pipeline.domain.media import ToolIdentity
-from video_evidence_pipeline.errors import VepError, configuration_error
+from video_evidence_pipeline.errors import VepError, configuration_error, io_error
 from video_evidence_pipeline.storage.layout import JobWorkspace
 
 
 def public_resolver(_host: str, _port: int) -> list[str]:
     return ["93.184.216.34"]
+
+
+@pytest.mark.parametrize(
+    ("now", "expected_code"),
+    [(2.0, "NETWORK_TIMEOUT"), (0.5, "YTDLP_TOOLCHAIN_INVALID")],
+)
+def test_tool_discovery_timeout_preserves_absolute_deadline_classification(
+    monkeypatch: pytest.MonkeyPatch,
+    now: float,
+    expected_code: str,
+) -> None:
+    class TimeoutRunner:
+        def discover_identities(self, **_kwargs: object) -> None:
+            raise io_error("MEDIA_TOOL_TIMEOUT", "synthetic media tool timeout")
+
+    monkeypatch.setattr(ytdlp_runner, "FFmpegRunner", TimeoutRunner)
+    deadline = AcquisitionDeadline(expires_at=1.0, monotonic=lambda: now)
+
+    with pytest.raises(VepError) as captured:
+        ytdlp_runner.default_ytdlp_toolchain(deadline)
+
+    assert captured.value.code == expected_code
 
 
 def workspace_for(tmp_path: Path, kind: SourceKind = SourceKind.GENERIC_YTDLP) -> JobWorkspace:
