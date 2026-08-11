@@ -259,9 +259,7 @@ class LocalFileAdapter(AcquisitionAdapter):
     @staticmethod
     def _verify_raw(path: Path, artifact: ArtifactRef, *, deep: bool = False) -> None:
         try:
-            if not artifact_file_matches(path, artifact) or (
-                deep and sha256_file(path) != artifact.content_sha256
-            ):
+            if not artifact_file_matches(path, artifact, deep=deep, hasher=sha256_file):
                 raise integrity_error("ARTIFACT_INTEGRITY_FAILED", "raw artifact is invalid")
         except OSError as exc:
             raise io_error("ARTIFACT_READ_FAILED", "raw artifact could not be verified") from exc

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import stat
+from collections.abc import Callable
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Literal, Self
@@ -41,7 +42,13 @@ class ArtifactRef(StrictModel):
         return validate_relative_storage_path(value)
 
 
-def artifact_file_matches(path: Path, artifact: ArtifactRef, *, deep: bool = False) -> bool:
+def artifact_file_matches(
+    path: Path,
+    artifact: ArtifactRef,
+    *,
+    deep: bool = False,
+    hasher: Callable[[Path], str] | None = None,
+) -> bool:
     """Verify immutable publication metadata, hashing bytes only for explicit deep checks."""
 
     before = path.stat(follow_symlinks=False)
@@ -67,10 +74,13 @@ def artifact_file_matches(path: Path, artifact: ArtifactRef, *, deep: bool = Fal
     ):
         return False
     key = (path.absolute(), artifact.content_sha256)
+    if deep:
+        if (hasher or sha256_file)(path) != artifact.content_sha256:
+            return False
+        _VERIFIED_FILE_METADATA[key] = stable
+        return True
     previous = _VERIFIED_FILE_METADATA.setdefault(key, stable)
-    if previous != stable:
-        return False
-    return not deep or sha256_file(path) == artifact.content_sha256
+    return previous == stable
 
 
 class EvidenceLedgerArtifactRef(ArtifactRef):

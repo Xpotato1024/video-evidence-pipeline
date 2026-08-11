@@ -973,6 +973,10 @@ def test_artifact_fast_reuse_skips_hash_and_deep_verify_hashes(
 
     assert artifact_file_matches(path, artifact)
     assert calls == 0
+    metadata = path.stat()
+    os.utime(path, ns=(metadata.st_atime_ns, metadata.st_mtime_ns + 1_000_000))
+    assert not artifact_file_matches(path, artifact)
+    assert calls == 0
     assert artifact_file_matches(path, artifact, deep=True)
     assert calls == 1
 

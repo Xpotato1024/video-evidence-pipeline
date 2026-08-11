@@ -65,6 +65,7 @@ from video_evidence_pipeline.storage.permissions import (
 
 NORMALIZATION_IMPLEMENTATION_VERSION = "media-normalization-v1"
 _ATTEMPT_NAME = re.compile(r"^[0-9a-f]{32}$")
+_FAST_REUSE_ARTIFACT_TYPES = {"analysis_proxy", "speech_audio"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -549,9 +550,7 @@ def _artifact_for(
 
 def _verify_artifact_path(path: Path, artifact: ArtifactRef, *, deep: bool = False) -> None:
     try:
-        if not artifact_file_matches(path, artifact) or (
-            deep and sha256_file(path) != artifact.content_sha256
-        ):
+        if not artifact_file_matches(path, artifact, deep=deep, hasher=sha256_file):
             raise integrity_error("NORMALIZED_BUNDLE_TAMPERED", "normalized artifact is invalid")
         enforce_private_file(path)
     except OSError:
@@ -805,7 +804,9 @@ def verify_normalized_bundle(
         if not artifact.relative_storage_path.startswith("normalized/"):
             raise integrity_error("MEDIA_MANIFEST_MISMATCH", "media artifact path is invalid")
         _verify_artifact_path(
-            workspace.safe_path(artifact.relative_storage_path), artifact, deep=deep
+            workspace.safe_path(artifact.relative_storage_path),
+            artifact,
+            deep=deep or artifact.artifact_type not in _FAST_REUSE_ARTIFACT_TYPES,
         )
     stored_index = read_json_model(
         workspace.safe_path(manifest.frame_index_artifact.relative_storage_path),

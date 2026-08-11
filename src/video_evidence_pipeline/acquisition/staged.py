@@ -118,9 +118,7 @@ def _verify_staged_file(path: Path, *, maximum_bytes: int) -> tuple[int, str]:
 
 def _verify_raw(path: Path, artifact: ArtifactRef, *, deep: bool = False) -> None:
     try:
-        matches = artifact_file_matches(path, artifact) and (
-            not deep or sha256_file(path) == artifact.content_sha256
-        )
+        matches = artifact_file_matches(path, artifact, deep=deep, hasher=sha256_file)
         if matches:
             enforce_private_file(path)
     except OSError as exc:

@@ -564,9 +564,7 @@ def cleanup_attempt(workspace: JobWorkspace, attempt: Path) -> None:
 
 def _verify_artifact(path: Path, artifact: ArtifactRef, *, deep: bool = False) -> None:
     try:
-        if not artifact_file_matches(path, artifact) or (
-            deep and sha256_file(path) != artifact.content_sha256
-        ):
+        if not artifact_file_matches(path, artifact, deep=True, hasher=sha256_file):
             raise integrity_error("TRANSCRIPT_BUNDLE_TAMPERED", "transcript artifact is invalid")
         enforce_private_file(path)
     except OSError:
