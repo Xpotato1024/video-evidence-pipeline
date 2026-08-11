@@ -524,6 +524,8 @@ def recover_job(
         )
     child_data = qualified.job.model_dump(mode="python")
     child_data.update({"job_id": new_job_id, "created_at": datetime.now(UTC)})
+    if qualified.job.primary_input is None:
+        child_data["primary_input"] = PrimaryInputSpec(kind=PrimaryInputKind.VIDEO)
     child_job = JobSpec.model_validate(child_data)
     child_fingerprint = job_fingerprint(child_job)
     recorded_at = datetime.now(UTC)

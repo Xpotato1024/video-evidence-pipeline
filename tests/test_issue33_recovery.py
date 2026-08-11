@@ -55,6 +55,7 @@ from video_evidence_pipeline.domain.job import (
     SourceKind,
     job_fingerprint,
     load_job_yaml,
+    requires_transcript_refinement,
 )
 from video_evidence_pipeline.domain.refinement import (
     RefinementExecutionMode,
@@ -145,7 +146,7 @@ def _transcript_parent(
 
 def _prepare_fresh_semantic_inputs(tmp_path: Path, workspace, job_id: str) -> None:
     job = load_job_yaml(workspace.job_yaml)
-    if job.primary_input is not None and job.primary_input.kind is PrimaryInputKind.TRANSCRIPT:
+    if requires_transcript_refinement(job):
         refinement = prepare_transcript_refinement_job(workspace.root).request
         refinement_response = RefinementResponseManifest(
             request_fingerprint=refinement.request_fingerprint,
@@ -164,6 +165,7 @@ def _prepare_fresh_semantic_inputs(tmp_path: Path, workspace, job_id: str) -> No
         refinement_path = tmp_path / f"{job_id}-fresh-refinement.json"
         refinement_path.write_bytes(pretty_json_bytes(refinement_response))
         _import_transcript_refinement_fixture(workspace.root, refinement_path)
+        assert validate_job(workspace.root)["state"] == JobState.TRANSCRIPT_REFINED.value
     evidence = prepare_evidence_job(workspace.root).request
     evidence_path = tmp_path / f"{job_id}-fresh-evidence.json"
     _write_evidence_response(
@@ -171,6 +173,7 @@ def _prepare_fresh_semantic_inputs(tmp_path: Path, workspace, job_id: str) -> No
         _evidence_response(evidence, execution_mode=AnalyzerExecutionMode.TEST_FIXTURE),
     )
     _import_evidence_fixture(workspace.root, evidence_path)
+    assert validate_job(workspace.root)["state"] == JobState.EVIDENCE_READY.value
 
 
 def _author_response_with_draft(request, draft_markdown: str):
@@ -420,6 +423,9 @@ def test_recovery_fork_reuses_only_pre_semantic_artifacts_and_keeps_parent_immut
     assert payload["parent_finding_ids"] == ["AF000001"]
     child_root = Path(payload["workspace"])
     assert validate_job(child_root)["state"] == JobState.TRANSCRIBED.value
+    child_job = load_job_yaml(child_root / "job.yaml")
+    assert child_job.primary_input is not None
+    assert child_job.primary_input.kind is PrimaryInputKind.TRANSCRIPT
     assert _file_bytes(parent.root) == parent_before
     assert parent.transitions_jsonl.read_bytes() == parent_transitions_before
 
@@ -550,6 +556,7 @@ def test_recovery_rebinds_a_box_source_without_reacquisition(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     parent, requests = _box_transcribed_parent(tmp_path, "boxp", monkeypatch)
+    assert load_job_yaml(parent.job_yaml).primary_input is None
     _prepare_fresh_semantic_inputs(tmp_path, parent, "boxp")
     request = prepare_authoring_job(parent.root, "draft-video-report").request
     response_path = tmp_path / "boxp-author.json"
@@ -561,6 +568,7 @@ def test_recovery_rebinds_a_box_source_without_reacquisition(
         job_id="boxp",
         category="content-integrity",
     )
+    parent_before = _file_bytes(parent.root)
     acquisition_calls_before = len(requests)
 
     recovered = recover_job(
@@ -572,6 +580,9 @@ def test_recovery_rebinds_a_box_source_without_reacquisition(
 
     assert len(requests) == acquisition_calls_before == 4
     child_job = load_job_yaml(recovered.workspace.job_yaml)
+    assert child_job.primary_input is not None
+    assert child_job.primary_input.kind is PrimaryInputKind.VIDEO
+    assert requires_transcript_refinement(child_job) is True
     assert (
         verify_acquired_bundle(recovered.workspace, child_job).content_sha256
         == verify_acquired_bundle(parent, load_job_yaml(parent.job_yaml)).content_sha256
@@ -587,6 +598,22 @@ def test_recovery_rebinds_a_box_source_without_reacquisition(
     assert child_authorization["allow_network_acquisition"] is True
     assert child_authorization["allow_external_api"] is True
     assert validate_job(recovered.workspace.root)["state"] == JobState.TRANSCRIBED.value
+
+    _prepare_fresh_semantic_inputs(tmp_path, recovered.workspace, "boxc")
+    authoring = prepare_authoring_job(recovered.workspace.root, "draft-video-report").request
+    authoring_path = tmp_path / "boxc-author.json"
+    _write_model(authoring_path, _author_response(authoring))
+    initial = _import_authoring_fixture(recovered.workspace.root, authoring_path)
+
+    assert initial.manifest.draft_version == "v001"
+    assert initial.manifest.revision_count == 0
+    assert json.loads(recovered.workspace.refinement_manifest_json.read_text("utf-8"))[
+        "job_id"
+    ] == ("boxc")
+    assert json.loads(recovered.workspace.evidence_manifest_json.read_text("utf-8"))["job_id"] == (
+        "boxc"
+    )
+    assert _file_bytes(parent.root) == parent_before
 
 
 def test_recovery_restarts_a_bad_synthesis_at_fresh_v001_and_reaches_clean_audit(
