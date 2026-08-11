@@ -7,7 +7,7 @@ status: draft
 canonical: true
 canonical_for: artifact-model
 created_at: 2026-08-06T16:07:00+09:00
-updated_at: 2026-08-11T00:00:00+09:00
+updated_at: 2026-08-10T02:00:00+09:00
 authors:
   - Xpotato1024
   - OpenAI ChatGPT
