@@ -26,7 +26,7 @@ automatic_trigger = false
 side_effect_policy = "instruction-only"
 eval_path = ".agents/skill-evals/analyze-video-evidence.toml"
 owner = "Xpotato1024"
-required_capabilities = ["evidence-bundle-read"]
+required_capabilities = ["evidence-bundle-read", "supporting-evidence-read"]
 
 [[skills]]
 id = "draft-video-report"

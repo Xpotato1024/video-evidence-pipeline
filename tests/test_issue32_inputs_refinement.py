@@ -20,8 +20,11 @@ from video_evidence_pipeline.application import (
 from video_evidence_pipeline.domain.artifacts import ArtifactRef
 from video_evidence_pipeline.domain.evidence import (
     ATOMIC_PROPOSITION_RULE,
+    AnalyzerExecutionMode,
+    AnalyzerIdentity,
     EvidenceConfidence,
     EvidenceRecord,
+    EvidenceResponseManifest,
     InterpretationLevel,
     SourceRef,
     SourceRefKind,
@@ -496,6 +499,31 @@ def test_supplied_transcript_refines_separately_and_rejects_ungrounded_merge(
     assert evidence_request.analyzer_contract.atomic_proposition_contract == (
         ATOMIC_PROPOSITION_RULE
     )
+    assert [item.description for item in evidence_request.unresolved_ambiguities] == [
+        "No supporting source resolves whether this game is related."
+    ]
+    response = EvidenceResponseManifest(
+        request_fingerprint=evidence_request.request_fingerprint,
+        analyzer=AnalyzerIdentity(
+            provider="pytest",
+            model="deterministic",
+            version="1",
+            executor="pytest",
+            execution_mode=AnalyzerExecutionMode.TEST_FIXTURE,
+            external_api_used=False,
+        ),
+        evidence_records=[],
+        ambiguity_records=list(evidence_request.unresolved_ambiguities),
+        created_at=evidence_request.created_at + timedelta(seconds=1),
+    )
+    evidence_module._validate_response(evidence_request, response, allow_fixture=True)
+    with pytest.raises(VepError) as dropped:
+        evidence_module._validate_response(
+            evidence_request,
+            response.model_copy(update={"ambiguity_records": []}),
+            allow_fixture=True,
+        )
+    assert dropped.value.code == "UNRESOLVED_AMBIGUITY_LOST"
 
 
 def test_evidence_record_keeps_one_structural_proposition_line_and_notes_non_video() -> None:

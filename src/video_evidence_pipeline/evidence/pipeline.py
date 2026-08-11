@@ -62,7 +62,14 @@ from video_evidence_pipeline.storage.permissions import (
     ensure_private_directory,
 )
 from video_evidence_pipeline.supporting import load_supporting_inputs
-from video_evidence_pipeline.transcription.pipeline import media_bundle_fingerprint
+from video_evidence_pipeline.transcription.pipeline import (
+    load_transcription_result,
+    media_bundle_fingerprint,
+)
+from video_evidence_pipeline.transcription.refinement import (
+    evidence_transcript_projection,
+    load_refinement_result,
+)
 
 EVIDENCE_IMPLEMENTATION_VERSION = "evidence-v1"
 _ATTEMPT_NAME = re.compile(r"^[0-9a-f]{32}$")
@@ -205,6 +212,52 @@ def _request_ambiguities(
     return records
 
 
+def _refinement_ambiguities(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    media_manifest: MediaManifest,
+    transcript_manifest: TranscriptManifest,
+    segments: tuple[TranscriptSegment, ...],
+    *,
+    first_id: int,
+) -> list[AmbiguityRecord]:
+    if not requires_transcript_refinement(job):
+        return []
+    raw = load_transcription_result(workspace, job, media_manifest)
+    refinement = load_refinement_result(
+        workspace,
+        job,
+        media_manifest,
+        raw.transcript_manifest,
+        raw.segments,
+    )
+    if (
+        evidence_transcript_projection(raw.transcript_manifest, refinement) != transcript_manifest
+        or refinement.segments != segments
+    ):
+        raise integrity_error(
+            "REFINEMENT_EVIDENCE_INPUT_MISMATCH",
+            "evidence input does not match the canonical refined transcript",
+        )
+    by_id = {item.segment_id: item for item in segments}
+    if first_id + len(refinement.ambiguities) - 1 > _MAXIMUM_AMBIGUITIES:
+        raise state_error(
+            "EVIDENCE_AMBIGUITY_LIMIT_EXCEEDED",
+            "transcript ambiguities exceed the evidence request limit",
+        )
+    return [
+        AmbiguityRecord(
+            ambiguity_id=f"A{first_id + index:06d}",
+            description=item.description,
+            start_ms=by_id[item.segment_id].start_ms,
+            end_ms=by_id[item.segment_id].end_ms,
+            source_refs=item.source_refs,
+            status=AmbiguityStatus.UNRESOLVED,
+        )
+        for index, item in enumerate(refinement.ambiguities)
+    ]
+
+
 def _supporting_catalog(
     workspace: JobWorkspace, job: JobSpec
 ) -> tuple[tuple[ArtifactRef, ...], tuple[SourceRef, ...]]:
@@ -340,7 +393,20 @@ def _expected_request(
     )
     frames = tuple(_frame_refs(media_manifest))
     approved_artifacts, approved_artifact_refs = _supporting_catalog(workspace, job)
-    ambiguities = tuple(_request_ambiguities(transcript_manifest, segments))
+    request_ambiguities = _request_ambiguities(transcript_manifest, segments)
+    ambiguities = tuple(
+        [
+            *request_ambiguities,
+            *_refinement_ambiguities(
+                workspace,
+                job,
+                media_manifest,
+                transcript_manifest,
+                segments,
+                first_id=len(request_ambiguities) + 1,
+            ),
+        ]
+    )
     media_fingerprint = media_bundle_fingerprint(media_manifest)
     request_fingerprint = evidence_request_fingerprint(
         job_id=job.job_id,
