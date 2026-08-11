@@ -124,12 +124,19 @@ def test_hardened_ytdlp_argv_is_fixed_and_single_file(tmp_path: Path) -> None:
     assert forbidden.isdisjoint(argv)
 
 
-def test_hardened_argv_is_accepted_by_pinned_ytdlp_parser(tmp_path: Path) -> None:
+@pytest.mark.parametrize("cookie_source", [None, BrowserCookieSource.FIREFOX])
+def test_hardened_argv_is_accepted_by_pinned_ytdlp_parser(
+    tmp_path: Path,
+    cookie_source: BrowserCookieSource | None,
+) -> None:
     locator = "https://videos.example.invalid/watch?v=stable-id"
     argv = hardened_argv(
         locator,
         tmp_path,
-        AcquisitionRuntimeConfig(maximum_download_bytes=12345),
+        AcquisitionRuntimeConfig(
+            maximum_download_bytes=12345,
+            cookies_from_browser=cookie_source,
+        ),
         proxy_url="http://127.0.0.1:43210",
     )
 
