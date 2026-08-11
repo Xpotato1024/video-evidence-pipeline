@@ -39,6 +39,7 @@ uv sync --locked --all-groups
 uv run vep job init demo-report \
   --source-kind local_file \
   --source /path/to/authorized-source.mp4 \
+  --primary-input video \
   --task-type report \
   --language ja \
   --requirement "cite two concrete observations" \
@@ -53,6 +54,9 @@ uv run vep job authorize .local/jobs/demo-report \
 uv run vep acquire .local/jobs/demo-report
 uv run vep normalize .local/jobs/demo-report
 uv run vep transcribe .local/jobs/demo-report --preferred-language ja
+uv run vep refine prepare .local/jobs/demo-report
+# refinement/request.jsonを固定入力として、認可済みresponse.jsonを別途用意する
+uv run vep refine import .local/jobs/demo-report --response /path/to/refinement-response.json
 uv run vep evidence prepare .local/jobs/demo-report
 # evidence/request.jsonを固定入力として、認可済みのprovider-neutralなresponse.jsonを別途用意する
 uv run vep evidence import .local/jobs/demo-report --response /path/to/response.json
@@ -74,7 +78,8 @@ raw sourceは`.local/`配下へcontent-addressedに保存され、上書きさ�
 captionが十分ならASR package／modelは不要です。不足区間だけASRを使用する場合も、明示された完全な
 local model directoryをofflineで使用し、暗黙downloadやcloud送信を行いません。外部APIを使った
 evidence responseのimportにはjobの`allow_external_api`認可が必要です。
-新規jobは`--primary-input video|audio|transcript`と、必要な場合だけrepeatableな
+新規CLI jobは`--primary-input`を省略してもmodern videoとして作成されます。
+`--primary-input video|audio|transcript`と、必要な場合だけrepeatableな
 `--supporting-input pdf:PATH|image:PATH|notes:PATH`を指定できます。新input宣言を持つjobはtranscribe後に
 `vep refine prepare`／`vep refine import`を実行し、raw transcriptとrefined transcriptを分離します。
 authoring／audit／revisionの`external_exchange` public production importは、対応するrepository-local Skillが
@@ -136,7 +141,7 @@ route; without an access token, shared-link acquisition is blocked.
 2. acquisition
 3. media normalization
 4. caption／ASR／supplied transcriptからのraw transcript
-5. transcript refinement（新input宣言を持つjob）
+5. transcript refinement（新規CLI job。保存済みv1 jobはlegacy routeを維持）
 6. evidence construction／ambiguity preservation
 7. private rebuildable search cache
 8. deliverable authoring

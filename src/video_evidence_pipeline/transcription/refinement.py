@@ -173,15 +173,6 @@ def _source_catalog(
                         content_sha256=record.original_artifact.content_sha256,
                     )
                 )
-                if record.canonical_text_artifact is not None:
-                    artifacts.append(record.canonical_text_artifact)
-                    refs.append(
-                        SourceRef(
-                            kind=SourceRefKind.PDF_TEXT,
-                            ref_id=record.input_id,
-                            content_sha256=record.canonical_text_artifact.content_sha256,
-                        )
-                    )
                 for page in record.rendered_pages:
                     artifacts.append(page.artifact)
                     refs.append(
@@ -423,9 +414,20 @@ def read_refinement_response(
 def automatic_refinement(value: str) -> str:
     """Apply bounded mechanical cleanup only; semantic corrections remain explicit."""
 
-    value = normalize_transcript_text(value)
-    value = re.sub(r"([!?.,;:])\1+", r"\1", value)
-    return re.sub(r"\b(um|uh|erm)\s+\1\b", r"\1", value, flags=re.IGNORECASE)
+    original = normalize_transcript_text(value)
+    value = re.sub(r"([!?.,;:、。\uff01\uff1f])\1+", r"\1", original)
+    fillers = r"(?:えーと|ええと|えっと|えー|あー|あのー|そのー|um|uh|erm)"
+    value = re.sub(
+        rf"(^|[\s、。\uff01\uff1f!?.,;:]){fillers}(?=$|[\s、。\uff01\uff1f!?.,;:])",
+        r"\1",
+        value,
+        flags=re.IGNORECASE,
+    )
+    value = re.sub(r"\s+", " ", value)
+    value = re.sub(r"\s+([、。\uff01\uff1f!?.,;:])", r"\1", value)
+    value = re.sub(r"([、,;:])(?:\s*[、,;:])+", r"\1", value)
+    value = re.sub(r"^[\s、。\uff01\uff1f!?.,;:]+", "", value).strip()
+    return value or original
 
 
 def _refined_output(

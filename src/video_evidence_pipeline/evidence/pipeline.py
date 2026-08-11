@@ -285,17 +285,6 @@ def _supporting_catalog(
                     ),
                 )
             )
-            if record.canonical_text_artifact is not None:
-                pairs.append(
-                    (
-                        record.canonical_text_artifact,
-                        SourceRef(
-                            kind=SourceRefKind.PDF_TEXT,
-                            ref_id=record.input_id,
-                            content_sha256=record.canonical_text_artifact.content_sha256,
-                        ),
-                    )
-                )
             pairs.extend(
                 (
                     page.artifact,
