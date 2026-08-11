@@ -185,7 +185,7 @@ def job_init(
     ] = None,
     primary_input: Annotated[
         PrimaryInputKind | None,
-        typer.Option("--primary-input", help="Primary input kind; omit for legacy video jobs."),
+        typer.Option("--primary-input", help="Primary input kind; defaults to video."),
     ] = None,
     supporting_input: Annotated[
         list[str] | None,
@@ -203,7 +203,7 @@ def job_init(
             language=language,
             output_format=output_format,
             requirements=requirement,
-            primary_input=primary_input,
+            primary_input=(primary_input if primary_input is not None else PrimaryInputKind.VIDEO),
             supporting_inputs=_supporting_inputs(supporting_input),
         ),
         json_output=json_output,

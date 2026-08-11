@@ -42,6 +42,7 @@ from video_evidence_pipeline.domain.job import (
     SupportingInputSpec,
     job_fingerprint,
     job_to_yaml,
+    requires_transcript_refinement,
 )
 from video_evidence_pipeline.domain.media import (
     MediaManifest,
@@ -88,6 +89,7 @@ from video_evidence_pipeline.transcription.pipeline import (
     publish_transcript,
 )
 from video_evidence_pipeline.transcription.refinement import (
+    automatic_refinement,
     load_refinement_result,
     prepare_refinement_request,
     publish_refinement,
@@ -162,6 +164,90 @@ def test_v1_job_fingerprint_and_yaml_remain_legacy_shaped() -> None:
     yaml = job_to_yaml(job)
     assert "primary_input" not in yaml
     assert "supporting_inputs" not in yaml
+    assert requires_transcript_refinement(job) is False
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("えー、本日は説明します。", "本日は説明します。"),
+        ("えっと 次に進みます。", "次に進みます。"),
+        ("その資料を確認します。", "その資料を確認します。"),
+        ("あの資料を確認します。", "あの資料を確認します。"),
+        ("um this is a test", "this is a test"),
+        ("summary remains", "summary remains"),
+    ],
+)
+def test_automatic_refinement_removes_only_standalone_fillers(source: str, expected: str) -> None:
+    assert automatic_refinement(source) == expected
+
+
+def test_automatic_filler_cleanup_preserves_raw_transcript_and_records_edits(
+    tmp_path: Path,
+) -> None:
+    job = _job(supplied=True)
+    workspace = JobWorkspace.create(tmp_path, job.job_id)
+    raw_bytes = (
+        "えー、本日は説明します。\n\nその資料を確認します。\n\num this is a test\n"
+    ).encode()
+    raw = _raw_artifact(workspace, raw_bytes)
+    media = _transcript_media(job, raw)
+    prepared = prepare_supplied_transcript(workspace, job, media, TranscriptionConfig())
+    transcript = publish_transcript(
+        workspace,
+        job,
+        media,
+        prepared,
+        create_transcription_attempt(workspace),
+    )
+    original_segments = transcript.segments
+    request = prepare_refinement_request(
+        workspace,
+        job,
+        media,
+        transcript.transcript_manifest,
+        transcript.segments,
+    ).request
+    response = RefinementResponseManifest(
+        request_fingerprint=request.request_fingerprint,
+        refiner=RefinerIdentity(
+            provider="fixture",
+            model="fixture",
+            version="1",
+            executor="pytest",
+            execution_mode=RefinementExecutionMode.TEST_FIXTURE,
+            external_api_used=False,
+        ),
+        created_at=request.created_at + timedelta(seconds=1),
+    )
+
+    refined = publish_refinement(
+        workspace,
+        job,
+        transcript.transcript_manifest,
+        transcript.segments,
+        request,
+        response,
+    )
+
+    assert [item.normalized_text for item in refined.segments] == [
+        "本日は説明します。",
+        "その資料を確認します。",
+        "this is a test",
+    ]
+    assert [item.raw_text for item in original_segments] == [
+        "えー、本日は説明します。",
+        "その資料を確認します。",
+        "um this is a test",
+    ]
+    assert [item.normalized_text for item in original_segments] == [
+        "えー、本日は説明します。",
+        "その資料を確認します。",
+        "um this is a test",
+    ]
+    assert [item.segment_id for item in refined.edits] == ["T000001", "T000003"]
+    assert all(item.kind is RefinementEditKind.AUTOMATIC for item in refined.edits)
+    assert workspace.safe_path(raw.relative_storage_path).read_bytes() == raw_bytes
 
 
 def test_supplied_transcript_application_path_reaches_raw_transcript_without_asr(
@@ -566,8 +652,9 @@ def test_evidence_record_keeps_one_structural_proposition_line_and_notes_non_vid
         )
 
 
-def test_pdf_and_image_supporting_inputs_keep_validated_originals(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+@pytest.mark.parametrize("rendered_page", [None, b"\x89PNG\r\n\x1a\nrendered-page"])
+def test_pdf_and_image_supporting_inputs_keep_validated_originals_without_cheap_text(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, rendered_page: bytes | None
 ) -> None:
     image = tmp_path / "support.png"
     image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"bounded-image-fixture")
@@ -576,10 +663,10 @@ def test_pdf_and_image_supporting_inputs_keep_validated_originals(
     pdf.write_bytes(pdf_payload)
     rendered_payloads: list[bytes] = []
 
-    def render_snapshot(_workspace: JobWorkspace, payload: bytes) -> None:
+    def render_snapshot(_workspace: JobWorkspace, payload: bytes) -> bytes | None:
         rendered_payloads.append(payload)
         pdf.write_bytes(b"%PDF-1.4\n(replaced after snapshot) Tj\n%%EOF\n")
-        return None
+        return rendered_page
 
     monkeypatch.setattr(supporting_module, "_render_first_pdf_page", render_snapshot)
     job = JobSpec(
@@ -603,25 +690,31 @@ def test_pdf_and_image_supporting_inputs_keep_validated_originals(
         SupportingInputKind.PDF,
     ]
     assert manifest.inputs[0].original_artifact.artifact_type == "supporting_image_original"
-    assert manifest.inputs[1].canonical_text_artifact is not None
+    assert manifest.inputs[1].canonical_text_artifact is None
+    assert "PDF_EMBEDDED_TEXT_UNAVAILABLE" in manifest.inputs[1].warnings
+    assert bool(manifest.inputs[1].rendered_pages) is (rendered_page is not None)
     assert rendered_payloads == [pdf_payload]
     assert (
         workspace.safe_path(manifest.inputs[1].original_artifact.relative_storage_path).read_bytes()
         == pdf_payload
     )
-    assert (
-        workspace.safe_path(
-            manifest.inputs[1].canonical_text_artifact.relative_storage_path
-        ).read_text(encoding="utf-8")
-        == "embedded support\n"
-    )
     raw = _raw_artifact(workspace, b"support-catalog")
-    refinement_refs = refinement_module._source_catalog(_transcript_media(job, raw), (), manifest)[
-        1
-    ]
-    evidence_refs = evidence_module._supporting_catalog(workspace, job)[1]
+    refinement_artifacts, refinement_refs = refinement_module._source_catalog(
+        _transcript_media(job, raw), (), manifest
+    )
+    evidence_artifacts, evidence_refs = evidence_module._supporting_catalog(workspace, job)
     assert any(item.kind is SourceRefKind.APPROVED_ARTIFACT for item in refinement_refs)
     assert any(item.kind is SourceRefKind.APPROVED_ARTIFACT for item in evidence_refs)
+    assert not any(item.kind is SourceRefKind.PDF_TEXT for item in refinement_refs)
+    assert not any(item.kind is SourceRefKind.PDF_TEXT for item in evidence_refs)
+    assert any(item == manifest.inputs[1].original_artifact for item in refinement_artifacts)
+    assert any(item == manifest.inputs[1].original_artifact for item in evidence_artifacts)
+    assert any(item.kind is SourceRefKind.PDF_PAGE for item in refinement_refs) is (
+        rendered_page is not None
+    )
+    assert any(item.kind is SourceRefKind.PDF_PAGE for item in evidence_refs) is (
+        rendered_page is not None
+    )
 
     invalid_image = tmp_path / "invalid.png"
     invalid_image.write_bytes(b"not-an-image")

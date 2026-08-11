@@ -9,6 +9,8 @@ from pathlib import Path
 
 import yaml
 
+from video_evidence_pipeline.domain.job import load_job_yaml, requires_transcript_refinement
+
 
 def vep_executable() -> Path:
     name = "vep.exe" if os.name == "nt" else "vep"
@@ -114,6 +116,8 @@ def test_cli_created_authorized_acquired_e2e(tmp_path: Path) -> None:
     assert status_data["artifact_integrity"]["status"] == "valid"
     final_job_data = yaml.safe_load((job_path / "job.yaml").read_text(encoding="utf-8"))
     assert final_job_data["assignment"]["requirements"] == expected_requirements
+    assert final_job_data["primary_input"]["kind"] == "video"
+    assert requires_transcript_refinement(load_job_yaml(job_path / "job.yaml")) is True
 
     manifest = json.loads((job_path / "manifests/source-manifest.json").read_text(encoding="utf-8"))
     manifest_text = (job_path / "manifests/source-manifest.json").read_text(encoding="utf-8")

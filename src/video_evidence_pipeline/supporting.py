@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import shutil
 import stat
 import subprocess
@@ -138,16 +137,6 @@ def _canonical_notes(payload: bytes) -> bytes:
     return (text + "\n").encode("utf-8")
 
 
-def _cheap_pdf_text(payload: bytes) -> bytes | None:
-    """Use only literal PDF text operators; compressed/OCR content remains unavailable."""
-
-    literals = re.findall(r"\(((?:\\.|[^\\)]){1,4096})\)\s*(?:Tj|'|\")", payload.decode("latin-1"))
-    text = " ".join(
-        value.replace(r"\(", "(").replace(r"\)", ")").replace(r"\\", "\\") for value in literals
-    )
-    return (text + "\n").encode("utf-8") if text else None
-
-
 def _render_first_pdf_page(workspace: JobWorkspace, payload: bytes) -> bytes | None:
     executable = shutil.which("pdftoppm")
     if executable is None:
@@ -239,18 +228,7 @@ def _records(workspace: JobWorkspace, job: JobSpec) -> list[SupportingInputRecor
                 filename="notes.txt",
             )
         elif specification.kind is SupportingInputKind.PDF:
-            text = _cheap_pdf_text(payload)
-            if text is None:
-                warnings.append("PDF_EMBEDDED_TEXT_UNAVAILABLE")
-            else:
-                text_artifact = _store(
-                    workspace,
-                    text,
-                    input_id=input_id,
-                    artifact_type="supporting_pdf_text",
-                    directory="text",
-                    filename="embedded-text.txt",
-                )
+            warnings.append("PDF_EMBEDDED_TEXT_UNAVAILABLE")
             page = _render_first_pdf_page(workspace, payload)
             if page is None:
                 warnings.append("PDF_PAGE_RENDER_UNAVAILABLE")
