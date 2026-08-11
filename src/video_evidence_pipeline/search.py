@@ -75,10 +75,15 @@ CREATE TABLE documents (
         (
             kind = 'transcript'
             AND record_id GLOB 'T[0-9][0-9][0-9][0-9][0-9][0-9]'
-            AND start_ms IS NOT NULL
-            AND end_ms IS NOT NULL
-            AND start_ms >= 0
-            AND end_ms > start_ms
+            AND (
+                (start_ms IS NULL AND end_ms IS NULL)
+                OR (
+                    start_ms IS NOT NULL
+                    AND end_ms IS NOT NULL
+                    AND start_ms >= 0
+                    AND end_ms > start_ms
+                )
+            )
         )
         OR
         (
@@ -703,11 +708,10 @@ def _document_from_row(row: tuple[object, ...]) -> _Document:
     ):
         raise _index_invalid("search document content or identity is invalid")
     if document.kind is SearchDocumentKind.TRANSCRIPT:
-        if (
-            document.start_ms is None
-            or document.end_ms is None
-            or document.start_ms < 0
-            or document.end_ms <= document.start_ms
+        if (document.start_ms is None) != (document.end_ms is None) or (
+            document.start_ms is not None
+            and document.end_ms is not None
+            and (document.start_ms < 0 or document.end_ms <= document.start_ms)
         ):
             raise _index_invalid("search transcript interval is invalid")
     elif document.start_ms is not None or document.end_ms is not None:

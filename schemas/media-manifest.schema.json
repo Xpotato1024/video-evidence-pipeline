@@ -768,6 +768,16 @@
       "title": "NormalizedSubtitle",
       "type": "object"
     },
+    "PrimaryInputKind": {
+      "description": "The one primary item that becomes a transcript.\n\n``source`` remains the v1 acquisition projection.  Keeping it in place\nlets historic video job YAML and its fingerprint remain valid while newer\njobs opt into an explicit primary kind.",
+      "enum": [
+        "video",
+        "audio",
+        "transcript"
+      ],
+      "title": "PrimaryInputKind",
+      "type": "string"
+    },
     "SpeechAudio": {
       "additionalProperties": false,
       "properties": {
@@ -884,7 +894,15 @@
   "additionalProperties": false,
   "properties": {
     "analysis_proxy": {
-      "$ref": "#/$defs/AnalysisProxy"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AnalysisProxy"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "configuration": {
       "$ref": "#/$defs/NormalizationConfig"
@@ -895,16 +913,48 @@
       "type": "string"
     },
     "ffmpeg": {
-      "$ref": "#/$defs/ToolIdentity"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ToolIdentity"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "ffprobe": {
-      "$ref": "#/$defs/ToolIdentity"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ToolIdentity"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "frame_index": {
-      "$ref": "#/$defs/FrameIndex"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FrameIndex"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "frame_index_artifact": {
-      "$ref": "#/$defs/ArtifactRef"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "implementation_version": {
       "maxLength": 128,
@@ -926,8 +976,20 @@
       "title": "Normalization Fingerprint",
       "type": "string"
     },
+    "primary_input_kind": {
+      "$ref": "#/$defs/PrimaryInputKind",
+      "default": "video"
+    },
     "probe": {
-      "$ref": "#/$defs/MediaProbe"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MediaProbe"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "raw_artifact": {
       "$ref": "#/$defs/ArtifactRef"
@@ -975,13 +1037,7 @@
     "normalization_fingerprint",
     "implementation_version",
     "configuration",
-    "ffmpeg",
-    "ffprobe",
     "raw_artifact",
-    "probe",
-    "analysis_proxy",
-    "frame_index_artifact",
-    "frame_index",
     "started_at",
     "created_at"
   ],

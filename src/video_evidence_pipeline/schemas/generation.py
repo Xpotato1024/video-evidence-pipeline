@@ -65,12 +65,20 @@ from video_evidence_pipeline.domain.media import (
     NormalizationConfig,
     NormalizedSubtitle,
 )
+from video_evidence_pipeline.domain.refinement import (
+    RefinementAmbiguityLedger,
+    RefinementEditLedger,
+    RefinementManifest,
+    RefinementRequestManifest,
+    RefinementResponseManifest,
+)
 from video_evidence_pipeline.domain.search import (
     SearchHit,
     SearchIndexBuildResult,
     SearchIndexMetadata,
     SearchResult,
 )
+from video_evidence_pipeline.domain.supporting import SupportingInputManifest
 from video_evidence_pipeline.domain.transcription import (
     AsrSegment,
     SegmentLineage,
@@ -139,6 +147,12 @@ SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "transcript-segment.schema.json": TranscriptSegment,
     "transcript-interval.schema.json": TranscriptInterval,
     "transcript-manifest.schema.json": TranscriptManifest,
+    "supporting-input-manifest.schema.json": SupportingInputManifest,
+    "refinement-request-manifest.schema.json": RefinementRequestManifest,
+    "refinement-response-manifest.schema.json": RefinementResponseManifest,
+    "refinement-edit-ledger.schema.json": RefinementEditLedger,
+    "refinement-ambiguity-ledger.schema.json": RefinementAmbiguityLedger,
+    "refinement-manifest.schema.json": RefinementManifest,
     "source-ref.schema.json": SourceRef,
     "evidence-record.schema.json": EvidenceRecord,
     "ambiguity-record.schema.json": AmbiguityRecord,

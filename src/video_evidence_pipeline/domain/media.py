@@ -12,6 +12,7 @@ from pydantic import Field, field_validator, model_validator
 from video_evidence_pipeline.domain import StrictModel, UtcDateTime
 from video_evidence_pipeline.domain.artifacts import ArtifactRef
 from video_evidence_pipeline.domain.identifiers import JobId, Sha256
+from video_evidence_pipeline.domain.job import PrimaryInputKind
 
 
 class MediaStreamType(StrEnum):
@@ -169,12 +170,10 @@ class MediaProbe(StrictModel):
     streams: list[MediaStream] = Field(min_length=1, max_length=1024)
 
     @model_validator(mode="after")
-    def contains_one_supported_video(self) -> Self:
+    def stream_indexes_are_canonical(self) -> Self:
         indexes = [stream.index for stream in self.streams]
         if indexes != sorted(set(indexes)):
             raise ValueError("media stream indexes must be sorted and unique")
-        if not any(stream.stream_type is MediaStreamType.VIDEO for stream in self.streams):
-            raise ValueError("media requires a video stream")
         return self
 
 
@@ -386,15 +385,16 @@ class MediaManifest(StrictModel):
     normalization_fingerprint: Sha256
     implementation_version: str = Field(min_length=1, max_length=128)
     configuration: NormalizationConfig
-    ffmpeg: ToolIdentity
-    ffprobe: ToolIdentity
+    primary_input_kind: PrimaryInputKind = PrimaryInputKind.VIDEO
+    ffmpeg: ToolIdentity | None = None
+    ffprobe: ToolIdentity | None = None
     raw_artifact: ArtifactRef
-    probe: MediaProbe
-    analysis_proxy: AnalysisProxy
+    probe: MediaProbe | None = None
+    analysis_proxy: AnalysisProxy | None = None
     speech_audio: SpeechAudio | None = None
     subtitles: list[NormalizedSubtitle] = Field(default_factory=list)
-    frame_index_artifact: ArtifactRef
-    frame_index: FrameIndex
+    frame_index_artifact: ArtifactRef | None = None
+    frame_index: FrameIndex | None = None
     warnings: list[str] = Field(default_factory=list, max_length=128)
     started_at: UtcDateTime
     created_at: UtcDateTime
@@ -403,6 +403,28 @@ class MediaManifest(StrictModel):
     def bundle_is_internally_consistent(self) -> Self:
         if self.created_at < self.started_at:
             raise ValueError("media manifest timestamps are inconsistent")
+        if self.primary_input_kind is PrimaryInputKind.TRANSCRIPT:
+            if (
+                any(
+                    item is not None
+                    for item in (
+                        self.ffmpeg,
+                        self.ffprobe,
+                        self.probe,
+                        self.analysis_proxy,
+                        self.speech_audio,
+                        self.frame_index_artifact,
+                        self.frame_index,
+                    )
+                )
+                or self.subtitles
+            ):
+                raise ValueError("transcript primary input must not claim normalized media")
+            if self.warnings != ["TRANSCRIPT_PRIMARY"]:
+                raise ValueError("transcript primary input requires its canonical warning")
+            return self
+        if self.ffmpeg is None or self.ffprobe is None or self.probe is None:
+            raise ValueError("media primary input requires FFmpeg, ffprobe, and a media probe")
         has_audio = any(
             stream.stream_type is MediaStreamType.AUDIO for stream in self.probe.streams
         )
@@ -416,6 +438,33 @@ class MediaManifest(StrictModel):
         if self.warnings != sorted(set(self.warnings)):
             raise ValueError("media warnings must be sorted and unique")
         config = self.configuration
+        if self.primary_input_kind is PrimaryInputKind.AUDIO:
+            if (
+                any(stream.stream_type is MediaStreamType.VIDEO for stream in self.probe.streams)
+                or self.analysis_proxy is not None
+                or self.frame_index_artifact is not None
+                or self.frame_index is not None
+                or self.subtitles
+                or self.speech_audio is None
+            ):
+                raise ValueError("audio primary input must not create video outputs")
+            if (
+                self.probe.duration_ms > config.maximum_duration_ms
+                or len(self.probe.streams) > config.maximum_streams
+                or self.speech_audio.sample_rate_hz != config.speech_sample_rate_hz
+                or abs(self.speech_audio.duration_ms - self.probe.duration_ms)
+                > config.duration_tolerance_ms
+            ):
+                raise ValueError("audio outputs exceed or mismatch normalization configuration")
+            return self
+        if not any(stream.stream_type is MediaStreamType.VIDEO for stream in self.probe.streams):
+            raise ValueError("video primary input requires a video stream")
+        if (
+            self.analysis_proxy is None
+            or self.frame_index_artifact is None
+            or self.frame_index is None
+        ):
+            raise ValueError("video primary input requires proxy and frame outputs")
         if (
             self.probe.duration_ms > config.maximum_duration_ms
             or len(self.probe.streams) > config.maximum_streams

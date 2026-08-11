@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import stat
@@ -103,7 +104,7 @@ class PreparedTranscript:
     caption_coverage: float | None
     media_bundle_fingerprint: str
     transcription_fingerprint: str
-    duration_ms: int
+    duration_ms: int | None
     gaps: tuple[TranscriptInterval, ...]
     overlaps: tuple[TranscriptInterval, ...]
     warnings: tuple[str, ...]
@@ -124,7 +125,7 @@ def normalize_transcript_text(value: str) -> str:
 
 def media_bundle_fingerprint(manifest: MediaManifest) -> str:
     artifacts = [
-        manifest.analysis_proxy.artifact,
+        *([manifest.analysis_proxy.artifact] if manifest.analysis_proxy is not None else []),
         *([manifest.speech_audio.artifact] if manifest.speech_audio is not None else []),
         *(
             artifact
@@ -132,13 +133,16 @@ def media_bundle_fingerprint(manifest: MediaManifest) -> str:
             for artifact in (subtitle.webvtt_artifact, subtitle.cues_artifact)
             if artifact is not None
         ),
-        *(record.artifact for record in manifest.frame_index.records),
-        manifest.frame_index_artifact,
+        *(
+            record.artifact
+            for record in (manifest.frame_index.records if manifest.frame_index is not None else [])
+        ),
+        *([manifest.frame_index_artifact] if manifest.frame_index_artifact is not None else []),
     ]
     return fingerprint(
         {
             "normalization_fingerprint": manifest.normalization_fingerprint,
-            "duration_ms": manifest.probe.duration_ms,
+            "duration_ms": manifest.probe.duration_ms if manifest.probe is not None else None,
             "artifacts": [item.model_dump(mode="json") for item in artifacts],
         }
     )
@@ -326,6 +330,10 @@ def prepare_transcript(
     backend: AsrBackend | None,
     model_directory: Path | None = None,
 ) -> PreparedTranscript:
+    if media_manifest.probe is None:
+        raise state_error(
+            "TRANSCRIPTION_SOURCE_UNAVAILABLE", "media transcript input is unavailable"
+        )
     started_at = datetime.now(UTC)
     preferred = list(config.preferred_languages)
     if job.assignment.language.casefold() not in {item.casefold() for item in preferred}:
@@ -501,6 +509,186 @@ def prepare_transcript(
         gaps=gaps,
         overlaps=overlaps,
         warnings=tuple(sorted(set(warnings))),
+        started_at=started_at,
+    )
+
+
+def _supplied_transcript_spans(payload: str, maximum_chars: int) -> tuple[str, ...]:
+    """Split supplied UTF-8 text/Markdown into stable, timestamp-less spans."""
+
+    blocks = [item.strip() for item in re.split(r"\r?\n[ \t]*\r?\n", payload) if item.strip()]
+    spans: list[str] = []
+    for block in blocks:
+        if len(block) <= 65_536:
+            spans.append(block)
+            continue
+        current: list[str] = []
+        current_size = 0
+        for line in block.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if len(line) > 65_536:
+                raise state_error("TRANSCRIPT_TOO_LARGE", "supplied transcript span is too large")
+            addition = len(line) + (1 if current else 0)
+            if current and current_size + addition > 65_536:
+                spans.append("\n".join(current))
+                current = []
+                current_size = 0
+            current.append(line)
+            current_size += addition
+        if current:
+            spans.append("\n".join(current))
+    if not spans:
+        raise state_error("TRANSCRIPT_EMPTY", "supplied transcript has no usable text")
+    if sum(len(item) + len(normalize_transcript_text(item)) for item in spans) > maximum_chars:
+        raise state_error("TRANSCRIPT_TOO_LARGE", "supplied transcript text exceeds its limit")
+    return tuple(spans)
+
+
+def _supplied_timestamped_spans(
+    payload: str, maximum_chars: int
+) -> tuple[tuple[str, int | None, int | None], ...]:
+    """Read the deliberately small supplied-JSONL format without creating times."""
+
+    spans: list[tuple[str, int | None, int | None]] = []
+    timestamped: bool | None = None
+    for line in payload.splitlines():
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            raise state_error(
+                "SUPPLIED_TRANSCRIPT_INVALID", "supplied JSONL is malformed"
+            ) from None
+        if not isinstance(record, dict) or set(record) - {"text", "start_ms", "end_ms"}:
+            raise state_error("SUPPLIED_TRANSCRIPT_INVALID", "supplied JSONL record is invalid")
+        text = record.get("text")
+        start_ms = record.get("start_ms")
+        end_ms = record.get("end_ms")
+        has_interval = start_ms is not None or end_ms is not None
+        if (
+            not isinstance(text, str)
+            or not text.strip()
+            or len(text) > 65_536
+            or (start_ms is None) != (end_ms is None)
+            or (start_ms is not None and (type(start_ms) is not int or start_ms < 0))
+            or (end_ms is not None and (type(end_ms) is not int or end_ms <= start_ms))
+            or (timestamped is not None and timestamped != has_interval)
+        ):
+            raise state_error("SUPPLIED_TRANSCRIPT_INVALID", "supplied JSONL record is invalid")
+        timestamped = has_interval
+        spans.append((text.strip(), start_ms, end_ms))
+    if not spans:
+        raise state_error("TRANSCRIPT_EMPTY", "supplied transcript has no usable text")
+    if (
+        sum(len(text) + len(normalize_transcript_text(text)) for text, _, _ in spans)
+        > maximum_chars
+    ):
+        raise state_error("TRANSCRIPT_TOO_LARGE", "supplied transcript text exceeds its limit")
+    return tuple(spans)
+
+
+def prepare_supplied_transcript(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    media_manifest: MediaManifest,
+    config: TranscriptionConfig,
+) -> PreparedTranscript:
+    """Import acquired UTF-8 text/Markdown or bounded JSONL without ASR."""
+
+    raw_artifact = media_manifest.raw_artifact
+    source_path = workspace.safe_path(raw_artifact.relative_storage_path)
+    maximum_bytes = min(2_147_483_648, config.maximum_total_text_chars * 8)
+    try:
+        metadata = source_path.stat(follow_symlinks=False)
+        if (
+            source_path.is_symlink()
+            or not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_size <= 0
+            or metadata.st_size > maximum_bytes
+        ):
+            raise integrity_error("SUPPLIED_TRANSCRIPT_INVALID", "supplied transcript is invalid")
+        payload = source_path.read_bytes()
+    except OSError:
+        raise integrity_error(
+            "SUPPLIED_TRANSCRIPT_INVALID", "supplied transcript is unavailable"
+        ) from None
+    if len(payload) != metadata.st_size:
+        raise integrity_error(
+            "SUPPLIED_TRANSCRIPT_INVALID", "supplied transcript changed while reading"
+        )
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError:
+        raise integrity_error(
+            "SUPPLIED_TRANSCRIPT_INVALID", "supplied transcript must be UTF-8 text"
+        ) from None
+    if Path(job.source.locator).suffix.casefold() == ".jsonl":
+        spans = _supplied_timestamped_spans(text, config.maximum_total_text_chars)
+    else:
+        spans = tuple(
+            (item, None, None)
+            for item in _supplied_transcript_spans(text, config.maximum_total_text_chars)
+        )
+    started_at = datetime.now(UTC)
+    backend = TranscriptionBackendIdentity(
+        source=TranscriptSource.SUPPLIED,
+        name="supplied-transcript",
+        version=TRANSCRIPTION_IMPLEMENTATION_VERSION,
+        model="utf-8-text",
+        model_fingerprint=raw_artifact.content_sha256,
+        local_files_only=True,
+    )
+    backend_fingerprint = fingerprint(backend)
+    segments = tuple(
+        TranscriptSegment(
+            segment_id=f"T{index:06d}",
+            start_ms=start_ms,
+            end_ms=end_ms,
+            raw_text=text,
+            normalized_text=normalize_transcript_text(text),
+            source=TranscriptSource.SUPPLIED,
+            confidence=TranscriptConfidence(kind=TranscriptConfidenceKind.NOT_AVAILABLE),
+            lineage=SegmentLineage(
+                source_artifact=raw_artifact,
+                source_record_id=f"S{index:06d}",
+                backend_identity_fingerprint=backend_fingerprint,
+            ),
+        )
+        for index, (text, start_ms, end_ms) in enumerate(spans, start=1)
+    )
+    duration_ms = max((item.end_ms or 0) for item in segments) or None
+    gaps, overlaps = _intervals(segments, duration_ms) if duration_ms is not None else ((), ())
+    media_fingerprint = media_bundle_fingerprint(media_manifest)
+    selected_artifacts = (raw_artifact,)
+    backends = (backend,)
+    return PreparedTranscript(
+        segments=segments,
+        configuration=config,
+        backends=backends,
+        selected_source_artifacts=selected_artifacts,
+        selected_subtitle_stream_index=None,
+        selected_subtitle_provenance=None,
+        caption_coverage=None,
+        media_bundle_fingerprint=media_fingerprint,
+        transcription_fingerprint=transcription_fingerprint(
+            media_fingerprint=media_fingerprint,
+            selected_artifacts=selected_artifacts,
+            configuration=config,
+            backends=backends,
+        ),
+        duration_ms=duration_ms,
+        gaps=gaps,
+        overlaps=overlaps,
+        warnings=(
+            (
+                "SUPPLIED_TRANSCRIPT_TIMESTAMPED"
+                if duration_ms is not None
+                else "SUPPLIED_TRANSCRIPT_UNTIMED"
+            ),
+        ),
         started_at=started_at,
     )
 
@@ -689,7 +877,7 @@ def publish_transcript(
 
 
 def _read_segments(
-    path: Path, config: TranscriptionConfig, duration_ms: int
+    path: Path, config: TranscriptionConfig, duration_ms: int | None
 ) -> tuple[TranscriptSegment, ...]:
     maximum_bytes = min(
         2_147_483_648,
@@ -719,15 +907,34 @@ def _read_segments(
     if len(segments) > config.maximum_segments:
         raise integrity_error("TRANSCRIPT_INVALID", "transcript JSONL exceeds its limit")
     ids = [item.segment_id for item in segments]
-    if (
-        not segments
-        or ids != [f"T{index:06d}" for index in range(1, len(ids) + 1)]
-        or list(segments)
-        != sorted(
+    ordered = (
+        sorted(segments, key=lambda item: item.lineage.source_record_id)
+        if duration_ms is None
+        else sorted(
             segments,
             key=lambda item: (item.start_ms, item.end_ms, item.lineage.source_record_id),
         )
-        or any(item.end_ms > duration_ms for item in segments)
+    )
+    if (
+        not segments
+        or ids != [f"T{index:06d}" for index in range(1, len(ids) + 1)]
+        or list(segments) != ordered
+        or (
+            duration_ms is None
+            and any(
+                item.source is not TranscriptSource.SUPPLIED
+                or item.start_ms is not None
+                or item.end_ms is not None
+                for item in segments
+            )
+        )
+        or (
+            duration_ms is not None
+            and any(
+                item.start_ms is None or item.end_ms is None or item.end_ms > duration_ms
+                for item in segments
+            )
+        )
         or any(
             normalize_transcript_text(item.raw_text) != item.normalized_text for item in segments
         )
@@ -763,6 +970,43 @@ def _verify_transcript_manifest(
         raise integrity_error(
             "TRANSCRIPT_MANIFEST_MISMATCH", "transcript manifest does not match the job"
         )
+    if TranscriptSource.SUPPLIED in {item.source for item in manifest.backends}:
+        if (
+            manifest.selected_source_artifacts != [media_manifest.raw_artifact]
+            or manifest.selected_subtitle_stream_index is not None
+            or manifest.selected_subtitle_provenance is not None
+            or manifest.caption_coverage is not None
+        ):
+            raise integrity_error(
+                "TRANSCRIPT_MANIFEST_MISMATCH", "supplied transcript manifest is inconsistent"
+            )
+        segments_path = workspace.safe_path(manifest.segments_artifact.relative_storage_path)
+        _verify_artifact(segments_path, manifest.segments_artifact)
+        segments = _read_segments(segments_path, manifest.configuration, manifest.duration_ms)
+        if manifest.duration_ms is None:
+            if manifest.gaps or manifest.overlaps:
+                raise integrity_error(
+                    "TRANSCRIPT_MANIFEST_MISMATCH",
+                    "timestamp-less supplied transcript has intervals",
+                )
+        elif (manifest.gaps, manifest.overlaps) != _intervals(segments, manifest.duration_ms):
+            raise integrity_error(
+                "TRANSCRIPT_MANIFEST_MISMATCH", "supplied transcript intervals are inconsistent"
+            )
+        backend = manifest.backends[0]
+        backend_fingerprint = fingerprint(backend)
+        if any(
+            item.source is not TranscriptSource.SUPPLIED
+            or item.lineage.source_artifact != media_manifest.raw_artifact
+            or item.lineage.backend_identity_fingerprint != backend_fingerprint
+            for item in segments
+        ):
+            raise integrity_error(
+                "TRANSCRIPT_MANIFEST_MISMATCH", "supplied transcript lineage is invalid"
+            )
+        return manifest, segments
+    if media_manifest.probe is None:
+        raise integrity_error("TRANSCRIPT_MANIFEST_MISMATCH", "media transcript lacks a probe")
     allowed_sources = [
         *(
             item.cues_artifact
@@ -781,6 +1025,8 @@ def _verify_transcript_manifest(
         )
     segments_path = workspace.safe_path(manifest.segments_artifact.relative_storage_path)
     _verify_artifact(segments_path, manifest.segments_artifact)
+    if manifest.duration_ms is None:
+        raise integrity_error("TRANSCRIPT_MANIFEST_MISMATCH", "media transcript lacks a duration")
     segments = _read_segments(segments_path, manifest.configuration, manifest.duration_ms)
     gaps, overlaps = _intervals(segments, manifest.duration_ms)
     backend_by_fingerprint = {fingerprint(item): item for item in manifest.backends}

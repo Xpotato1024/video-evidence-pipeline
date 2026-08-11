@@ -87,6 +87,9 @@ class JobWorkspace:
             root / "normalized/staging",
             root / "transcript",
             root / "transcript/staging",
+            root / "refinement",
+            root / "supporting",
+            root / "supporting/staging",
             root / "evidence",
             root / "evidence/staging",
             root / "search",
@@ -181,6 +184,22 @@ class JobWorkspace:
     @property
     def transcription_lock_path(self) -> Path:
         return self.safe_path("transcript/.transcription.lock")
+
+    @property
+    def supporting_manifest_json(self) -> Path:
+        return self.safe_path("manifests/supporting-input-manifest.json")
+
+    @property
+    def refinement_request_json(self) -> Path:
+        return self.safe_path("refinement/request.json")
+
+    @property
+    def refinement_manifest_json(self) -> Path:
+        return self.safe_path("manifests/transcript-refinement-manifest.json")
+
+    @property
+    def refinement_lock_path(self) -> Path:
+        return self.safe_path("refinement/.refinement.lock")
 
     @property
     def evidence_request_json(self) -> Path:

@@ -27,8 +27,9 @@ related_documents:
 transcription、semantic evidence／authoring／audit／revision prepare／import、private search cache、
 human-review package、明示的人間approval、byte-exact Markdown export、status／integrity確認、JSON Schema生成／drift確認を
 実装しています。実行可能な直線経路は
-`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → EVIDENCE_READY → DRAFTED → AUDITED → HUMAN_REVIEW_READY → HUMAN_APPROVED → EXPORTED`
+`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → TRANSCRIPT_REFINED → EVIDENCE_READY → DRAFTED → AUDITED → HUMAN_REVIEW_READY → HUMAN_APPROVED → EXPORTED`
 で、P0／P1が残る経路は最大2回のrevision後に`BLOCKED`です。
+primary指定を持たない既存v1 video jobは`TRANSCRIBED → EVIDENCE_READY`を維持します。
 
 ## Commands
 
@@ -41,6 +42,8 @@ vep job status
 vep acquire
 vep normalize
 vep transcribe
+vep refine prepare
+vep refine import --response PATH
 vep evidence prepare
 vep evidence import --response PATH
 vep author prepare --skill SKILL
@@ -63,6 +66,10 @@ error codeとsafe messageを返し、Python stack traceを表示しません。
 `job init`ではassignment requirementをrepeatableな`--requirement`で指定します。未指定時は空配列で、
 指定順は意味を持ち、normalized job fingerprintへそのまま含まれます。空白だけの値と512文字を超える
 値は拒否します。
+
+新規jobは`--primary-input video|audio|transcript`を指定でき、repeatableな
+`--supporting-input pdf:PATH|image:PATH|notes:PATH`でlocal supporting inputを追加できます。省略時は既存v1
+video jobと同じYAML／fingerprintです。audio／transcript primaryは`local_file` sourceだけを受け付けます。
 
 ```bash
 vep job init demo-report \
@@ -111,6 +118,12 @@ CLIは再認可を推測しません。このMVPではin-place再認可も実装
 ├─ transcript/
 │  ├─ staging/
 │  └─ segments/<sha256>/transcript.jsonl
+├─ supporting/{original,text,pages}/<sha256>/...
+├─ refinement/
+│  ├─ segments/<sha256>/transcript.jsonl
+│  ├─ edits/<sha256>/edits.json
+│  ├─ ambiguities/<sha256>/ambiguities.json
+│  └─ responses/<sha256>/validated-response.json
 ├─ evidence/
 │  ├─ staging/
 │  ├─ request.json
@@ -140,6 +153,9 @@ CLIは再認可を推測しません。このMVPではin-place再認可も実装
 │  ├─ source-manifest.json
 │  ├─ media-manifest.json
 │  ├─ transcript-manifest.json
+│  ├─ supporting-input-manifest.json
+│  ├─ transcript-refinement-request.json
+│  ├─ transcript-refinement-manifest.json
 │  ├─ evidence-manifest.json
 │  ├─ authoring/{draft-vNNN,audit-vNNN,revision-vNNN,human-review}.json
 │  ├─ approval-manifest.json
@@ -236,6 +252,9 @@ configでもこのhard capを超えられません。完全bundleの再実行、
 fingerprint、全artifact hash、media manifest、normalization stage manifestを検証し、subprocessなしで再利用します。
 partial manifestは検証可能な完全artifactがある場合だけ復旧します。
 
+audio primaryはspeech WAVだけを生成し、video proxy／subtitle／frame extractionを行いません。transcript primaryは
+FFmpegを起動せず、raw artifactへ束縛したno-media normalization manifestを生成します。
+
 ## Transcription
 
 `vep transcribe JOB [--preferred-language LANG] [--minimum-caption-coverage N] [--asr-model-directory DIR]`
@@ -250,10 +269,18 @@ segmentは連続ID、integer millisecond、gap／overlap、source／backend line
 `raw_text`はadapter出力を保持し、`normalized_text`はNFKC＋空白正規化後の値です。subtitle source markupの
 raw preservationとは別契約です。backend metricを校正済み確率として表示しません。
 
+transcript primaryはASRを実行せずUTF-8 text／Markdownまたはbounded JSONLをraw transcriptへimportします。
+timestampがないsegmentへ時刻を補いません。新input宣言を持つjobは`vep refine prepare JOB`でrequestを作り、
+`vep refine import JOB --response PATH`でsemantic correctionのsupport refs、validated response、edit／ambiguity ledgerを
+検証して`TRANSCRIPT_REFINED`へ進みます。raw transcriptはimmutableで、refined transcriptとは別artifactです。
+
 ## Evidence exchange
 
 `vep evidence prepare JOB`は`evidence/request.json`へassignment、順序付きrequirements、exact transcript
 segments／refs、frame records／artifact refs、承認済み外部artifact catalog、未解決ambiguityを固定します。
+PDF page/text、image、notesが入力にある場合だけ同じrequestへ追加します。1 evidence recordは1つのatomic
+propositionとし、複数SourceRefはすべて同じpropositionを支持する必要があります。離れた事実を結合して
+unsupported relationを作成してはいけません。
 analystはこのrequest fingerprintへ対応するprovider-neutral JSON responseを別pathに作成し、
 `vep evidence import JOB --response PATH`でimportします。production CLIはfixture execution modeを拒否します。
 

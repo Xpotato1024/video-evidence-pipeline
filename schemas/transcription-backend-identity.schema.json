@@ -2,6 +2,7 @@
   "$defs": {
     "TranscriptSource": {
       "enum": [
+        "supplied",
         "normalized_subtitle",
         "asr"
       ],

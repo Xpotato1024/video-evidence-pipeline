@@ -75,17 +75,26 @@ from video_evidence_pipeline.domain.job import (
     AssignmentSpec,
     JobSpec,
     OutputSpec,
+    PrimaryInputKind,
+    PrimaryInputSpec,
     SourceKind,
     SourceSpec,
+    SupportingInputSpec,
     canonicalize_source_locator,
     job_fingerprint,
     job_to_yaml,
     load_job_yaml,
+    primary_input_kind,
+    requires_transcript_refinement,
 )
 from video_evidence_pipeline.domain.media import NormalizationConfig
 from video_evidence_pipeline.domain.serialization import fingerprint
 from video_evidence_pipeline.domain.state import JobState
-from video_evidence_pipeline.domain.transcription import TranscriptionConfig
+from video_evidence_pipeline.domain.transcription import (
+    TranscriptionConfig,
+    TranscriptManifest,
+    TranscriptSegment,
+)
 from video_evidence_pipeline.domain.transitions import (
     TransitionRecord,
     require_implemented_transition,
@@ -124,6 +133,7 @@ from video_evidence_pipeline.media.normalization import (
     load_normalization_result,
     process_media,
     publish_staged_media,
+    publish_transcript_primary,
     recover_normalization_result,
 )
 from video_evidence_pipeline.media.runner import FFmpegRunner
@@ -146,6 +156,7 @@ from video_evidence_pipeline.transcription.pipeline import (
     TranscriptionResult,
     load_transcription_result,
     media_bundle_fingerprint,
+    prepare_supplied_transcript,
     prepare_transcript,
     publish_transcript,
     recover_transcription_result,
@@ -158,6 +169,16 @@ from video_evidence_pipeline.transcription.pipeline import (
 )
 from video_evidence_pipeline.transcription.pipeline import (
     create_attempt_directory as create_transcription_attempt_directory,
+)
+from video_evidence_pipeline.transcription.refinement import (
+    RefinementPrepareResult,
+    RefinementResult,
+    evidence_transcript_projection,
+    load_refinement_request,
+    load_refinement_result,
+    prepare_refinement_request,
+    publish_refinement,
+    read_refinement_response,
 )
 
 
@@ -183,6 +204,8 @@ def initialize_job(
     language: str,
     output_format: str,
     requirements: list[str] | None = None,
+    primary_input: PrimaryInputKind | None = None,
+    supporting_inputs: list[SupportingInputSpec] | None = None,
 ) -> tuple[JobWorkspace, JobSpec]:
     raw_locator = (
         str(Path(source).expanduser().absolute())
@@ -195,10 +218,22 @@ def initialize_job(
         locator = None
     if locator is None:
         raise configuration_error("SOURCE_LOCATOR_INVALID", "source locator is invalid")
+    normalized_supports = sorted(
+        (
+            SupportingInputSpec(
+                kind=item.kind,
+                locator=str(Path(item.locator).expanduser().absolute()),
+            )
+            for item in (supporting_inputs or [])
+        ),
+        key=lambda item: (item.kind.value, item.locator),
+    )
     job = JobSpec(
         job_id=job_id,
         created_at=datetime.now(UTC),
         source=SourceSpec(kind=source_kind, locator=locator),
+        primary_input=(PrimaryInputSpec(kind=primary_input) if primary_input is not None else None),
+        supporting_inputs=normalized_supports,
         assignment=AssignmentSpec(
             task_type=task_type,
             language=language,
@@ -240,16 +275,19 @@ def _validate_job_unmapped(path: Path) -> dict[str, Any]:
         JobState.HUMAN_APPROVED,
         JobState.EXPORTED,
     }
+    refinement_states = {JobState.TRANSCRIPT_REFINED, JobState.EVIDENCE_READY, *authoring_states}
     acquired_states = {
         JobState.ACQUIRED,
         JobState.NORMALIZED,
         JobState.TRANSCRIBED,
+        JobState.TRANSCRIPT_REFINED,
         JobState.EVIDENCE_READY,
         *authoring_states,
     }
     normalized_states = {
         JobState.NORMALIZED,
         JobState.TRANSCRIBED,
+        JobState.TRANSCRIPT_REFINED,
         JobState.EVIDENCE_READY,
         *authoring_states,
     }
@@ -257,15 +295,21 @@ def _validate_job_unmapped(path: Path) -> dict[str, Any]:
         raw_artifact = verify_acquired_bundle(workspace, job)
         if state in normalized_states:
             media_manifest = load_normalization_result(workspace, job, raw_artifact).media_manifest
-            if state in {JobState.TRANSCRIBED, JobState.EVIDENCE_READY, *authoring_states}:
+            if state in {JobState.TRANSCRIBED, *refinement_states}:
                 transcription = load_transcription_result(workspace, job, media_manifest)
+                evidence_manifest = transcription.transcript_manifest
+                evidence_segments = transcription.segments
+                if state in refinement_states:
+                    evidence_manifest, evidence_segments = _evidence_transcript_inputs(
+                        workspace, job, media_manifest, transcription
+                    )
                 if state in {JobState.EVIDENCE_READY, *authoring_states}:
                     load_evidence_result(
                         workspace,
                         job,
                         media_manifest,
-                        transcription.transcript_manifest,
-                        transcription.segments,
+                        evidence_manifest,
+                        evidence_segments,
                     )
                     if state in authoring_states:
                         try:
@@ -517,6 +561,21 @@ def _normalize_job_locked(
                 trigger="normalize.ffmpeg",
             )
             return recovered
+        if primary_input_kind(job) is PrimaryInputKind.TRANSCRIPT:
+            result = publish_transcript_primary(
+                workspace,
+                job,
+                raw_artifact,
+                normalization_config,
+            )
+            _append_transition_locked(
+                workspace,
+                job,
+                from_state=JobState.ACQUIRED,
+                to_state=JobState.NORMALIZED,
+                trigger="normalize.transcript",
+            )
+            return result
         snapshot_sequence = transitions[-1].sequence
         snapshot_raw_artifact = raw_artifact
         source_path = workspace.safe_path(raw_artifact.relative_storage_path)
@@ -538,6 +597,7 @@ def _normalize_job_locked(
             attempt,
             ffmpeg_identity,
             ffprobe_identity,
+            primary_input_kind=primary_input_kind(job),
         )
         with exclusive_append_lock(workspace.transitions_jsonl):
             workspace, job, transitions, state = _load_context(path)
@@ -680,14 +740,22 @@ def _transcribe_job_locked(
     attempt = create_transcription_attempt_directory(workspace)
     operation_failed = False
     try:
-        prepared = prepare_transcript(
-            workspace,
-            job,
-            media_manifest,
-            config,
-            backend_override,
-            model_directory=asr_model_directory,
-        )
+        if primary_input_kind(job) is PrimaryInputKind.TRANSCRIPT:
+            if backend_override is not None or asr_model_directory is not None:
+                raise configuration_error(
+                    "SUPPLIED_TRANSCRIPT_ASR_FORBIDDEN",
+                    "supplied transcript input does not permit ASR configuration",
+                )
+            prepared = prepare_supplied_transcript(workspace, job, media_manifest, config)
+        else:
+            prepared = prepare_transcript(
+                workspace,
+                job,
+                media_manifest,
+                config,
+                backend_override,
+                model_directory=asr_model_directory,
+            )
         with exclusive_append_lock(workspace.transitions_jsonl):
             workspace, job, transitions, state = _load_context(path)
             current_raw_artifact = verify_acquired_bundle(workspace, job)
@@ -760,6 +828,164 @@ def _transcribe_job_locked(
                 raise
 
 
+def _evidence_transcript_inputs(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    media_manifest,
+    transcription: TranscriptionResult,
+) -> tuple:
+    """Select raw v1 transcript or the explicit refined projection for downstream stages."""
+
+    if not requires_transcript_refinement(job):
+        return transcription.transcript_manifest, transcription.segments
+    refinement = load_refinement_result(
+        workspace,
+        job,
+        media_manifest,
+        transcription.transcript_manifest,
+        transcription.segments,
+    )
+    return evidence_transcript_projection(
+        transcription.transcript_manifest, refinement
+    ), refinement.segments
+
+
+def _evidence_predecessor(job: JobSpec) -> JobState:
+    """Keep v1 jobs on their historical direct edge to evidence."""
+
+    return (
+        JobState.TRANSCRIPT_REFINED if requires_transcript_refinement(job) else JobState.TRANSCRIBED
+    )
+
+
+def prepare_transcript_refinement_job(path: Path) -> RefinementPrepareResult:
+    workspace = JobWorkspace.open(path)
+    with (
+        exclusive_file_lock(
+            workspace.refinement_lock_path,
+            busy_code="REFINEMENT_BUSY",
+            busy_message="transcript refinement is already running",
+            failure_code="REFINEMENT_LOCK_FAILED",
+            failure_message="transcript refinement could not be locked",
+        ),
+        exclusive_append_lock(workspace.transitions_jsonl),
+    ):
+        workspace, job, transitions, state = _load_context(path)
+        if not requires_transcript_refinement(job):
+            raise state_error(
+                "REFINEMENT_NOT_REQUIRED", "legacy video jobs continue directly to evidence"
+            )
+        if state not in {JobState.TRANSCRIBED, JobState.TRANSCRIPT_REFINED}:
+            raise state_error(
+                "STATE_GATE_FAILED", "job must be TRANSCRIBED before transcript refinement"
+            )
+        authorization = _authorization(workspace)
+        _require_current_authorization(job, transitions, authorization)
+        raw_artifact = verify_acquired_bundle(workspace, job)
+        media_manifest = load_normalization_result(workspace, job, raw_artifact).media_manifest
+        transcription = load_transcription_result(workspace, job, media_manifest)
+        request = prepare_refinement_request(
+            workspace,
+            job,
+            media_manifest,
+            transcription.transcript_manifest,
+            transcription.segments,
+        )
+        if state is JobState.TRANSCRIPT_REFINED:
+            load_refinement_result(
+                workspace,
+                job,
+                media_manifest,
+                transcription.transcript_manifest,
+                transcription.segments,
+                request=request.request,
+            )
+        return request
+
+
+def import_transcript_refinement_job(
+    path: Path,
+    response_path: Path,
+    *,
+    _allow_fixture: bool = False,
+) -> RefinementResult:
+    workspace = JobWorkspace.open(path)
+    with (
+        exclusive_file_lock(
+            workspace.refinement_lock_path,
+            busy_code="REFINEMENT_BUSY",
+            busy_message="transcript refinement is already running",
+            failure_code="REFINEMENT_LOCK_FAILED",
+            failure_message="transcript refinement could not be locked",
+        ),
+        exclusive_append_lock(workspace.transitions_jsonl),
+    ):
+        workspace, job, transitions, state = _load_context(path)
+        if not requires_transcript_refinement(job):
+            raise state_error(
+                "REFINEMENT_NOT_REQUIRED", "legacy video jobs continue directly to evidence"
+            )
+        if state not in {JobState.TRANSCRIBED, JobState.TRANSCRIPT_REFINED}:
+            raise state_error(
+                "STATE_GATE_FAILED", "job must be TRANSCRIBED before transcript refinement"
+            )
+        authorization = _authorization(workspace)
+        _require_current_authorization(job, transitions, authorization)
+        raw_artifact = verify_acquired_bundle(workspace, job)
+        media_manifest = load_normalization_result(workspace, job, raw_artifact).media_manifest
+        transcription = load_transcription_result(workspace, job, media_manifest)
+        request = load_refinement_request(
+            workspace,
+            job,
+            media_manifest,
+            transcription.transcript_manifest,
+            transcription.segments,
+        )
+        response = read_refinement_response(response_path, request, allow_fixture=_allow_fixture)
+        if response.refiner.external_api_used and not authorization.allow_external_api:
+            raise state_error(
+                "EXTERNAL_API_NOT_AUTHORIZED",
+                "refinement response used an external API without job authorization",
+            )
+        if state is JobState.TRANSCRIPT_REFINED:
+            existing = load_refinement_result(
+                workspace,
+                job,
+                media_manifest,
+                transcription.transcript_manifest,
+                transcription.segments,
+                request=request,
+            )
+            if existing.refinement_manifest.response_fingerprint != fingerprint(response):
+                raise integrity_error(
+                    "REFINEMENT_FINGERPRINT_MISMATCH",
+                    "refinement response does not match the committed bundle",
+                )
+            return existing
+        result = publish_refinement(
+            workspace,
+            job,
+            transcription.transcript_manifest,
+            transcription.segments,
+            request,
+            response,
+        )
+        _append_transition_locked(
+            workspace,
+            job,
+            from_state=JobState.TRANSCRIBED,
+            to_state=JobState.TRANSCRIPT_REFINED,
+            trigger="transcript.refine.import",
+        )
+        return result
+
+
+def _import_transcript_refinement_fixture(path: Path, response_path: Path) -> RefinementResult:
+    """Internal test-only hook; production CLI never exposes this route."""
+
+    return import_transcript_refinement_job(path, response_path, _allow_fixture=True)
+
+
 def prepare_evidence_job(path: Path) -> EvidencePrepareResult:
     workspace = JobWorkspace.open(path)
     with (
@@ -773,9 +999,11 @@ def prepare_evidence_job(path: Path) -> EvidencePrepareResult:
         exclusive_append_lock(workspace.transitions_jsonl),
     ):
         workspace, job, transitions, state = _load_context(path)
-        if state not in {JobState.TRANSCRIBED, JobState.EVIDENCE_READY}:
+        predecessor = _evidence_predecessor(job)
+        if state not in {predecessor, JobState.EVIDENCE_READY}:
             raise state_error(
-                "STATE_GATE_FAILED", "job must be TRANSCRIBED before evidence preparation"
+                "STATE_GATE_FAILED",
+                "job must complete its transcript stage before evidence preparation",
             )
         authorization = _authorization(workspace)
         _require_current_authorization(job, transitions, authorization)
@@ -783,20 +1011,23 @@ def prepare_evidence_job(path: Path) -> EvidencePrepareResult:
         media_result = load_normalization_result(workspace, job, raw_artifact)
         media_manifest = media_result.media_manifest
         transcription = load_transcription_result(workspace, job, media_manifest)
+        evidence_transcript_manifest, evidence_segments = _evidence_transcript_inputs(
+            workspace, job, media_manifest, transcription
+        )
         if state is JobState.EVIDENCE_READY:
             load_evidence_result(
                 workspace,
                 job,
                 media_manifest,
-                transcription.transcript_manifest,
-                transcription.segments,
+                evidence_transcript_manifest,
+                evidence_segments,
             )
         return prepare_evidence_request(
             workspace,
             job,
             media_manifest,
-            transcription.transcript_manifest,
-            transcription.segments,
+            evidence_transcript_manifest,
+            evidence_segments,
         )
 
 
@@ -836,8 +1067,11 @@ def _import_evidence_job_locked(
     workspace = JobWorkspace.open(path)
     with exclusive_append_lock(workspace.transitions_jsonl):
         workspace, job, transitions, state = _load_context(path)
-        if state not in {JobState.TRANSCRIBED, JobState.EVIDENCE_READY}:
-            raise state_error("STATE_GATE_FAILED", "job must be TRANSCRIBED before evidence import")
+        predecessor = _evidence_predecessor(job)
+        if state not in {predecessor, JobState.EVIDENCE_READY}:
+            raise state_error(
+                "STATE_GATE_FAILED", "job must complete its transcript stage before evidence import"
+            )
         authorization = _authorization(workspace)
         _require_current_authorization(job, transitions, authorization)
         snapshot_state = state
@@ -849,12 +1083,15 @@ def _import_evidence_job_locked(
     media_result = load_normalization_result(workspace, snapshot_job, raw_artifact)
     media_manifest = media_result.media_manifest
     transcription = load_transcription_result(workspace, snapshot_job, media_manifest)
+    evidence_transcript_manifest, evidence_segments = _evidence_transcript_inputs(
+        workspace, snapshot_job, media_manifest, transcription
+    )
     request = load_evidence_request(
         workspace,
         snapshot_job,
         media_manifest,
-        transcription.transcript_manifest,
-        transcription.segments,
+        evidence_transcript_manifest,
+        evidence_segments,
     )
 
     response = read_evidence_response(
@@ -873,8 +1110,8 @@ def _import_evidence_job_locked(
             workspace,
             snapshot_job,
             media_manifest,
-            transcription.transcript_manifest,
-            transcription.segments,
+            evidence_transcript_manifest,
+            evidence_segments,
         )
         if existing.evidence_manifest.response_fingerprint != response_fingerprint:
             raise integrity_error(
@@ -887,8 +1124,8 @@ def _import_evidence_job_locked(
         workspace,
         snapshot_job,
         media_manifest,
-        transcription.transcript_manifest,
-        transcription.segments,
+        evidence_transcript_manifest,
+        evidence_segments,
         commit=False,
     )
     if (
@@ -910,8 +1147,8 @@ def _import_evidence_job_locked(
                 workspace,
                 snapshot_job,
                 media_manifest,
-                transcription.transcript_manifest,
-                transcription.segments,
+                evidence_transcript_manifest,
+                evidence_segments,
                 request,
                 response,
                 attempt,
@@ -926,17 +1163,22 @@ def _import_evidence_job_locked(
         current_transcription = load_transcription_result(
             workspace, snapshot_job, current_media_result.media_manifest
         )
+        current_evidence_transcript, current_evidence_segments = _evidence_transcript_inputs(
+            workspace, snapshot_job, current_media_result.media_manifest, current_transcription
+        )
         current_request = load_evidence_request(
             workspace,
             snapshot_job,
             current_media_result.media_manifest,
-            current_transcription.transcript_manifest,
-            current_transcription.segments,
+            current_evidence_transcript,
+            current_evidence_segments,
         )
         if (
             current_raw_artifact != raw_artifact
             or current_media_result != media_result
             or current_transcription != transcription
+            or current_evidence_transcript != evidence_transcript_manifest
+            or current_evidence_segments != evidence_segments
             or current_request != request
         ):
             raise state_error(
@@ -947,7 +1189,7 @@ def _import_evidence_job_locked(
             workspace, current_job, transitions, state = _load_context(path)
             current_authorization = _authorization(workspace)
             if (
-                state is not JobState.TRANSCRIBED
+                state is not _evidence_predecessor(current_job)
                 or transitions[-1].sequence != snapshot_sequence
                 or current_job != snapshot_job
                 or current_authorization != snapshot_authorization
@@ -966,17 +1208,22 @@ def _import_evidence_job_locked(
             locked_transcription = load_transcription_result(
                 workspace, current_job, locked_media_result.media_manifest
             )
+            locked_evidence_transcript, locked_evidence_segments = _evidence_transcript_inputs(
+                workspace, current_job, locked_media_result.media_manifest, locked_transcription
+            )
             locked_request = load_evidence_request(
                 workspace,
                 current_job,
                 locked_media_result.media_manifest,
-                locked_transcription.transcript_manifest,
-                locked_transcription.segments,
+                locked_evidence_transcript,
+                locked_evidence_segments,
             )
             if (
                 locked_raw_artifact != raw_artifact
                 or locked_media_result != media_result
                 or locked_transcription != transcription
+                or locked_evidence_transcript != evidence_transcript_manifest
+                or locked_evidence_segments != evidence_segments
                 or locked_request != request
             ):
                 raise state_error(
@@ -987,8 +1234,8 @@ def _import_evidence_job_locked(
                 workspace,
                 current_job,
                 locked_media_result.media_manifest,
-                locked_transcription.transcript_manifest,
-                locked_transcription.segments,
+                locked_evidence_transcript,
+                locked_evidence_segments,
                 locked_request,
                 response,
                 staged,
@@ -997,7 +1244,7 @@ def _import_evidence_job_locked(
             _append_transition_locked(
                 workspace,
                 current_job,
-                from_state=JobState.TRANSCRIBED,
+                from_state=_evidence_predecessor(current_job),
                 to_state=JobState.EVIDENCE_READY,
                 trigger="evidence.import",
             )
@@ -1018,19 +1265,22 @@ def _load_fixed_evidence(workspace: JobWorkspace, job: JobSpec):
     raw_artifact = verify_acquired_bundle(workspace, job)
     media = load_normalization_result(workspace, job, raw_artifact).media_manifest
     transcription = load_transcription_result(workspace, job, media)
+    evidence_transcript, evidence_segments = _evidence_transcript_inputs(
+        workspace, job, media, transcription
+    )
     evidence = load_evidence_result(
         workspace,
         job,
         media,
-        transcription.transcript_manifest,
-        transcription.segments,
+        evidence_transcript,
+        evidence_segments,
     )
     request = load_evidence_request(
         workspace,
         job,
         media,
-        transcription.transcript_manifest,
-        transcription.segments,
+        evidence_transcript,
+        evidence_segments,
     )
     return build_fixed_evidence_bundle(
         job,
@@ -2097,7 +2347,7 @@ def _load_search_inputs(
 ) -> tuple[
     JobWorkspace,
     JobSpec,
-    TranscriptionResult,
+    tuple[TranscriptManifest, tuple[TranscriptSegment, ...]],
     EvidenceImportResult,
 ]:
     workspace, job, transitions, state = _load_context(path)
@@ -2115,25 +2365,27 @@ def _load_search_inputs(
     raw_artifact = verify_acquired_bundle(workspace, job)
     media_manifest = load_normalization_result(workspace, job, raw_artifact).media_manifest
     transcription = load_transcription_result(workspace, job, media_manifest)
+    evidence_transcript, evidence_segments = _evidence_transcript_inputs(
+        workspace, job, media_manifest, transcription
+    )
     evidence = load_evidence_result(
         workspace,
         job,
         media_manifest,
-        transcription.transcript_manifest,
-        transcription.segments,
+        evidence_transcript,
+        evidence_segments,
     )
-    return workspace, job, transcription, evidence
+    return workspace, job, (evidence_transcript, evidence_segments), evidence
 
 
 def build_search_index_job(path: Path) -> SearchIndexBuildResult:
     workspace = JobWorkspace.open(path)
     with exclusive_append_lock(workspace.transitions_jsonl):
-        workspace, job, transcription, evidence = _load_search_inputs(path)
+        workspace, job, transcript_inputs, evidence = _load_search_inputs(path)
     return build_index(
         workspace,
         job.job_id,
-        transcription.transcript_manifest,
-        transcription.segments,
+        *transcript_inputs,
         evidence.evidence_manifest,
         evidence.evidence_records,
     )
@@ -2142,12 +2394,11 @@ def build_search_index_job(path: Path) -> SearchIndexBuildResult:
 def search_job(path: Path, query: str, limit: int = 20) -> SearchResult:
     workspace = JobWorkspace.open(path)
     with exclusive_append_lock(workspace.transitions_jsonl):
-        workspace, job, transcription, evidence = _load_search_inputs(path)
+        workspace, job, transcript_inputs, evidence = _load_search_inputs(path)
     return search_index(
         workspace,
         job.job_id,
-        transcription.transcript_manifest,
-        transcription.segments,
+        *transcript_inputs,
         evidence.evidence_manifest,
         evidence.evidence_records,
         query,
@@ -2200,12 +2451,14 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
         JobState.ACQUIRED,
         JobState.NORMALIZED,
         JobState.TRANSCRIBED,
+        JobState.TRANSCRIPT_REFINED,
         JobState.EVIDENCE_READY,
         *authoring_states,
     }
     downstream_normalized_states = {
         JobState.NORMALIZED,
         JobState.TRANSCRIBED,
+        JobState.TRANSCRIPT_REFINED,
         JobState.EVIDENCE_READY,
         *authoring_states,
     }
@@ -2231,7 +2484,11 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
             normalization_status = {
                 "status": "valid",
                 "normalization_fingerprint": media_manifest.normalization_fingerprint,
-                "frame_count": len(media_manifest.frame_index.records),
+                "frame_count": (
+                    len(media_manifest.frame_index.records)
+                    if media_manifest.frame_index is not None
+                    else 0
+                ),
             }
         except VepError as exc:
             normalization_status = {"status": "invalid", "error_code": exc.code}
@@ -2239,7 +2496,13 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
     transcription_status: dict[str, Any] = {"status": "not-applicable"}
     transcription = None
     if (
-        state in {JobState.TRANSCRIBED, JobState.EVIDENCE_READY, *authoring_states}
+        state
+        in {
+            JobState.TRANSCRIBED,
+            JobState.TRANSCRIPT_REFINED,
+            JobState.EVIDENCE_READY,
+            *authoring_states,
+        }
         and normalization_status.get("status") == "valid"
         and media_manifest is not None
     ):
@@ -2255,20 +2518,57 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
         except VepError as exc:
             transcription_status = {"status": "invalid", "error_code": exc.code}
             exit_code = int(exc.exit_code)
+    refinement_status: dict[str, Any] = {"status": "not-applicable"}
+    evidence_transcript = None
+    evidence_segments = None
+    if transcription is not None:
+        evidence_transcript = transcription.transcript_manifest
+        evidence_segments = transcription.segments
+        if requires_transcript_refinement(job) and state in {
+            JobState.TRANSCRIPT_REFINED,
+            JobState.EVIDENCE_READY,
+            *authoring_states,
+        }:
+            try:
+                refinement = load_refinement_result(
+                    workspace,
+                    job,
+                    media_manifest,
+                    transcription.transcript_manifest,
+                    transcription.segments,
+                )
+                evidence_transcript = evidence_transcript_projection(
+                    transcription.transcript_manifest, refinement
+                )
+                evidence_segments = refinement.segments
+                refinement_status = {
+                    "status": "valid",
+                    "refined_transcript_fingerprint": (
+                        refinement.refinement_manifest.refined_transcript_fingerprint
+                    ),
+                    "edit_count": len(refinement.edits),
+                    "ambiguity_count": len(refinement.ambiguities),
+                }
+            except VepError as exc:
+                refinement_status = {"status": "invalid", "error_code": exc.code}
+                exit_code = int(exc.exit_code)
     evidence_status: dict[str, Any] = {"status": "not-applicable"}
     if (
         state in {JobState.EVIDENCE_READY, *authoring_states}
         and transcription_status.get("status") == "valid"
+        and refinement_status.get("status") != "invalid"
         and media_manifest is not None
         and transcription is not None
+        and evidence_transcript is not None
+        and evidence_segments is not None
     ):
         try:
             evidence = load_evidence_result(
                 workspace,
                 job,
                 media_manifest,
-                transcription.transcript_manifest,
-                transcription.segments,
+                evidence_transcript,
+                evidence_segments,
             )
             evidence_status = {
                 "status": "valid",
@@ -2377,6 +2677,7 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
             "artifact_integrity": artifact_status,
             "normalization_integrity": normalization_status,
             "transcription_integrity": transcription_status,
+            "refinement_integrity": refinement_status,
             "evidence_integrity": evidence_status,
             "authoring_integrity": authoring_status,
             "approval_integrity": approval_status,

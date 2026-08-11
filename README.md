@@ -6,12 +6,12 @@
 > [!IMPORTANT]
 > 現在実装済みなのは、core domain contracts、local workspace、`vep` CLI、明示authorization、
 > `local_file`／`direct_http`／`generic_ytdlp`／`panopto`／`box`による
-> acquisition、system FFmpeg／ffprobeによるmedia normalization、caption-first transcription、
+> acquisition、video／audio／supplied transcript input、system FFmpeg／ffprobeによるmedia normalization、caption-first transcription、
 > provider-neutralなevidence／authoring／independent-audit／revision prepare／import、private SQLite FTS5
 > search、人間確認package、明示的人間approval、byte-exact Markdown exportです。直線経路は
-> `CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → EVIDENCE_READY → DRAFTED → AUDITED → HUMAN_REVIEW_READY → HUMAN_APPROVED → EXPORTED`、
+> `CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → TRANSCRIPT_REFINED → EVIDENCE_READY → DRAFTED → AUDITED → HUMAN_REVIEW_READY → HUMAN_APPROVED → EXPORTED`、
 > material findingがある経路は最大2回の`REVISION_REQUIRED → DRAFTED → AUDITED`を経て、未解消なら
-> `BLOCKED`です。DOCX／PDF／HTML exportは未実装です。
+> `BLOCKED`です。既存v1 video jobは`TRANSCRIBED → EVIDENCE_READY`を維持します。DOCX／PDF／HTML exportは未実装です。
 
 ## Quickstart
 
@@ -74,6 +74,9 @@ raw sourceは`.local/`配下へcontent-addressedに保存され、上書きさ�
 captionが十分ならASR package／modelは不要です。不足区間だけASRを使用する場合も、明示された完全な
 local model directoryをofflineで使用し、暗黙downloadやcloud送信を行いません。外部APIを使った
 evidence responseのimportにはjobの`allow_external_api`認可が必要です。
+新規jobは`--primary-input video|audio|transcript`と、必要な場合だけrepeatableな
+`--supporting-input pdf:PATH|image:PATH|notes:PATH`を指定できます。新input宣言を持つjobはtranscribe後に
+`vep refine prepare`／`vep refine import`を実行し、raw transcriptとrefined transcriptを分離します。
 authoring／audit／revisionの`external_exchange` public production importは、対応するrepository-local Skillが
 `active`になっている場合だけ利用できます。現行のactive Skillは`draft-video-report`、`draft-video-summary`、
 `independent-content-audit`、`revise-from-audit`で、いずれも明示選択専用（`automatic_trigger = false`）かつ
@@ -113,14 +116,15 @@ route; without an access token, shared-link acquisition is blocked.
 1. authorization／requirements
 2. acquisition
 3. media normalization
-4. caption-first transcription
-5. evidence construction／ambiguity preservation
-6. private rebuildable search cache
-7. deliverable authoring
-8. independent audit
-9. bounded revision
-10. human approval
-11. export
+4. caption／ASR／supplied transcriptからのraw transcript
+5. transcript refinement（新input宣言を持つjob）
+6. evidence construction／ambiguity preservation
+7. private rebuildable search cache
+8. deliverable authoring
+9. independent audit
+10. bounded revision
+11. human approval
+12. export
 
 ## SoT
 
@@ -168,6 +172,6 @@ CIは実データや実credentialを使用しません。
 
 ## Status
 
-- Implemented: core contracts、generated Schema、CLI、local workspace、local／network acquisition、media normalization、transcription、evidence ledger、private FTS5 cache、bounded authoring／independent audit／revision、人間確認package、hash-bound human approval、byte-exact Markdown export
+- Implemented: core contracts、generated Schema、CLI、local workspace、local／network acquisition、video／audio／transcript input、transcript refinement、PDF／image／notes supporting input、evidence ledger、private FTS5 cache、bounded authoring／independent audit／revision、人間確認package、hash-bound human approval、byte-exact Markdown export
 - Current state path: `… → EVIDENCE_READY → DRAFTED → AUDITED → HUMAN_REVIEW_READY → HUMAN_APPROVED → EXPORTED`、または最大2回のrevision後に`BLOCKED`
 - Next: ownerによるstacked Draft PRの監査とrootから順のmerge

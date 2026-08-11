@@ -50,6 +50,29 @@
       "title": "OutputSpec",
       "type": "object"
     },
+    "PrimaryInputKind": {
+      "description": "The one primary item that becomes a transcript.\n\n``source`` remains the v1 acquisition projection.  Keeping it in place\nlets historic video job YAML and its fingerprint remain valid while newer\njobs opt into an explicit primary kind.",
+      "enum": [
+        "video",
+        "audio",
+        "transcript"
+      ],
+      "title": "PrimaryInputKind",
+      "type": "string"
+    },
+    "PrimaryInputSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/PrimaryInputKind"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "PrimaryInputSpec",
+      "type": "object"
+    },
     "SourceKind": {
       "enum": [
         "local_file",
@@ -80,6 +103,35 @@
       ],
       "title": "SourceSpec",
       "type": "object"
+    },
+    "SupportingInputKind": {
+      "enum": [
+        "pdf",
+        "image",
+        "notes"
+      ],
+      "title": "SupportingInputKind",
+      "type": "string"
+    },
+    "SupportingInputSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/SupportingInputKind"
+        },
+        "locator": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Locator",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "locator"
+      ],
+      "title": "SupportingInputSpec",
+      "type": "object"
     }
   },
   "$id": "https://schemas.video-evidence-pipeline.local/v1/job-spec.schema.json",
@@ -104,6 +156,17 @@
     "output": {
       "$ref": "#/$defs/OutputSpec"
     },
+    "primary_input": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PrimaryInputSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "schema_version": {
       "const": "1.0",
       "default": "1.0",
@@ -112,6 +175,14 @@
     },
     "source": {
       "$ref": "#/$defs/SourceSpec"
+    },
+    "supporting_inputs": {
+      "items": {
+        "$ref": "#/$defs/SupportingInputSpec"
+      },
+      "maxItems": 32,
+      "title": "Supporting Inputs",
+      "type": "array"
     }
   },
   "required": [

@@ -97,6 +97,7 @@
     },
     "TranscriptSource": {
       "enum": [
+        "supplied",
         "normalized_subtitle",
         "asr"
       ],
@@ -310,9 +311,17 @@
       "type": "string"
     },
     "duration_ms": {
-      "exclusiveMinimum": 0,
-      "title": "Duration Ms",
-      "type": "integer"
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Duration Ms"
     },
     "gaps": {
       "items": {
@@ -426,7 +435,6 @@
     "selected_source_artifacts",
     "segments_artifact",
     "segment_count",
-    "duration_ms",
     "started_at",
     "created_at"
   ],

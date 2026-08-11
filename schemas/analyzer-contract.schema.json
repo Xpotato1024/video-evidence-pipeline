@@ -3,6 +3,20 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "atomic_proposition_contract": {
+      "anyOf": [
+        {
+          "const": "One record states one atomic proposition; every reference supports that same proposition; do not combine separate facts.",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Semantic request rule for new input/refinement jobs; absent in v1 requests.",
+      "title": "Atomic Proposition Contract"
+    },
     "name": {
       "const": "video-evidence-analyzer",
       "default": "video-evidence-analyzer",

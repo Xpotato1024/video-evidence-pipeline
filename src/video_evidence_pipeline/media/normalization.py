@@ -21,7 +21,7 @@ from video_evidence_pipeline.domain.artifacts import (
     ProducerKind,
 )
 from video_evidence_pipeline.domain.hashing import sha256_file
-from video_evidence_pipeline.domain.job import JobSpec
+from video_evidence_pipeline.domain.job import JobSpec, PrimaryInputKind, primary_input_kind
 from video_evidence_pipeline.domain.manifests import StageManifest, StageStatus
 from video_evidence_pipeline.domain.media import (
     AnalysisProxy,
@@ -79,9 +79,10 @@ class AudioProbeInfo:
 class StagedMedia:
     attempt_directory: Path
     started_at: datetime
+    primary_input_kind: PrimaryInputKind
     probe: MediaProbe
-    analysis_path: Path
-    analysis_probe: MediaProbe
+    analysis_path: Path | None
+    analysis_probe: MediaProbe | None
     audio_path: Path | None
     audio_probe: AudioProbeInfo | None
     subtitles: tuple[StagedSubtitle, ...]
@@ -107,13 +108,33 @@ def normalization_fingerprint(
     config: NormalizationConfig,
     ffmpeg: ToolIdentity,
     ffprobe: ToolIdentity,
+    *,
+    primary_input_kind: PrimaryInputKind = PrimaryInputKind.VIDEO,
 ) -> str:
+    value = {
+        "raw_sha256": raw_artifact.content_sha256,
+        "configuration": config.model_dump(mode="json"),
+        "ffmpeg": ffmpeg.model_dump(mode="json"),
+        "ffprobe": ffprobe.model_dump(mode="json"),
+        "implementation_version": NORMALIZATION_IMPLEMENTATION_VERSION,
+    }
+    # The historical video fingerprint is intentionally unchanged.
+    if primary_input_kind is not PrimaryInputKind.VIDEO:
+        value["primary_input_kind"] = primary_input_kind.value
+    return fingerprint(value)
+
+
+def transcript_primary_normalization_fingerprint(
+    raw_artifact: ArtifactRef,
+    config: NormalizationConfig,
+) -> str:
+    """Bind a supplied text primary to its immutable raw artifact, without media tools."""
+
     return fingerprint(
         {
             "raw_sha256": raw_artifact.content_sha256,
             "configuration": config.model_dump(mode="json"),
-            "ffmpeg": ffmpeg.model_dump(mode="json"),
-            "ffprobe": ffprobe.model_dump(mode="json"),
+            "primary_input_kind": PrimaryInputKind.TRANSCRIPT.value,
             "implementation_version": NORMALIZATION_IMPLEMENTATION_VERSION,
         }
     )
@@ -431,10 +452,60 @@ def process_media(
     attempt: Path,
     ffmpeg: ToolIdentity,
     ffprobe: ToolIdentity,
+    *,
+    primary_input_kind: PrimaryInputKind = PrimaryInputKind.VIDEO,
 ) -> StagedMedia:
     started_at = datetime.now(UTC)
     budget = StagingBudget(config.maximum_output_bytes)
     probe = probe_media(runner, source, config)
+    if primary_input_kind is PrimaryInputKind.AUDIO:
+        if any(stream.stream_type is MediaStreamType.VIDEO for stream in probe.streams):
+            raise integrity_error(
+                "AUDIO_PRIMARY_HAS_VIDEO", "audio primary input must not contain a video stream"
+            )
+        if not any(stream.stream_type is MediaStreamType.AUDIO for stream in probe.streams):
+            raise integrity_error(
+                "AUDIO_STREAM_UNAVAILABLE", "audio primary input has no audio stream"
+            )
+        audio_path = attempt / "speech.wav"
+        budget.require_capacity(_speech_output_upper_bound(probe.duration_ms, config))
+        _run_speech_audio(runner, source, audio_path, config)
+        _verify_staged_output(
+            audio_path,
+            config,
+            maximum_file_bytes=config.maximum_output_file_bytes,
+        )
+        budget.record_file(audio_path, maximum_file_bytes=config.maximum_output_file_bytes)
+        audio_probe = _audio_probe(runner, audio_path, config)
+        if abs(audio_probe.duration_ms - probe.duration_ms) > config.duration_tolerance_ms:
+            raise integrity_error(
+                "NORMALIZED_AUDIO_INVALID", "speech audio duration does not match source"
+            )
+        return StagedMedia(
+            attempt_directory=attempt,
+            started_at=started_at,
+            primary_input_kind=primary_input_kind,
+            probe=probe,
+            analysis_path=None,
+            analysis_probe=None,
+            audio_path=audio_path,
+            audio_probe=audio_probe,
+            subtitles=(),
+            frames=(),
+            frame_candidate_count=0,
+            frame_duplicate_count=0,
+            staging_budget=budget,
+            ffmpeg=ffmpeg,
+            ffprobe=ffprobe,
+            normalization_fingerprint=normalization_fingerprint(
+                raw_artifact,
+                config,
+                ffmpeg,
+                ffprobe,
+                primary_input_kind=primary_input_kind,
+            ),
+            warnings=(),
+        )
     analysis_path = attempt / "analysis.mp4"
     budget.require_capacity(config.maximum_output_file_bytes)
     _run_analysis_proxy(runner, source, analysis_path, config)
@@ -493,6 +564,7 @@ def process_media(
     return StagedMedia(
         attempt_directory=attempt,
         started_at=started_at,
+        primary_input_kind=primary_input_kind,
         probe=probe,
         analysis_path=analysis_path,
         analysis_probe=analysis_probe,
@@ -505,7 +577,13 @@ def process_media(
         staging_budget=budget,
         ffmpeg=ffmpeg,
         ffprobe=ffprobe,
-        normalization_fingerprint=normalization_fingerprint(raw_artifact, config, ffmpeg, ffprobe),
+        normalization_fingerprint=normalization_fingerprint(
+            raw_artifact,
+            config,
+            ffmpeg,
+            ffprobe,
+            primary_input_kind=primary_input_kind,
+        ),
         warnings=tuple(sorted(set(warnings))),
     )
 
@@ -590,29 +668,36 @@ def publish_staged_media(
     config: NormalizationConfig,
     staged: StagedMedia,
 ) -> NormalizationResult:
-    analysis_artifact = _artifact_for(
-        workspace,
-        staged.analysis_path,
-        artifact_prefix="analysis",
-        artifact_type="analysis_proxy",
-        relative_directory="analysis",
-        filename="analysis.mp4",
-    )
-    analysis_stream = next(
-        stream
-        for stream in staged.analysis_probe.streams
-        if stream.stream_type is MediaStreamType.VIDEO
-    )
-    analysis = AnalysisProxy(
-        artifact=analysis_artifact,
-        format_name=staged.analysis_probe.format_name,
-        codec_name="h264",
-        width=analysis_stream.width,
-        height=analysis_stream.height,
-        duration_ms=staged.analysis_probe.duration_ms,
-    )
+    analysis = None
     audio = None
-    output_artifacts = [analysis_artifact]
+    output_artifacts: list[ArtifactRef] = []
+    if staged.primary_input_kind is PrimaryInputKind.VIDEO:
+        if staged.analysis_path is None or staged.analysis_probe is None:
+            raise integrity_error(
+                "NORMALIZED_BUNDLE_INVALID", "video analysis staging is incomplete"
+            )
+        analysis_artifact = _artifact_for(
+            workspace,
+            staged.analysis_path,
+            artifact_prefix="analysis",
+            artifact_type="analysis_proxy",
+            relative_directory="analysis",
+            filename="analysis.mp4",
+        )
+        analysis_stream = next(
+            stream
+            for stream in staged.analysis_probe.streams
+            if stream.stream_type is MediaStreamType.VIDEO
+        )
+        analysis = AnalysisProxy(
+            artifact=analysis_artifact,
+            format_name=staged.analysis_probe.format_name,
+            codec_name="h264",
+            width=analysis_stream.width,
+            height=analysis_stream.height,
+            duration_ms=staged.analysis_probe.duration_ms,
+        )
+        output_artifacts.append(analysis_artifact)
     if staged.audio_path is not None and staged.audio_probe is not None:
         audio_artifact = _artifact_for(
             workspace,
@@ -674,56 +759,59 @@ def publish_staged_media(
                 raw_text_preserved=False,
             )
         )
-    frame_records: list[FrameRecord] = []
-    for index, staged_frame in enumerate(staged.frames, start=1):
-        frame_id = f"F{index:06d}"
-        frame_artifact = _artifact_for(
-            workspace,
-            staged_frame.path,
-            artifact_prefix=f"frame-{frame_id.lower()}",
-            artifact_type="extracted_frame",
-            relative_directory="frames",
-            filename=f"{frame_id}.png",
-        )
-        output_artifacts.append(frame_artifact)
-        frame_records.append(
-            FrameRecord(
-                frame_id=frame_id,
-                timestamp_ms=staged_frame.timestamp_ms,
-                artifact=frame_artifact,
-                perceptual_hash=staged_frame.perceptual_hash,
-                reasons=list(staged_frame.reasons),
-                candidate_timestamps_ms=list(staged_frame.candidate_timestamps_ms),
+    frame_index = None
+    frame_index_artifact = None
+    if staged.primary_input_kind is PrimaryInputKind.VIDEO:
+        frame_records: list[FrameRecord] = []
+        for index, staged_frame in enumerate(staged.frames, start=1):
+            frame_id = f"F{index:06d}"
+            frame_artifact = _artifact_for(
+                workspace,
+                staged_frame.path,
+                artifact_prefix=f"frame-{frame_id.lower()}",
+                artifact_type="extracted_frame",
+                relative_directory="frames",
+                filename=f"{frame_id}.png",
             )
+            output_artifacts.append(frame_artifact)
+            frame_records.append(
+                FrameRecord(
+                    frame_id=frame_id,
+                    timestamp_ms=staged_frame.timestamp_ms,
+                    artifact=frame_artifact,
+                    perceptual_hash=staged_frame.perceptual_hash,
+                    reasons=list(staged_frame.reasons),
+                    candidate_timestamps_ms=list(staged_frame.candidate_timestamps_ms),
+                )
+            )
+        frame_index = FrameIndex(
+            duration_ms=staged.probe.duration_ms,
+            records=frame_records,
+            candidate_count=staged.frame_candidate_count,
+            duplicate_count=staged.frame_duplicate_count,
         )
-    frame_index = FrameIndex(
-        duration_ms=staged.probe.duration_ms,
-        records=frame_records,
-        candidate_count=staged.frame_candidate_count,
-        duplicate_count=staged.frame_duplicate_count,
-    )
-    frame_index_staging = staged.attempt_directory / "frame-index.json"
-    frame_index_payload = pretty_json_bytes(frame_index)
-    staged.staging_budget.require_capacity(len(frame_index_payload))
-    atomic_write_bytes(frame_index_staging, frame_index_payload, private=True)
-    _verify_staged_output(
-        frame_index_staging,
-        config,
-        maximum_file_bytes=config.maximum_output_file_bytes,
-    )
-    staged.staging_budget.record_file(
-        frame_index_staging,
-        maximum_file_bytes=config.maximum_output_file_bytes,
-    )
-    frame_index_artifact = _artifact_for(
-        workspace,
-        frame_index_staging,
-        artifact_prefix="frame-index",
-        artifact_type="frame_index",
-        relative_directory="index",
-        filename="frame-index.json",
-    )
-    output_artifacts.append(frame_index_artifact)
+        frame_index_staging = staged.attempt_directory / "frame-index.json"
+        frame_index_payload = pretty_json_bytes(frame_index)
+        staged.staging_budget.require_capacity(len(frame_index_payload))
+        atomic_write_bytes(frame_index_staging, frame_index_payload, private=True)
+        _verify_staged_output(
+            frame_index_staging,
+            config,
+            maximum_file_bytes=config.maximum_output_file_bytes,
+        )
+        staged.staging_budget.record_file(
+            frame_index_staging,
+            maximum_file_bytes=config.maximum_output_file_bytes,
+        )
+        frame_index_artifact = _artifact_for(
+            workspace,
+            frame_index_staging,
+            artifact_prefix="frame-index",
+            artifact_type="frame_index",
+            relative_directory="index",
+            filename="frame-index.json",
+        )
+        output_artifacts.append(frame_index_artifact)
     created_at = datetime.now(UTC)
     try:
         media_manifest = MediaManifest(
@@ -731,6 +819,7 @@ def publish_staged_media(
             normalization_fingerprint=staged.normalization_fingerprint,
             implementation_version=NORMALIZATION_IMPLEMENTATION_VERSION,
             configuration=config,
+            primary_input_kind=staged.primary_input_kind,
             ffmpeg=staged.ffmpeg,
             ffprobe=staged.ffprobe,
             raw_artifact=raw_artifact,
@@ -766,7 +855,7 @@ def publish_staged_media(
 
 def _manifest_artifacts(manifest: MediaManifest) -> list[ArtifactRef]:
     return [
-        manifest.analysis_proxy.artifact,
+        *([manifest.analysis_proxy.artifact] if manifest.analysis_proxy is not None else []),
         *([manifest.speech_audio.artifact] if manifest.speech_audio is not None else []),
         *(
             artifact
@@ -774,8 +863,11 @@ def _manifest_artifacts(manifest: MediaManifest) -> list[ArtifactRef]:
             for artifact in (subtitle.webvtt_artifact, subtitle.cues_artifact)
             if artifact is not None
         ),
-        *(record.artifact for record in manifest.frame_index.records),
-        manifest.frame_index_artifact,
+        *(
+            record.artifact
+            for record in (manifest.frame_index.records if manifest.frame_index is not None else [])
+        ),
+        *([manifest.frame_index_artifact] if manifest.frame_index_artifact is not None else []),
     ]
 
 
@@ -792,13 +884,26 @@ def verify_normalized_bundle(
     if (
         manifest.job_id != job.job_id
         or manifest.raw_artifact != raw_artifact
+        or manifest.primary_input_kind is not primary_input_kind(job)
         or manifest.implementation_version != NORMALIZATION_IMPLEMENTATION_VERSION
         or (expected_config is not None and manifest.configuration != expected_config)
-        or manifest.normalization_fingerprint
-        != normalization_fingerprint(
-            raw_artifact, manifest.configuration, manifest.ffmpeg, manifest.ffprobe
-        )
     ):
+        raise integrity_error("MEDIA_MANIFEST_MISMATCH", "media manifest does not match the job")
+    if manifest.primary_input_kind is PrimaryInputKind.TRANSCRIPT:
+        expected_fingerprint = transcript_primary_normalization_fingerprint(
+            raw_artifact, manifest.configuration
+        )
+    else:
+        if manifest.ffmpeg is None or manifest.ffprobe is None:
+            raise integrity_error("MEDIA_MANIFEST_MISMATCH", "media tool identity is missing")
+        expected_fingerprint = normalization_fingerprint(
+            raw_artifact,
+            manifest.configuration,
+            manifest.ffmpeg,
+            manifest.ffprobe,
+            primary_input_kind=manifest.primary_input_kind,
+        )
+    if manifest.normalization_fingerprint != expected_fingerprint:
         raise integrity_error("MEDIA_MANIFEST_MISMATCH", "media manifest does not match the job")
     artifacts = _manifest_artifacts(manifest)
     if len({artifact.relative_storage_path for artifact in artifacts}) != len(artifacts):
@@ -807,13 +912,16 @@ def verify_normalized_bundle(
         if not artifact.relative_storage_path.startswith("normalized/"):
             raise integrity_error("MEDIA_MANIFEST_MISMATCH", "media artifact path is invalid")
         _verify_artifact_path(workspace.safe_path(artifact.relative_storage_path), artifact)
-    stored_index = read_json_model(
-        workspace.safe_path(manifest.frame_index_artifact.relative_storage_path),
-        FrameIndex,
-        code="FRAME_INDEX_INVALID",
-    )
-    if stored_index != manifest.frame_index:
-        raise integrity_error("FRAME_INDEX_INVALID", "frame index does not match media manifest")
+    if manifest.frame_index_artifact is not None and manifest.frame_index is not None:
+        stored_index = read_json_model(
+            workspace.safe_path(manifest.frame_index_artifact.relative_storage_path),
+            FrameIndex,
+            code="FRAME_INDEX_INVALID",
+        )
+        if stored_index != manifest.frame_index:
+            raise integrity_error(
+                "FRAME_INDEX_INVALID", "frame index does not match media manifest"
+            )
     for subtitle in manifest.subtitles:
         if subtitle.status is not SubtitleStatus.NORMALIZED:
             continue
@@ -825,12 +933,54 @@ def verify_normalized_bundle(
             maximum_bytes=manifest.configuration.maximum_subtitle_bytes,
         )
         if len(cues) != subtitle.cue_count or any(
-            cue.end_ms > manifest.probe.duration_ms + manifest.configuration.duration_tolerance_ms
+            manifest.probe is None
+            or cue.end_ms
+            > manifest.probe.duration_ms + manifest.configuration.duration_tolerance_ms
             or not cue.text
             for cue in cues
         ):
             raise integrity_error("SUBTITLE_CUES_INVALID", "subtitle cue JSONL is inconsistent")
     return manifest
+
+
+def publish_transcript_primary(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    raw_artifact: ArtifactRef,
+    config: NormalizationConfig,
+) -> NormalizationResult:
+    """Publish the no-media normalization projection for a supplied transcript.
+
+    The source acquisition artifact remains the sole immutable source.  This
+    explicit manifest lets the rest of the state machine keep the existing
+    normalization gate without invoking FFmpeg or inventing media metadata.
+    """
+
+    fingerprint_value = transcript_primary_normalization_fingerprint(raw_artifact, config)
+    if workspace.media_manifest_json.exists() or workspace.normalization_manifest_json.exists():
+        existing = load_normalization_result(workspace, job, raw_artifact, expected_config=config)
+        if existing.media_manifest.normalization_fingerprint != fingerprint_value:
+            raise integrity_error(
+                "NORMALIZATION_FINGERPRINT_MISMATCH",
+                "another normalization bundle uses a different source fingerprint",
+            )
+        return existing
+    started_at = datetime.now(UTC)
+    manifest = MediaManifest(
+        job_id=job.job_id,
+        normalization_fingerprint=fingerprint_value,
+        implementation_version=NORMALIZATION_IMPLEMENTATION_VERSION,
+        configuration=config,
+        primary_input_kind=PrimaryInputKind.TRANSCRIPT,
+        raw_artifact=raw_artifact,
+        warnings=["TRANSCRIPT_PRIMARY"],
+        started_at=started_at,
+        created_at=datetime.now(UTC),
+    )
+    stage = _stage_manifest(manifest, [])
+    atomic_write_json(workspace.media_manifest_json, manifest, private=True)
+    atomic_write_json(workspace.normalization_manifest_json, stage, private=True)
+    return NormalizationResult(media_manifest=manifest, stage_manifest=stage, reused=False)
 
 
 def load_normalization_result(

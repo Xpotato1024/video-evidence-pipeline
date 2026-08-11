@@ -27,6 +27,7 @@ from video_evidence_pipeline.application import (
     import_authoring_job,
     import_evidence_job,
     import_revision_job,
+    import_transcript_refinement_job,
     initialize_job,
     job_status,
     normalize_job,
@@ -34,11 +35,17 @@ from video_evidence_pipeline.application import (
     prepare_authoring_job,
     prepare_evidence_job,
     prepare_revision_job,
+    prepare_transcript_refinement_job,
     search_job,
     transcribe_job,
     validate_job,
 )
-from video_evidence_pipeline.domain.job import SourceKind
+from video_evidence_pipeline.domain.job import (
+    PrimaryInputKind,
+    SourceKind,
+    SupportingInputKind,
+    SupportingInputSpec,
+)
 from video_evidence_pipeline.domain.transcription import (
     GapPolicy,
     OverlapPolicy,
@@ -83,6 +90,7 @@ app = StructuredTyper(name="vep", no_args_is_help=True, pretty_exceptions_enable
 job_app = typer.Typer(no_args_is_help=True)
 schema_app = typer.Typer(no_args_is_help=True)
 evidence_app = typer.Typer(no_args_is_help=True)
+refine_app = typer.Typer(no_args_is_help=True)
 index_app = typer.Typer(no_args_is_help=True)
 author_app = typer.Typer(no_args_is_help=True)
 audit_app = typer.Typer(no_args_is_help=True)
@@ -90,6 +98,7 @@ revision_app = typer.Typer(no_args_is_help=True)
 app.add_typer(job_app, name="job")
 app.add_typer(schema_app, name="schema")
 app.add_typer(evidence_app, name="evidence")
+app.add_typer(refine_app, name="refine")
 app.add_typer(index_app, name="index")
 app.add_typer(author_app, name="author")
 app.add_typer(audit_app, name="audit")
@@ -127,6 +136,26 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
+def _supporting_inputs(values: list[str] | None) -> list[SupportingInputSpec]:
+    """Parse repeatable ``kind:local-path`` supporting-input options."""
+
+    parsed: list[SupportingInputSpec] = []
+    for value in values or []:
+        kind_text, delimiter, locator = value.partition(":")
+        if not delimiter or not locator.strip():
+            raise configuration_error(
+                "SUPPORTING_INPUT_INVALID", "supporting input must use kind:local-path"
+            )
+        try:
+            kind = SupportingInputKind(kind_text)
+        except ValueError:
+            raise configuration_error(
+                "SUPPORTING_INPUT_INVALID", "supporting input kind is invalid"
+            ) from None
+        parsed.append(SupportingInputSpec(kind=kind, locator=locator))
+    return parsed
+
+
 @app.callback()
 def main(
     version: Annotated[
@@ -154,6 +183,14 @@ def job_init(
         list[str] | None,
         typer.Option("--requirement", help="Repeat for each ordered assignment requirement."),
     ] = None,
+    primary_input: Annotated[
+        PrimaryInputKind | None,
+        typer.Option("--primary-input", help="Primary input kind; omit for legacy video jobs."),
+    ] = None,
+    supporting_input: Annotated[
+        list[str] | None,
+        typer.Option("--supporting-input", help="Repeat kind:local-path for pdf, image, or notes."),
+    ] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     result = _run(
@@ -166,6 +203,8 @@ def job_init(
             language=language,
             output_format=output_format,
             requirements=requirement,
+            primary_input=primary_input,
+            supporting_inputs=_supporting_inputs(supporting_input),
         ),
         json_output=json_output,
     )
@@ -370,7 +409,7 @@ def normalize(
             "job_id": manifest.job_id,
             "state": "NORMALIZED",
             "normalization_fingerprint": manifest.normalization_fingerprint,
-            "frame_count": len(manifest.frame_index.records),
+            "frame_count": len(manifest.frame_index.records) if manifest.frame_index else 0,
             "subtitle_count": len(manifest.subtitles),
             "speech_audio": manifest.speech_audio is not None,
             "warnings": manifest.warnings,
@@ -431,6 +470,51 @@ def transcribe(
             "gap_count": len(manifest.gaps),
             "overlap_count": len(manifest.overlaps),
             "sources": [item.source.value for item in manifest.backends],
+            "reused": result.reused,
+        },
+        json_output=json_output,
+    )
+
+
+@refine_app.command("prepare")
+def refine_prepare(
+    workspace: Path,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    result = _run(lambda: prepare_transcript_refinement_job(workspace), json_output=json_output)
+    request = result.request
+    _emit(
+        {
+            "ok": True,
+            "job_id": request.job_id,
+            "request_fingerprint": request.request_fingerprint,
+            "transcript_segment_count": len(request.transcript_segments),
+            "support_ref_count": len(request.available_source_refs),
+            "reused": result.reused,
+        },
+        json_output=json_output,
+    )
+
+
+@refine_app.command("import")
+def refine_import(
+    workspace: Path,
+    response: Annotated[Path, typer.Option("--response")],
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    result = _run(
+        lambda: import_transcript_refinement_job(workspace, response),
+        json_output=json_output,
+    )
+    manifest = result.refinement_manifest
+    _emit(
+        {
+            "ok": True,
+            "job_id": manifest.job_id,
+            "state": "TRANSCRIPT_REFINED",
+            "refined_transcript_fingerprint": manifest.refined_transcript_fingerprint,
+            "edit_count": manifest.edit_count,
+            "ambiguity_count": manifest.ambiguity_count,
             "reused": result.reused,
         },
         json_output=json_output,

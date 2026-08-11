@@ -201,6 +201,7 @@
     },
     "TranscriptSource": {
       "enum": [
+        "supplied",
         "normalized_subtitle",
         "asr"
       ],
@@ -216,9 +217,17 @@
       "$ref": "#/$defs/TranscriptConfidence"
     },
     "end_ms": {
-      "exclusiveMinimum": 0,
-      "title": "End Ms",
-      "type": "integer"
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "End Ms"
     },
     "flags": {
       "items": {
@@ -272,15 +281,21 @@
       "title": "Speaker"
     },
     "start_ms": {
-      "minimum": 0,
-      "title": "Start Ms",
-      "type": "integer"
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Start Ms"
     }
   },
   "required": [
     "segment_id",
-    "start_ms",
-    "end_ms",
     "raw_text",
     "normalized_text",
     "source",
