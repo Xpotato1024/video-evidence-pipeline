@@ -16,6 +16,7 @@ from video_evidence_pipeline.domain.artifacts import (
 )
 from video_evidence_pipeline.domain.identifiers import JobId, Sha256
 from video_evidence_pipeline.domain.job import SourceKind
+from video_evidence_pipeline.domain.media import ToolIdentity
 from video_evidence_pipeline.domain.state import JobState
 
 
@@ -35,8 +36,24 @@ class HttpStatusCategory(StrEnum):
     NOT_OBSERVED = "not-observed"
 
 
+class AcquisitionMode(StrEnum):
+    PROGRESSIVE = "progressive"
+    ADAPTIVE_MERGED = "adaptive-merged"
+
+
 EvidenceHost = Annotated[str, Field(min_length=1, max_length=253, pattern=r"^[A-Za-z0-9.:-]+$")]
 EvidenceWarning = Annotated[str, Field(min_length=1, max_length=256)]
+YtdlpMetadataToken = Annotated[
+    str,
+    Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._+-]+$"),
+]
+
+
+class YtdlpFormatEvidence(StrictModel):
+    format_id: YtdlpMetadataToken
+    video_codec: YtdlpMetadataToken
+    audio_codec: YtdlpMetadataToken
+    protocol: YtdlpMetadataToken
 
 
 class AcquisitionEvidence(StrictModel):
@@ -53,7 +70,50 @@ class AcquisitionEvidence(StrictModel):
     declared_content_length: int | None = Field(default=None, ge=0)
     actual_acquired_size: int = Field(ge=1)
     credential_mode: CredentialMode
+    acquisition_mode: AcquisitionMode | None = None
+    selected_formats: list[YtdlpFormatEvidence] = Field(default_factory=list, max_length=2)
+    merger: ToolIdentity | None = None
     warnings: list[EvidenceWarning] = Field(default_factory=list, max_length=32)
+
+    @model_validator(mode="after")
+    def ytdlp_lineage_is_consistent(self) -> Self:
+        if self.backend != "yt-dlp":
+            if (
+                self.acquisition_mode is not None
+                or self.selected_formats
+                or self.merger is not None
+            ):
+                raise ValueError("non-yt-dlp acquisition must not claim yt-dlp lineage")
+            return self
+
+        # Source manifests created before adaptive lineage was introduced remain
+        # readable for idempotent recovery. New yt-dlp acquisitions always set
+        # acquisition_mode and selected_formats in the runner.
+        if self.acquisition_mode is None and not self.selected_formats and self.merger is None:
+            return self
+
+        if self.acquisition_mode is AcquisitionMode.PROGRESSIVE:
+            if (
+                len(self.selected_formats) != 1
+                or self.selected_formats[0].video_codec == "none"
+                or self.selected_formats[0].audio_codec == "none"
+                or self.merger is not None
+            ):
+                raise ValueError("progressive yt-dlp lineage is invalid")
+        elif self.acquisition_mode is AcquisitionMode.ADAPTIVE_MERGED:
+            if (
+                len(self.selected_formats) != 2
+                or self.selected_formats[0].video_codec == "none"
+                or self.selected_formats[0].audio_codec != "none"
+                or self.selected_formats[1].video_codec != "none"
+                or self.selected_formats[1].audio_codec == "none"
+                or self.merger is None
+                or self.merger.name != "ffmpeg"
+            ):
+                raise ValueError("adaptive yt-dlp lineage is invalid")
+        else:
+            raise ValueError("yt-dlp acquisition requires a supported acquisition mode")
+        return self
 
 
 class SourceManifest(StrictModel):

@@ -23,7 +23,12 @@ from video_evidence_pipeline.acquisition.staged import (
     AcquisitionEvidenceDraft,
     publish_staged_source,
 )
-from video_evidence_pipeline.acquisition.ytdlp_runner import SubprocessRunner, run_ytdlp
+from video_evidence_pipeline.acquisition.ytdlp_runner import (
+    SubprocessRunner,
+    YtdlpToolchainFactory,
+    default_ytdlp_toolchain,
+    run_ytdlp,
+)
 from video_evidence_pipeline.domain.identifiers import sanitize_filename
 from video_evidence_pipeline.domain.job import JobSpec, SourceKind
 from video_evidence_pipeline.domain.locators import locator_fingerprint, panopto_identity
@@ -41,12 +46,14 @@ class PanoptoAdapter(AcquisitionAdapter):
         resolver: Resolver = default_resolver,
         runner: SubprocessRunner | None = None,
         monotonic: Callable[[], float] = time.monotonic,
+        toolchain_factory: YtdlpToolchainFactory = default_ytdlp_toolchain,
     ) -> None:
         self.runtime = runtime
         self.client = client
         self.resolver = resolver
         self.runner = runner
         self.monotonic = monotonic
+        self.toolchain_factory = toolchain_factory
 
     def probe(self, job: JobSpec) -> ProbeResult:
         if job.source.kind is not SourceKind.PANOPTO:
@@ -88,6 +95,7 @@ class PanoptoAdapter(AcquisitionAdapter):
             runner=self.runner,
             resolver=self.resolver,
             deadline=deadline,
+            toolchain_factory=self.toolchain_factory,
         )
         return publish_staged_source(
             job,

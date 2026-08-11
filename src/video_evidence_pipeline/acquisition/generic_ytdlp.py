@@ -18,7 +18,12 @@ from video_evidence_pipeline.acquisition.runtime import (
     AcquisitionRuntimeConfig,
 )
 from video_evidence_pipeline.acquisition.staged import publish_staged_source
-from video_evidence_pipeline.acquisition.ytdlp_runner import SubprocessRunner, run_ytdlp
+from video_evidence_pipeline.acquisition.ytdlp_runner import (
+    SubprocessRunner,
+    YtdlpToolchainFactory,
+    default_ytdlp_toolchain,
+    run_ytdlp,
+)
 from video_evidence_pipeline.domain.job import JobSpec, SourceKind
 from video_evidence_pipeline.domain.locators import locator_fingerprint
 from video_evidence_pipeline.errors import integrity_error
@@ -33,11 +38,13 @@ class GenericYtdlpAdapter(AcquisitionAdapter):
         runner: SubprocessRunner | None = None,
         resolver: Resolver = default_resolver,
         monotonic: Callable[[], float] = time.monotonic,
+        toolchain_factory: YtdlpToolchainFactory = default_ytdlp_toolchain,
     ) -> None:
         self.runtime = runtime
         self.runner = runner
         self.resolver = resolver
         self.monotonic = monotonic
+        self.toolchain_factory = toolchain_factory
 
     def probe(self, job: JobSpec) -> ProbeResult:
         if job.source.kind is not SourceKind.GENERIC_YTDLP:
@@ -63,6 +70,7 @@ class GenericYtdlpAdapter(AcquisitionAdapter):
             runner=self.runner,
             resolver=self.resolver,
             deadline=deadline,
+            toolchain_factory=self.toolchain_factory,
         )
         return publish_staged_source(
             job,

@@ -7,7 +7,7 @@ status: draft
 canonical: true
 canonical_for: artifact-model
 created_at: 2026-08-06T16:07:00+09:00
-updated_at: 2026-08-10T02:00:00+09:00
+updated_at: 2026-08-11T00:00:00+09:00
 authors:
   - Xpotato1024
   - OpenAI ChatGPT
@@ -174,6 +174,12 @@ network source manifestにはtyped redacted acquisition evidenceを追加し、a
 credential mode、warningsを保持します。full URL、query、redirect Location、token、Cookie、credential path、
 生のyt-dlp出力は保持しません。
 backendが観測できないfinal hostとredirect countは`null`とし、推測値へ置き換えません。
+
+yt-dlp取得は`progressive`または`adaptive-merged`を記録します。selected formatごとにformat ID、video codec、
+audio codec、protocolを保持し、adaptive mergeではstream-copyに使用したFFmpegのversion／executable SHA-256／
+capabilitiesをmerger identityとして保持します。componentのremote URLとsigned URLは保持しません。
+`ArtifactRecord`のSHA-256／sizeは統合後final artifactのidentityであり、remote originalや各componentのhashを
+表すものではありません。統合前componentを単一remote originalとして扱いません。
 
 ## 7. Storage layout
 

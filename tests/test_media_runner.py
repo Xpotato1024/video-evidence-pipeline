@@ -328,6 +328,30 @@ def test_runner_rejects_executable_replacement_after_pinning(tmp_path: Path) -> 
     assert captured.value.code == "MEDIA_TOOL_IDENTITY_CHANGED"
 
 
+def test_runner_exposes_only_revalidated_common_pinned_bin_directory(tmp_path: Path) -> None:
+    observed: dict[str, object] = {}
+    runner = runner_with_process(FakeProcess(), observed, tmp_path)
+    ffmpeg, ffprobe = _pinned_identities(tmp_path)
+    runner.pin_identities(ffmpeg, ffprobe)
+
+    assert runner.pinned_bin_directory(ffmpeg, ffprobe) == tmp_path
+
+
+def test_runner_rejects_replacement_before_exposing_pinned_bin_directory(
+    tmp_path: Path,
+) -> None:
+    observed: dict[str, object] = {}
+    runner = runner_with_process(FakeProcess(), observed, tmp_path)
+    ffmpeg, ffprobe = _pinned_identities(tmp_path)
+    runner.pin_identities(ffmpeg, ffprobe)
+    (tmp_path / "ffprobe").write_bytes(b"replacement executable")
+
+    with pytest.raises(VepError) as captured:
+        runner.pinned_bin_directory(ffmpeg, ffprobe)
+
+    assert captured.value.code == "MEDIA_TOOL_IDENTITY_CHANGED"
+
+
 def test_runner_rejects_persistent_replacement_before_a_pinned_launch(tmp_path: Path) -> None:
     observed: dict[str, object] = {}
     runner = runner_with_process(FakeProcess(), observed, tmp_path)

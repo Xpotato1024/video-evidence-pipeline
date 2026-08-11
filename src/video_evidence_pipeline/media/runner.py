@@ -281,6 +281,28 @@ class FFmpegRunner:
                 "MEDIA_TOOL_IDENTITY_CHANGED", "media tool changed during normalization"
             )
 
+    def pinned_bin_directory(self, ffmpeg: ToolIdentity, ffprobe: ToolIdentity) -> Path:
+        """Return the validated common bin directory for a pinned FFmpeg toolchain."""
+        self.revalidate_pinned_identities(ffmpeg, ffprobe)
+        parents = {Path(path).parent for path in self._executables.values()}
+        if len(parents) != 1:
+            raise configuration_error(
+                "MEDIA_TOOL_INVALID", "media tools must share one validated bin directory"
+            )
+        directory = parents.pop()
+        try:
+            if (
+                not directory.is_absolute()
+                or not directory.is_dir()
+                or _path_contains_link_or_junction(directory)
+            ):
+                raise OSError("media tool directory is invalid")
+        except OSError:
+            raise configuration_error(
+                "MEDIA_TOOL_INVALID", "media tool directory could not be verified"
+            ) from None
+        return directory
+
     def _revalidate_launch_identity(self, tool: ToolName) -> None:
         """Hash at both subprocess edges once identities have been pinned."""
         if self._pinned_snapshots is None:

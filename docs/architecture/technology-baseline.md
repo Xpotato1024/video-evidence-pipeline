@@ -7,7 +7,7 @@ status: draft
 canonical: true
 canonical_for: technology-baseline
 created_at: 2026-08-06T16:07:00+09:00
-updated_at: 2026-08-10T02:00:00+09:00
+updated_at: 2026-08-11T00:00:00+09:00
 authors: ["Xpotato1024", "OpenAI ChatGPT"]
 owners: ["Xpotato1024"]
 reviewers: []
@@ -52,7 +52,7 @@ related_documents: ["VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-TRUST",
 | Hash | streaming SHA-256 | required／implemented |
 | local source | `local_file` adapter | required／implemented |
 | direct HTTP | httpx 0.28.1 + httpcore 1.0.9 | required／implemented |
-| generic/Panopto backend | pinned yt-dlp adapter | preferred／implemented |
+| generic/Panopto backend | pinned yt-dlp adapter、combined／adaptive A/V fixed selection | preferred／implemented |
 | Panopto API | official REST v1 contract | preferred／implemented |
 | Box API | official API adapter | optional／implemented |
 | media | pinned FFmpeg／ffprobe toolchain manifest、generic decoder-limit capability／executable SHA検証 | required／implemented |
@@ -75,7 +75,9 @@ HTTPX/httpcoreのtransport contractへ依存するため、監査済みのexact 
 The media baseline is provisioned by the pinned manifest at
 `tools/ffmpeg-toolchain.json` on Windows. The installer verifies the archive
 and executable SHA-256 values, and the runtime records and revalidates the
-selected executable identity for each normalization run.
+selected executable identity for each normalization run. yt-dlp adaptive merge
+uses the same validated bin directory through a fixed `--ffmpeg-location`; it
+does not independently discover FFmpeg from `PATH`.
 
 ## 4. Deferred／rejected
 
