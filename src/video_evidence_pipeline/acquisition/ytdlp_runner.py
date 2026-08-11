@@ -100,6 +100,8 @@ class _PinnedYtdlpToolchain:
         except VepError as exc:
             if exc.code == "NETWORK_TIMEOUT":
                 raise
+            if exc.code == "MEDIA_TOOL_TIMEOUT":
+                deadline.remaining()
             if exc.code in {
                 "MEDIA_TOOL_IDENTITY_CHANGED",
                 "MEDIA_TOOL_IDENTITY_INVALID",

@@ -55,6 +55,40 @@ def test_tool_discovery_timeout_preserves_absolute_deadline_classification(
     assert captured.value.code == expected_code
 
 
+@pytest.mark.parametrize(
+    ("now", "expected_code"),
+    [(2.0, "NETWORK_TIMEOUT"), (0.5, "YTDLP_OUTPUT_INVALID")],
+)
+def test_final_probe_timeout_preserves_absolute_deadline_classification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    now: float,
+    expected_code: str,
+) -> None:
+    def timeout_probe(*_args: object, **_kwargs: object) -> None:
+        raise io_error("MEDIA_TOOL_TIMEOUT", "synthetic media probe timeout")
+
+    monkeypatch.setattr(ytdlp_runner, "probe_media", timeout_probe)
+    identity = ToolIdentity(
+        name="ffmpeg",
+        version="synthetic",
+        executable_sha256="0" * 64,
+        capabilities=[],
+    )
+    toolchain = ytdlp_runner._PinnedYtdlpToolchain(
+        runner=object(),  # type: ignore[arg-type]
+        ffmpeg_identity=identity,
+        ffprobe_identity=identity.model_copy(update={"name": "ffprobe"}),
+        ffmpeg_location=tmp_path,
+    )
+    deadline = AcquisitionDeadline(expires_at=1.0, monotonic=lambda: now)
+
+    with pytest.raises(VepError) as captured:
+        toolchain.validate_final(tmp_path / "synthetic.mp4", deadline)
+
+    assert captured.value.code == expected_code
+
+
 def workspace_for(tmp_path: Path, kind: SourceKind = SourceKind.GENERIC_YTDLP) -> JobWorkspace:
     workspace, _ = initialize_job(
         tmp_path,
