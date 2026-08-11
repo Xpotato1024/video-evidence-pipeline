@@ -833,12 +833,15 @@ def _install_fake_faster_whisper(
     *,
     cuda_count: int,
     supported: dict[str, set[str]],
+    fail_devices: set[str] | None = None,
 ) -> list[dict[str, object]]:
     calls: list[dict[str, object]] = []
 
     class FakeWhisperModel:
         def __init__(self, _path: str, **kwargs: object) -> None:
             calls.append(kwargs)
+            if kwargs["device"] in (fail_devices or set()):
+                raise RuntimeError("synthetic model construction failure")
 
         def transcribe(self, _path: str, **_kwargs: object):
             return iter(()), object()
@@ -888,6 +891,28 @@ def test_faster_whisper_auto_resolves_usable_cuda_and_records_runtime(
     assert identity.runtime == ("ctranslate2-test;device=cuda;compute_type=float16;device_index=0")
 
 
+def test_faster_whisper_auto_falls_back_to_cpu_when_cuda_model_load_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    faster_whisper_module._MODEL_FINGERPRINT_CACHE.clear()
+    calls = _install_fake_faster_whisper(
+        monkeypatch,
+        cuda_count=1,
+        supported={"cuda": {"float16", "int8"}, "cpu": {"int8"}},
+        fail_devices={"cuda"},
+    )
+
+    identity = FasterWhisperBackend(_complete_model(tmp_path)).identity()
+
+    assert [call["device"] for call in calls] == ["cuda", "cpu"]
+    assert calls[1] == {
+        "device": "cpu",
+        "compute_type": "int8",
+        "local_files_only": True,
+    }
+    assert identity.runtime == "ctranslate2-test;device=cpu;compute_type=int8;device_index=none"
+
+
 def test_faster_whisper_explicit_cuda_fails_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -903,6 +928,42 @@ def test_faster_whisper_explicit_cuda_fails_closed(
 
     assert unavailable.value.code == "ASR_DEVICE_UNAVAILABLE"
     assert calls == []
+
+
+def test_faster_whisper_explicit_cuda_model_load_failure_does_not_fall_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    faster_whisper_module._MODEL_FINGERPRINT_CACHE.clear()
+    calls = _install_fake_faster_whisper(
+        monkeypatch,
+        cuda_count=1,
+        supported={"cuda": {"float16"}, "cpu": {"int8"}},
+        fail_devices={"cuda"},
+    )
+
+    with pytest.raises(VepError) as unavailable:
+        FasterWhisperBackend(_complete_model(tmp_path), device="cuda").identity()
+
+    assert unavailable.value.code == "ASR_DEVICE_UNAVAILABLE"
+    assert [call["device"] for call in calls] == ["cuda"]
+
+
+def test_faster_whisper_auto_reports_cpu_load_failure_as_model_invalid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    faster_whisper_module._MODEL_FINGERPRINT_CACHE.clear()
+    calls = _install_fake_faster_whisper(
+        monkeypatch,
+        cuda_count=1,
+        supported={"cuda": {"float16"}, "cpu": {"int8"}},
+        fail_devices={"cuda", "cpu"},
+    )
+
+    with pytest.raises(VepError) as invalid:
+        FasterWhisperBackend(_complete_model(tmp_path)).identity()
+
+    assert invalid.value.code == "MODEL_INVALID"
+    assert [call["device"] for call in calls] == ["cuda", "cpu"]
 
 
 def test_faster_whisper_explicit_cpu_ignores_available_cuda(

@@ -542,9 +542,9 @@ def _artifact_for(
     atomic_copy_exclusive(
         staged_path,
         target,
-        verifier=lambda candidate: _verify_artifact_path(candidate, artifact, deep=True),
+        verifier=lambda candidate: _verify_artifact_path(candidate, artifact),
     )
-    _verify_artifact_path(target, artifact, deep=True)
+    _verify_artifact_path(target, artifact)
     return artifact
 
 

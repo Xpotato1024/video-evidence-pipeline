@@ -214,29 +214,47 @@ class FasterWhisperBackend:
                 "BACKEND_UNAVAILABLE", "the optional local ASR backend is not installed"
             ) from None
         resolved = self._resolve_runtime(ctranslate2)
-        try:
+
+        def construct_model(runtime: _ResolvedRuntime) -> Any:
             model_options: dict[str, object] = {
-                "device": resolved.device,
-                "compute_type": resolved.compute_type,
+                "device": runtime.device,
+                "compute_type": runtime.compute_type,
                 "local_files_only": True,
             }
-            if resolved.device_index is not None:
-                model_options["device_index"] = resolved.device_index
-            model = WhisperModel(
+            if runtime.device_index is not None:
+                model_options["device_index"] = runtime.device_index
+            return WhisperModel(
                 str(self._model_directory),
                 **model_options,
             )
+
+        try:
+            model = construct_model(resolved)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            if resolved.device == "cuda" and self._requested_device == "auto":
+                resolved = _ResolvedRuntime(device="cpu", compute_type="int8", device_index=None)
+                try:
+                    model = construct_model(resolved)
+                except (OSError, RuntimeError, TypeError, ValueError):
+                    raise configuration_error(
+                        "MODEL_INVALID", "the configured local ASR model could not be loaded"
+                    ) from None
+            elif resolved.device == "cuda":
+                raise configuration_error(
+                    "ASR_DEVICE_UNAVAILABLE", "CUDA model loading failed"
+                ) from None
+            else:
+                raise configuration_error(
+                    "MODEL_INVALID", "the configured local ASR model could not be loaded"
+                ) from None
+        try:
             if self._validated_model_files() != hashes:
                 raise configuration_error(
                     "MODEL_INVALID", "the local ASR model changed while loading"
                 )
         except (OSError, RuntimeError, TypeError, ValueError):
-            if resolved.device == "cuda":
-                raise configuration_error(
-                    "ASR_DEVICE_UNAVAILABLE", "CUDA model loading failed"
-                ) from None
             raise configuration_error(
-                "MODEL_INVALID", "the configured local ASR model could not be loaded"
+                "MODEL_INVALID", "the local ASR model changed while loading"
             ) from None
         identity = TranscriptionBackendIdentity(
             source=TranscriptSource.ASR,

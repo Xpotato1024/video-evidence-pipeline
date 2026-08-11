@@ -14,6 +14,7 @@ from typer.testing import CliRunner
 
 import video_evidence_pipeline.application as application_module
 import video_evidence_pipeline.media.frames as frames_module
+import video_evidence_pipeline.media.normalization as normalization_module
 import video_evidence_pipeline.media.subtitles as subtitles_module
 from video_evidence_pipeline.application import (
     acquire_job,
@@ -202,6 +203,43 @@ def _synthetic_identities() -> tuple[ToolIdentity, ToolIdentity]:
             capabilities=[],
         ),
     )
+
+
+def test_normalization_publication_hashes_staged_bytes_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, _job = initialize_job(
+        tmp_path,
+        job_id="publication-hash-count",
+        source_kind=SourceKind.LOCAL_FILE,
+        source=str(tmp_path / "source.mp4"),
+        task_type="report",
+        language="ja",
+        output_format="markdown",
+    )
+    staged = tmp_path / "staged.mp4"
+    staged.write_bytes(b"synthetic immutable media")
+    original = normalization_module.sha256_file
+    hashed: list[Path] = []
+
+    def counted(path: Path) -> str:
+        hashed.append(path)
+        return original(path)
+
+    monkeypatch.setattr(normalization_module, "sha256_file", counted)
+
+    artifact = normalization_module._artifact_for(
+        workspace,
+        staged,
+        artifact_prefix="analysis",
+        artifact_type="analysis_proxy",
+        relative_directory="analysis",
+        filename="analysis.mp4",
+    )
+
+    assert hashed == [staged]
+    target = workspace.safe_path(artifact.relative_storage_path)
+    assert target.read_bytes() == staged.read_bytes()
 
 
 def _probe_with_subtitle(codec_name: str | None = None) -> MediaProbe:
