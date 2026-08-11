@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import types
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -30,7 +31,11 @@ from video_evidence_pipeline.application import (
     validate_job,
 )
 from video_evidence_pipeline.cli import app
-from video_evidence_pipeline.domain.artifacts import ArtifactRef, EvidenceLedgerArtifactRef
+from video_evidence_pipeline.domain.artifacts import (
+    ArtifactRef,
+    EvidenceLedgerArtifactRef,
+    artifact_file_matches,
+)
 from video_evidence_pipeline.domain.evidence import (
     AmbiguityRecord,
     AmbiguityStatus,
@@ -45,7 +50,7 @@ from video_evidence_pipeline.domain.evidence import (
     SourceRef,
     SourceRefKind,
 )
-from video_evidence_pipeline.domain.hashing import sha256_bytes
+from video_evidence_pipeline.domain.hashing import sha256_bytes, sha256_file
 from video_evidence_pipeline.domain.job import (
     AssignmentSpec,
     JobSpec,
@@ -821,6 +826,155 @@ def test_faster_whisper_bounds_model_traversal_before_sorting(
         FasterWhisperBackend(model).identity()
 
     assert too_many.value.code == "MODEL_INVALID"
+
+
+def _install_fake_faster_whisper(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    cuda_count: int,
+    supported: dict[str, set[str]],
+) -> list[dict[str, object]]:
+    calls: list[dict[str, object]] = []
+
+    class FakeWhisperModel:
+        def __init__(self, _path: str, **kwargs: object) -> None:
+            calls.append(kwargs)
+
+        def transcribe(self, _path: str, **_kwargs: object):
+            return iter(()), object()
+
+    runtime = types.ModuleType("ctranslate2")
+    runtime.get_cuda_device_count = lambda: cuda_count  # type: ignore[attr-defined]
+    runtime.get_supported_compute_types = (  # type: ignore[attr-defined]
+        lambda device, _device_index=0: supported[device]
+    )
+    whisper = types.ModuleType("faster_whisper")
+    whisper.WhisperModel = FakeWhisperModel  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "ctranslate2", runtime)
+    monkeypatch.setitem(sys.modules, "faster_whisper", whisper)
+    monkeypatch.setattr(faster_whisper_module.importlib.metadata, "version", lambda _name: "test")
+    return calls
+
+
+def _complete_model(path: Path) -> Path:
+    model = path / "model"
+    model.mkdir()
+    (model / "config.json").write_text("{}", encoding="utf-8")
+    (model / "model.bin").write_bytes(b"model")
+    (model / "tokenizer.json").write_text("{}", encoding="utf-8")
+    return model.resolve()
+
+
+def test_faster_whisper_auto_resolves_usable_cuda_and_records_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    faster_whisper_module._MODEL_FINGERPRINT_CACHE.clear()
+    calls = _install_fake_faster_whisper(
+        monkeypatch,
+        cuda_count=1,
+        supported={"cuda": {"float16", "int8"}, "cpu": {"int8"}},
+    )
+
+    identity = FasterWhisperBackend(_complete_model(tmp_path)).identity()
+
+    assert calls == [
+        {
+            "device": "cuda",
+            "compute_type": "float16",
+            "local_files_only": True,
+            "device_index": 0,
+        }
+    ]
+    assert identity.runtime == ("ctranslate2-test;device=cuda;compute_type=float16;device_index=0")
+
+
+def test_faster_whisper_explicit_cuda_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    faster_whisper_module._MODEL_FINGERPRINT_CACHE.clear()
+    calls = _install_fake_faster_whisper(
+        monkeypatch,
+        cuda_count=0,
+        supported={"cuda": set(), "cpu": {"int8"}},
+    )
+
+    with pytest.raises(VepError) as unavailable:
+        FasterWhisperBackend(_complete_model(tmp_path), device="cuda").identity()
+
+    assert unavailable.value.code == "ASR_DEVICE_UNAVAILABLE"
+    assert calls == []
+
+
+def test_faster_whisper_explicit_cpu_ignores_available_cuda(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    faster_whisper_module._MODEL_FINGERPRINT_CACHE.clear()
+    calls = _install_fake_faster_whisper(
+        monkeypatch,
+        cuda_count=1,
+        supported={"cuda": {"float16"}, "cpu": {"int8"}},
+    )
+
+    FasterWhisperBackend(_complete_model(tmp_path), device="cpu").identity()
+
+    assert calls[0]["device"] == "cpu"
+    assert calls[0]["compute_type"] == "int8"
+    assert "device_index" not in calls[0]
+
+
+def test_faster_whisper_model_hash_is_reused_within_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    faster_whisper_module._MODEL_FINGERPRINT_CACHE.clear()
+    _install_fake_faster_whisper(
+        monkeypatch,
+        cuda_count=0,
+        supported={"cuda": set(), "cpu": {"int8"}},
+    )
+    model = _complete_model(tmp_path)
+    original = faster_whisper_module.sha256_file
+    hashed: list[Path] = []
+
+    def counted(path: Path) -> str:
+        hashed.append(path)
+        return original(path)
+
+    monkeypatch.setattr(faster_whisper_module, "sha256_file", counted)
+
+    FasterWhisperBackend(model).identity()
+    FasterWhisperBackend(model).identity()
+
+    assert len(hashed) == 3
+
+
+def test_artifact_fast_reuse_skips_hash_and_deep_verify_hashes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "artifact.bin"
+    path.write_bytes(b"small synthetic artifact")
+    artifact = ArtifactRef(
+        artifact_id="synthetic",
+        artifact_type="raw_source",
+        content_sha256=sha256_file(path),
+        size_bytes=path.stat().st_size,
+        relative_storage_path="source/raw/synthetic/artifact.bin",
+    )
+    import video_evidence_pipeline.domain.artifacts as artifacts_module
+
+    original = artifacts_module.sha256_file
+    calls = 0
+
+    def counted(candidate: Path) -> str:
+        nonlocal calls
+        calls += 1
+        return original(candidate)
+
+    monkeypatch.setattr(artifacts_module, "sha256_file", counted)
+
+    assert artifact_file_matches(path, artifact)
+    assert calls == 0
+    assert artifact_file_matches(path, artifact, deep=True)
+    assert calls == 1
 
 
 def test_asr_metric_availability_does_not_create_false_ambiguities(tmp_path: Path) -> None:

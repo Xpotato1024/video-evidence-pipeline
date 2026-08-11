@@ -16,6 +16,7 @@ from video_evidence_pipeline.domain.artifacts import (
     ArtifactRef,
     ProducerIdentity,
     ProducerKind,
+    artifact_file_matches,
 )
 from video_evidence_pipeline.domain.hashing import local_locator_fingerprint, sha256_file
 from video_evidence_pipeline.domain.identifiers import sanitize_filename
@@ -199,10 +200,13 @@ class LocalFileAdapter(AcquisitionAdapter):
             copy_result = atomic_copy_exclusive(
                 self._source_path(job),
                 raw_target,
-                verifier=lambda candidate: self._verify_raw(candidate, effective_artifact),
+                verifier=lambda candidate: self._verify_publication(candidate, effective_artifact),
             )
             reused = not copy_result.created
-        self._verify_raw(raw_target, effective_artifact)
+        if existing_manifest is None:
+            self._verify_publication(raw_target, effective_artifact)
+        else:
+            self._verify_raw(raw_target, effective_artifact)
 
         if existing_manifest is None:
             created_at = _utc_now()
@@ -253,17 +257,25 @@ class LocalFileAdapter(AcquisitionAdapter):
         )
 
     @staticmethod
-    def _verify_raw(path: Path, artifact: ArtifactRef) -> None:
+    def _verify_raw(path: Path, artifact: ArtifactRef, *, deep: bool = False) -> None:
         try:
-            if not path.is_file() or path.stat().st_size != artifact.size_bytes:
-                raise integrity_error("ARTIFACT_INTEGRITY_FAILED", "raw artifact size is invalid")
-            if sha256_file(path) != artifact.content_sha256:
-                raise integrity_error("ARTIFACT_INTEGRITY_FAILED", "raw artifact hash is invalid")
+            if not artifact_file_matches(path, artifact) or (
+                deep and sha256_file(path) != artifact.content_sha256
+            ):
+                raise integrity_error("ARTIFACT_INTEGRITY_FAILED", "raw artifact is invalid")
         except OSError as exc:
             raise io_error("ARTIFACT_READ_FAILED", "raw artifact could not be verified") from exc
 
+    @staticmethod
+    def _verify_publication(path: Path, artifact: ArtifactRef) -> None:
+        LocalFileAdapter._verify_raw(path, artifact)
+        if sha256_file(path) != artifact.content_sha256:
+            raise integrity_error("ARTIFACT_INTEGRITY_FAILED", "raw artifact hash is invalid")
 
-def verify_acquired_bundle(workspace: JobWorkspace, job: JobSpec) -> ArtifactRef:
+
+def verify_acquired_bundle(
+    workspace: JobWorkspace, job: JobSpec, *, deep: bool = False
+) -> ArtifactRef:
     if not workspace.source_manifest_json.is_file():
         raise integrity_error(
             "SOURCE_MANIFEST_INVALID", "ACQUIRED job is missing its source manifest"
@@ -285,5 +297,5 @@ def verify_acquired_bundle(workspace: JobWorkspace, job: JobSpec) -> ArtifactRef
     artifact = _validate_source_manifest_contract(manifest, job)
     _validate_stage_manifest_contract(stage_manifest, manifest, job)
     target = workspace.safe_path(artifact.relative_storage_path)
-    LocalFileAdapter._verify_raw(target, artifact)
+    LocalFileAdapter._verify_raw(target, artifact, deep=deep)
     return artifact

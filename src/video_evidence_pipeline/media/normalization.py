@@ -19,6 +19,7 @@ from video_evidence_pipeline.domain.artifacts import (
     ArtifactRef,
     ProducerIdentity,
     ProducerKind,
+    artifact_file_matches,
 )
 from video_evidence_pipeline.domain.hashing import sha256_file
 from video_evidence_pipeline.domain.job import JobSpec
@@ -540,20 +541,16 @@ def _artifact_for(
     atomic_copy_exclusive(
         staged_path,
         target,
-        verifier=lambda candidate: _verify_artifact_path(candidate, artifact),
+        verifier=lambda candidate: _verify_artifact_path(candidate, artifact, deep=True),
     )
-    _verify_artifact_path(target, artifact)
+    _verify_artifact_path(target, artifact, deep=True)
     return artifact
 
 
-def _verify_artifact_path(path: Path, artifact: ArtifactRef) -> None:
+def _verify_artifact_path(path: Path, artifact: ArtifactRef, *, deep: bool = False) -> None:
     try:
-        metadata = path.stat(follow_symlinks=False)
-        if (
-            not stat.S_ISREG(metadata.st_mode)
-            or path.is_symlink()
-            or metadata.st_size != artifact.size_bytes
-            or sha256_file(path) != artifact.content_sha256
+        if not artifact_file_matches(path, artifact) or (
+            deep and sha256_file(path) != artifact.content_sha256
         ):
             raise integrity_error("NORMALIZED_BUNDLE_TAMPERED", "normalized artifact is invalid")
         enforce_private_file(path)
@@ -785,6 +782,7 @@ def verify_normalized_bundle(
     raw_artifact: ArtifactRef,
     *,
     expected_config: NormalizationConfig | None = None,
+    deep: bool = False,
 ) -> MediaManifest:
     manifest = read_json_model(
         workspace.media_manifest_json, MediaManifest, code="MEDIA_MANIFEST_INVALID"
@@ -806,7 +804,9 @@ def verify_normalized_bundle(
     for artifact in artifacts:
         if not artifact.relative_storage_path.startswith("normalized/"):
             raise integrity_error("MEDIA_MANIFEST_MISMATCH", "media artifact path is invalid")
-        _verify_artifact_path(workspace.safe_path(artifact.relative_storage_path), artifact)
+        _verify_artifact_path(
+            workspace.safe_path(artifact.relative_storage_path), artifact, deep=deep
+        )
     stored_index = read_json_model(
         workspace.safe_path(manifest.frame_index_artifact.relative_storage_path),
         FrameIndex,
@@ -839,9 +839,10 @@ def load_normalization_result(
     raw_artifact: ArtifactRef,
     *,
     expected_config: NormalizationConfig | None = None,
+    deep: bool = False,
 ) -> NormalizationResult:
     manifest = verify_normalized_bundle(
-        workspace, job, raw_artifact, expected_config=expected_config
+        workspace, job, raw_artifact, expected_config=expected_config, deep=deep
     )
     stage_manifest = read_json_model(
         workspace.normalization_manifest_json,
