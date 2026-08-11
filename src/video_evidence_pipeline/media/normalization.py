@@ -539,12 +539,12 @@ def _artifact_for(
     ensure_private_directory(workspace.safe_path(f"normalized/{relative_directory}"))
     target = workspace.safe_path(relative_path)
     ensure_private_directory(target.parent)
-    atomic_copy_exclusive(
+    copy_result = atomic_copy_exclusive(
         staged_path,
         target,
         verifier=lambda candidate: _verify_artifact_path(candidate, artifact),
     )
-    _verify_artifact_path(target, artifact)
+    _verify_artifact_path(target, artifact, deep=not copy_result.created)
     return artifact
 
 

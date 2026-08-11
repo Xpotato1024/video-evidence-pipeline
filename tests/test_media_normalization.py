@@ -242,6 +242,47 @@ def test_normalization_publication_hashes_staged_bytes_once(
     assert target.read_bytes() == staged.read_bytes()
 
 
+def test_normalization_publication_rejects_mismatched_existing_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, _job = initialize_job(
+        tmp_path,
+        job_id="publication-existing-target",
+        source_kind=SourceKind.LOCAL_FILE,
+        source=str(tmp_path / "source.mp4"),
+        task_type="report",
+        language="ja",
+        output_format="markdown",
+    )
+    staged = tmp_path / "staged.mp4"
+    staged.write_bytes(b"correct")
+    content_sha256 = sha256_file(staged)
+    target = workspace.safe_path(f"normalized/analysis/{content_sha256}/analysis.mp4")
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"tamper!")
+    original = normalization_module.sha256_file
+    hashed: list[Path] = []
+
+    def counted(path: Path) -> str:
+        hashed.append(path)
+        return original(path)
+
+    monkeypatch.setattr(normalization_module, "sha256_file", counted)
+
+    with pytest.raises(VepError) as captured:
+        normalization_module._artifact_for(
+            workspace,
+            staged,
+            artifact_prefix="analysis",
+            artifact_type="analysis_proxy",
+            relative_directory="analysis",
+            filename="analysis.mp4",
+        )
+
+    assert captured.value.code == "NORMALIZED_BUNDLE_TAMPERED"
+    assert hashed == [staged, target]
+
+
 def _probe_with_subtitle(codec_name: str | None = None) -> MediaProbe:
     streams = [
         MediaStream(
