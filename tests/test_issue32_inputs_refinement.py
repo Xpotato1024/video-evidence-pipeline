@@ -453,14 +453,18 @@ def test_supplied_transcript_refines_separately_and_rejects_ungrounded_merge(
                 ambiguity_id="RA000001",
                 segment_id="T000002",
                 description="No supporting source resolves whether this game is related.",
-                source_refs=[
-                    next(
-                        item
-                        for item in request.available_source_refs
-                        if item.kind is SourceRefKind.TRANSCRIPT_SEGMENT
-                        and item.ref_id == "T000002"
-                    )
-                ],
+                source_refs=sorted(
+                    [
+                        transcript_ref,
+                        next(
+                            item
+                            for item in request.available_source_refs
+                            if item.kind is SourceRefKind.TRANSCRIPT_SEGMENT
+                            and item.ref_id == "T000002"
+                        ),
+                    ],
+                    key=lambda item: (item.kind.value, item.ref_id),
+                ),
             )
         ],
         created_at=request.created_at + timedelta(seconds=1),
@@ -502,6 +506,10 @@ def test_supplied_transcript_refines_separately_and_rejects_ungrounded_merge(
     assert [item.description for item in evidence_request.unresolved_ambiguities] == [
         "No supporting source resolves whether this game is related."
     ]
+    assert (
+        evidence_request.unresolved_ambiguities[0].source_refs[0]
+        == (evidence_request.transcript_refs[0])
+    )
     response = EvidenceResponseManifest(
         request_fingerprint=evidence_request.request_fingerprint,
         analyzer=AnalyzerIdentity(

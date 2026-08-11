@@ -251,7 +251,15 @@ def _refinement_ambiguities(
             description=item.description,
             start_ms=by_id[item.segment_id].start_ms,
             end_ms=by_id[item.segment_id].end_ms,
-            source_refs=item.source_refs,
+            source_refs=sorted(
+                [
+                    _transcript_ref(by_id[source.ref_id])
+                    if source.kind is SourceRefKind.TRANSCRIPT_SEGMENT
+                    else source
+                    for source in item.source_refs
+                ],
+                key=lambda source: (source.kind.value, source.ref_id),
+            ),
             status=AmbiguityStatus.UNRESOLVED,
         )
         for index, item in enumerate(refinement.ambiguities)
