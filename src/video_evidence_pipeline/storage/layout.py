@@ -262,5 +262,9 @@ class JobWorkspace:
         return self.safe_path("manifests/stages/export.json")
 
     @property
+    def recovery_manifest_json(self) -> Path:
+        return self.safe_path("manifests/recovery-manifest.json")
+
+    @property
     def transitions_jsonl(self) -> Path:
         return self.safe_path("manifests/transitions.jsonl")
