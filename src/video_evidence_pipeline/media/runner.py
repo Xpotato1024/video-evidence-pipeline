@@ -427,18 +427,25 @@ class FFmpegRunner:
         *,
         timeout_seconds: float,
         output_limit_bytes: int,
+        remaining_seconds: Callable[[], float] | None = None,
     ) -> tuple[ToolIdentity, ToolIdentity]:
+        def bounded_timeout() -> float:
+            if remaining_seconds is None:
+                return timeout_seconds
+            return min(timeout_seconds, remaining_seconds())
+
+        bounded_timeout()
         initial_snapshots = self._snapshots()
         ffmpeg_version = self._identity_version(
-            "ffmpeg", timeout_seconds=timeout_seconds, output_limit_bytes=output_limit_bytes
+            "ffmpeg", timeout_seconds=bounded_timeout(), output_limit_bytes=output_limit_bytes
         )
         ffprobe_version = self._identity_version(
-            "ffprobe", timeout_seconds=timeout_seconds, output_limit_bytes=output_limit_bytes
+            "ffprobe", timeout_seconds=bounded_timeout(), output_limit_bytes=output_limit_bytes
         )
         encoder_result = self.run_checked(
             "ffmpeg",
             ["-hide_banner", "-encoders"],
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=bounded_timeout(),
             stdout_limit_bytes=output_limit_bytes,
             stderr_limit_bytes=output_limit_bytes,
             require_complete_stdout=True,
@@ -446,7 +453,7 @@ class FFmpegRunner:
         filter_result = self.run_checked(
             "ffmpeg",
             ["-hide_banner", "-filters"],
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=bounded_timeout(),
             stdout_limit_bytes=output_limit_bytes,
             stderr_limit_bytes=output_limit_bytes,
             require_complete_stdout=True,
@@ -454,7 +461,7 @@ class FFmpegRunner:
         protocol_result = self.run_checked(
             "ffmpeg",
             ["-hide_banner", "-protocols"],
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=bounded_timeout(),
             stdout_limit_bytes=output_limit_bytes,
             stderr_limit_bytes=output_limit_bytes,
             require_complete_stdout=True,
@@ -462,7 +469,7 @@ class FFmpegRunner:
         muxer_result = self.run_checked(
             "ffmpeg",
             ["-hide_banner", "-muxers"],
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=bounded_timeout(),
             stdout_limit_bytes=output_limit_bytes,
             stderr_limit_bytes=output_limit_bytes,
             require_complete_stdout=True,
@@ -470,7 +477,7 @@ class FFmpegRunner:
         ffmpeg_full_help = self.run_checked(
             "ffmpeg",
             ["-hide_banner", "-h", "full"],
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=bounded_timeout(),
             stdout_limit_bytes=output_limit_bytes,
             stderr_limit_bytes=output_limit_bytes,
             require_complete_stdout=True,
@@ -479,7 +486,7 @@ class FFmpegRunner:
         ffprobe_full_help = self.run_checked(
             "ffprobe",
             ["-hide_banner", "-h", "full"],
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=bounded_timeout(),
             stdout_limit_bytes=output_limit_bytes,
             stderr_limit_bytes=output_limit_bytes,
             require_complete_stdout=True,
@@ -517,6 +524,7 @@ class FFmpegRunner:
                 "required media decoder limits are unavailable",
             )
         final_snapshots = self._snapshots()
+        bounded_timeout()
         if final_snapshots != initial_snapshots:
             raise configuration_error(
                 "MEDIA_TOOL_IDENTITY_CHANGED", "media tool changed during capability discovery"

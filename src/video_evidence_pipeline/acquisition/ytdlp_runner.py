@@ -23,6 +23,7 @@ from video_evidence_pipeline.acquisition.network_policy import (
     default_resolver,
     validate_network_url,
 )
+from video_evidence_pipeline.acquisition.process_tree import ManagedProcessTree
 from video_evidence_pipeline.acquisition.runtime import (
     AcquisitionDeadline,
     AcquisitionRuntimeConfig,
@@ -144,11 +145,9 @@ def default_ytdlp_toolchain(deadline: AcquisitionDeadline) -> YtdlpToolchain:
     try:
         runner = FFmpegRunner()
         ffmpeg, ffprobe = runner.discover_identities(
-            timeout_seconds=min(
-                _TOOL_DISCOVERY_TIMEOUT_SECONDS,
-                deadline.remaining(),
-            ),
+            timeout_seconds=_TOOL_DISCOVERY_TIMEOUT_SECONDS,
             output_limit_bytes=_TOOL_OUTPUT_LIMIT_BYTES,
+            remaining_seconds=deadline.remaining,
         )
         location = runner.pinned_bin_directory(ffmpeg, ffprobe)
     except VepError as exc:
@@ -357,18 +356,6 @@ def _failed_run_error(run_directory: Path, *, timed_out: bool = False) -> VepErr
     )
 
 
-def _stop_process(process: subprocess.Popen[bytes]) -> None:
-    with suppress(OSError):
-        process.terminate()
-    try:
-        process.wait(timeout=1)
-    except subprocess.TimeoutExpired:
-        with suppress(OSError):
-            process.kill()
-        with suppress(OSError, subprocess.TimeoutExpired):
-            process.wait(timeout=1)
-
-
 def _run_monitored_ytdlp(
     argv: list[str],
     *,
@@ -381,8 +368,9 @@ def _run_monitored_ytdlp(
 ) -> subprocess.CompletedProcess[bytes]:
     launch_error = None
     try:
-        process = process_factory(
+        process = ManagedProcessTree.start(
             argv,
+            process_factory=process_factory,
             shell=False,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -409,11 +397,12 @@ def _run_monitored_ytdlp(
                 )
             returncode = process.poll()
             if returncode is not None:
+                process.close()
                 return subprocess.CompletedProcess(argv, returncode)
             remaining = deadline.remaining()
             time.sleep(min(0.01, remaining))
     except Exception:
-        _stop_process(process)
+        process.stop()
         raise
 
 
