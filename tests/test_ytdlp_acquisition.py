@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
+from yt_dlp.options import create_parser
 
 from video_evidence_pipeline.acquisition.generic_ytdlp import GenericYtdlpAdapter
 from video_evidence_pipeline.acquisition.https_proxy import validating_https_proxy
@@ -91,7 +92,6 @@ def test_hardened_ytdlp_argv_is_fixed_and_single_file(tmp_path: Path) -> None:
         "never",
         "--no-continue",
         "--no-overwrites",
-        "--no-netrc",
         "--no-cookies",
         "--proxy",
         "http://127.0.0.1:43210",
@@ -111,8 +111,34 @@ def test_hardened_ytdlp_argv_is_fixed_and_single_file(tmp_path: Path) -> None:
         "--",
         "https://videos.example.invalid/watch?v=stable-id",
     ]
-    forbidden = {"--exec", "--external-downloader", "--use-postprocessor", "--cookies"}
+    forbidden = {
+        "--cookies",
+        "--exec",
+        "--external-downloader",
+        "--extractor-args",
+        "--netrc",
+        "--netrc-cmd",
+        "--netrc-location",
+        "--use-postprocessor",
+    }
     assert forbidden.isdisjoint(argv)
+
+
+def test_hardened_argv_is_accepted_by_pinned_ytdlp_parser(tmp_path: Path) -> None:
+    locator = "https://videos.example.invalid/watch?v=stable-id"
+    argv = hardened_argv(
+        locator,
+        tmp_path,
+        AcquisitionRuntimeConfig(maximum_download_bytes=12345),
+        proxy_url="http://127.0.0.1:43210",
+    )
+
+    parser = create_parser()
+    options, positional = parser.parse_args(argv[3:])
+
+    assert positional == [locator]
+    assert options.ignoreconfig is True
+    assert options.usenetrc is False
 
 
 def test_browser_cookie_is_only_added_when_explicit(tmp_path: Path) -> None:
@@ -147,6 +173,7 @@ def test_runner_uses_shell_false_and_disables_plugins(tmp_path: Path) -> None:
     kwargs = captured["kwargs"]
     assert isinstance(kwargs, dict)
     assert kwargs["shell"] is False
+    assert kwargs["stdin"] is subprocess.DEVNULL
     assert kwargs["stdout"] is subprocess.DEVNULL
     assert kwargs["stderr"] is subprocess.DEVNULL
     assert kwargs["cwd"] == staged.cleanup_root

@@ -149,7 +149,6 @@ def hardened_argv(
         "never",
         "--no-continue",
         "--no-overwrites",
-        "--no-netrc",
         "--no-cookies",
         "--proxy",
         proxy_url,
