@@ -260,7 +260,7 @@ def initialize_job(
     return workspace, job
 
 
-def _validate_job_unmapped(path: Path) -> dict[str, Any]:
+def _validate_job_unmapped(path: Path, *, deep: bool = False) -> dict[str, Any]:
     workspace, job, transitions, state = _load_context(path)
     if state is not JobState.CREATED:
         authorization = _authorization(workspace)
@@ -292,11 +292,13 @@ def _validate_job_unmapped(path: Path) -> dict[str, Any]:
         *authoring_states,
     }
     if state in acquired_states:
-        raw_artifact = verify_acquired_bundle(workspace, job)
+        raw_artifact = verify_acquired_bundle(workspace, job, deep=deep)
         if state in normalized_states:
-            media_manifest = load_normalization_result(workspace, job, raw_artifact).media_manifest
+            media_manifest = load_normalization_result(
+                workspace, job, raw_artifact, deep=deep
+            ).media_manifest
             if state in {JobState.TRANSCRIBED, *refinement_states}:
-                transcription = load_transcription_result(workspace, job, media_manifest)
+                transcription = load_transcription_result(workspace, job, media_manifest, deep=deep)
                 evidence_manifest = transcription.transcript_manifest
                 evidence_segments = transcription.segments
                 if state in refinement_states:
@@ -341,10 +343,10 @@ def _validate_job_unmapped(path: Path) -> dict[str, Any]:
     }
 
 
-def validate_job(path: Path) -> dict[str, Any]:
+def validate_job(path: Path, *, deep: bool = False) -> dict[str, Any]:
     _workspace, _job, _transitions, state = _load_context(path)
     try:
-        return _validate_job_unmapped(path)
+        return _validate_job_unmapped(path, deep=deep)
     except VepError as exc:
         if (
             state in {JobState.HUMAN_APPROVED, JobState.EXPORTED}

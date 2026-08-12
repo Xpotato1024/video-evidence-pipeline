@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import stat
+from collections.abc import Callable
 from enum import StrEnum
+from pathlib import Path
 from typing import Annotated, Literal, Self
 
 from pydantic import Field, StringConstraints, field_validator, model_validator
 
 from video_evidence_pipeline.domain import StrictModel, UtcDateTime
+from video_evidence_pipeline.domain.hashing import sha256_file
 from video_evidence_pipeline.domain.identifiers import Sha256, validate_relative_storage_path
 
 ArtifactId = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9._-]{0,127}$")]
+_VERIFIED_FILE_METADATA: dict[tuple[Path, str], tuple[int, int, int, int]] = {}
 
 
 class ProducerKind(StrEnum):
@@ -35,6 +40,47 @@ class ArtifactRef(StrictModel):
     @classmethod
     def storage_path_is_safe(cls, value: str) -> str:
         return validate_relative_storage_path(value)
+
+
+def artifact_file_matches(
+    path: Path,
+    artifact: ArtifactRef,
+    *,
+    deep: bool = False,
+    hasher: Callable[[Path], str] | None = None,
+) -> bool:
+    """Verify immutable publication metadata, hashing bytes only for explicit deep checks."""
+
+    before = path.stat(follow_symlinks=False)
+    if (
+        path.is_symlink()
+        or getattr(path, "is_junction", lambda: False)()
+        or not stat.S_ISREG(before.st_mode)
+        or before.st_size != artifact.size_bytes
+    ):
+        return False
+    after = path.stat(follow_symlinks=False)
+    stable = (
+        before.st_dev,
+        before.st_ino,
+        before.st_size,
+        before.st_mtime_ns,
+    )
+    if stable != (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+    ):
+        return False
+    key = (path.absolute(), artifact.content_sha256)
+    if deep:
+        if (hasher or sha256_file)(path) != artifact.content_sha256:
+            return False
+        _VERIFIED_FILE_METADATA[key] = stable
+        return True
+    previous = _VERIFIED_FILE_METADATA.setdefault(key, stable)
+    return previous == stable
 
 
 class EvidenceLedgerArtifactRef(ArtifactRef):

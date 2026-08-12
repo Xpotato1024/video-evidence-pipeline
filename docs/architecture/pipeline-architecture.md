@@ -167,7 +167,9 @@ transcriptionはnormalized text subtitleのうちcueが存在するstreamだけ�
 caption coverageが設定値以上ならASR package／modelを要求しません。不足時だけcoverage gapをprovider-neutral
 `AsrBackend`へ渡します。組込みadapterは完全なlocal faster-whisper model directoryだけをoffline／
 `local_files_only`でlazy loadし、model名からのdownload、cloud fallback、依存packageの暗黙追加を行いません。
-device、compute type、decode option、backend／library／model identityはfingerprintへ含めます。
+device `auto`はCTranslate2がusable CUDAとsupported compute typeを返した場合だけCUDAを選び、explicit CUDAは
+利用不能時にfail closedします。resolved device、compute type、device index、decode option、backend／library／model
+identityはfingerprintへ含めます。model directoryのfull fingerprintはprocess内でstable file metadataへ束縛して再利用します。
 
 各segmentはinteger millisecond、連続ID、source artifact／record／backend lineageを保持します。
 `raw_text`はcaption adapterまたはASR backendから受け取った文字列、`normalized_text`はNFKC＋空白正規化後の
@@ -330,10 +332,13 @@ fingerprintが一致し、出力検証が成功する場合は再利用できま
 network sourceは有効な`ACQUIRED` bundleをlocal検証して再利用し、通常の再実行でnetworkへ接続しません。
 `local_file`は再probeしてcontent changeを検出します。
 完全な`NORMALIZED` bundleの再実行は、保存済みtool version／executable SHA-256／capabilityを含むfingerprintと
-全artifactをlocal検証し、FFmpeg／ffprobe subprocessを起動せず再利用します。新規処理中はjob lockを保持せず、
+canonical path／regular file／link拒否／size／stable metadataをlocal検証し、stored artifact SHA-256を再利用して
+FFmpeg／ffprobe subprocessを起動しません。明示deep validation、size／metadata anomaly、crash recovery investigationだけ
+byte-level SHA-256を再計算します。新規処理中はjob lockを保持せず、
 snapshot取得と公開直前のstate／raw hash再検証だけをlock下で行います。
 `TRANSCRIBED`／`EVIDENCE_READY`／authoring／audit／revision／human-review／approval／exportもprimary manifest、stage manifest、
-全content artifact、semantic fingerprint、lineageをfull verifyしてから再利用します。semantic validationとprivate
+manifest binding、semantic fingerprint、lineageを検証してから再利用します。immutable large mediaは通常pathで再hashせず、
+semantic artifactと明示deep validationはbyte-level verifyを維持します。semantic validationとprivate
 staging中はtransition log lockを保持せず、公開直前の短いlock区間内でstate、authorization、job／fixed bundle、
 全履歴artifactのhashとsemantic bindingを再検証し、manifestとtransitionを最後にcommitします。
 author／audit／revisionでcontent artifact公開後かつprimary manifest前にprocessが停止した場合は、最後に公開した
