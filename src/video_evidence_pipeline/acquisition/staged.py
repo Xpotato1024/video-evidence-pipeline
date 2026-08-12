@@ -16,6 +16,7 @@ from video_evidence_pipeline.domain.artifacts import (
     ArtifactRef,
     ProducerIdentity,
     ProducerKind,
+    artifact_file_matches,
 )
 from video_evidence_pipeline.domain.hashing import sha256_file
 from video_evidence_pipeline.domain.identifiers import sanitize_filename
@@ -115,9 +116,14 @@ def _verify_staged_file(path: Path, *, maximum_bytes: int) -> tuple[int, str]:
         raise io_error("SOURCE_STAGING_FAILED", "staged source could not be verified") from exc
 
 
-def _verify_raw(path: Path, artifact: ArtifactRef) -> None:
-    size, content_sha256 = _verify_staged_file(path, maximum_bytes=artifact.size_bytes)
-    if size != artifact.size_bytes or content_sha256 != artifact.content_sha256:
+def _verify_raw(path: Path, artifact: ArtifactRef, *, deep: bool = False) -> None:
+    try:
+        matches = artifact_file_matches(path, artifact, deep=deep, hasher=sha256_file)
+        if matches:
+            enforce_private_file(path)
+    except OSError as exc:
+        raise io_error("ARTIFACT_READ_FAILED", "raw artifact could not be verified") from exc
+    if not matches:
         raise integrity_error("ARTIFACT_INTEGRITY_FAILED", "raw artifact integrity is invalid")
 
 
@@ -228,7 +234,9 @@ def recover_network_result(
     )
 
 
-def verify_network_bundle(workspace: JobWorkspace, job: JobSpec) -> ArtifactRef:
+def verify_network_bundle(
+    workspace: JobWorkspace, job: JobSpec, *, deep: bool = False
+) -> ArtifactRef:
     source_manifest = read_json_model(
         workspace.source_manifest_json, SourceManifest, code="SOURCE_MANIFEST_INVALID"
     )
@@ -236,7 +244,7 @@ def verify_network_bundle(workspace: JobWorkspace, job: JobSpec) -> ArtifactRef:
         workspace.acquisition_manifest_json, StageManifest, code="STAGE_MANIFEST_INVALID"
     )
     artifact = _validate_network_manifests(source_manifest, stage_manifest, job)
-    _verify_raw(workspace.safe_path(artifact.relative_storage_path), artifact)
+    _verify_raw(workspace.safe_path(artifact.relative_storage_path), artifact, deep=deep)
     return artifact
 
 
@@ -277,7 +285,7 @@ def publish_staged_source(
         copy_result = atomic_copy_exclusive(
             staged.path,
             target,
-            verifier=lambda candidate: _verify_raw(candidate, artifact),
+            verifier=lambda candidate: _verify_raw(candidate, artifact, deep=True),
         )
         _verify_raw(target, artifact)
         created_at = datetime.now(UTC)

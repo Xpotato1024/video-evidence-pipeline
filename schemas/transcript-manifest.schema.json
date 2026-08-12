@@ -189,8 +189,12 @@
           "type": "integer"
         },
         "asr_compute_type": {
-          "const": "int8",
-          "default": "int8",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "int8",
+            "float16"
+          ],
           "title": "Asr Compute Type",
           "type": "string"
         },
@@ -201,8 +205,12 @@
           "type": "boolean"
         },
         "asr_device": {
-          "const": "cpu",
-          "default": "cpu",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "cpu",
+            "cuda"
+          ],
           "title": "Asr Device",
           "type": "string"
         },

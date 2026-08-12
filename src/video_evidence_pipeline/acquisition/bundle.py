@@ -8,10 +8,12 @@ from video_evidence_pipeline.domain.job import JobSpec, SourceKind
 from video_evidence_pipeline.storage.layout import JobWorkspace
 
 
-def verify_acquired_bundle(workspace: JobWorkspace, job: JobSpec) -> ArtifactRef:
+def verify_acquired_bundle(
+    workspace: JobWorkspace, job: JobSpec, *, deep: bool = False
+) -> ArtifactRef:
     if job.source.kind is SourceKind.LOCAL_FILE:
-        return verify_local(workspace, job)
-    return verify_network_bundle(workspace, job)
+        return verify_local(workspace, job, deep=deep)
+    return verify_network_bundle(workspace, job, deep=deep)
 
 
 def reuse_acquired_network_bundle(

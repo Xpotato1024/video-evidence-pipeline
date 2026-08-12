@@ -14,7 +14,12 @@ from pathlib import Path
 from pydantic import BaseModel, ValidationError
 
 from video_evidence_pipeline import __version__
-from video_evidence_pipeline.domain.artifacts import ArtifactRef, ProducerIdentity, ProducerKind
+from video_evidence_pipeline.domain.artifacts import (
+    ArtifactRef,
+    ProducerIdentity,
+    ProducerKind,
+    artifact_file_matches,
+)
 from video_evidence_pipeline.domain.hashing import sha256_file
 from video_evidence_pipeline.domain.job import JobSpec
 from video_evidence_pipeline.domain.manifests import StageManifest, StageStatus
@@ -428,7 +433,11 @@ def prepare_transcript(
         if backend is None:
             from video_evidence_pipeline.transcription.faster_whisper import FasterWhisperBackend
 
-            backend = FasterWhisperBackend(model_directory)
+            backend = FasterWhisperBackend(
+                model_directory,
+                device=config.asr_device,
+                compute_type=config.asr_compute_type,
+            )
         selected_artifacts_list.append(media_manifest.speech_audio.artifact)
         asr_backend = backend.identity()
         if asr_backend.source is not TranscriptSource.ASR:
@@ -553,15 +562,9 @@ def cleanup_attempt(workspace: JobWorkspace, attempt: Path) -> None:
     shutil.rmtree(attempt)
 
 
-def _verify_artifact(path: Path, artifact: ArtifactRef) -> None:
+def _verify_artifact(path: Path, artifact: ArtifactRef, *, deep: bool = False) -> None:
     try:
-        metadata = path.stat(follow_symlinks=False)
-        if (
-            path.is_symlink()
-            or not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_size != artifact.size_bytes
-            or sha256_file(path) != artifact.content_sha256
-        ):
+        if not artifact_file_matches(path, artifact, deep=True, hasher=sha256_file):
             raise integrity_error("TRANSCRIPT_BUNDLE_TAMPERED", "transcript artifact is invalid")
         enforce_private_file(path)
     except OSError:
@@ -587,9 +590,9 @@ def _publish_segments(workspace: JobWorkspace, staged_path: Path, payload: bytes
     ensure_private_directory(target.parent.parent)
     ensure_private_directory(target.parent)
     atomic_copy_exclusive(
-        staged_path, target, verifier=lambda item: _verify_artifact(item, artifact)
+        staged_path, target, verifier=lambda item: _verify_artifact(item, artifact, deep=True)
     )
-    _verify_artifact(target, artifact)
+    _verify_artifact(target, artifact, deep=True)
     return artifact
 
 
@@ -632,7 +635,7 @@ def publish_transcript(
         + sha256_file(staged_path)
         + "/transcript.jsonl",
     )
-    _verify_artifact(staged_path, staged_artifact)
+    _verify_artifact(staged_path, staged_artifact, deep=True)
     _read_segments(staged_path, prepared.configuration, prepared.duration_ms)
     segments_artifact = _publish_segments(workspace, staged_path, payload)
     created_at = datetime.now(UTC)
@@ -744,6 +747,8 @@ def _verify_transcript_manifest(
     media_manifest: MediaManifest,
     manifest: TranscriptManifest,
     expected_config: TranscriptionConfig | None,
+    *,
+    deep: bool = False,
 ) -> tuple[TranscriptManifest, tuple[TranscriptSegment, ...]]:
     media_fingerprint = media_bundle_fingerprint(media_manifest)
     if (
@@ -780,7 +785,7 @@ def _verify_transcript_manifest(
             "TRANSCRIPT_MANIFEST_MISMATCH", "transcript source artifact is unknown"
         )
     segments_path = workspace.safe_path(manifest.segments_artifact.relative_storage_path)
-    _verify_artifact(segments_path, manifest.segments_artifact)
+    _verify_artifact(segments_path, manifest.segments_artifact, deep=deep)
     segments = _read_segments(segments_path, manifest.configuration, manifest.duration_ms)
     gaps, overlaps = _intervals(segments, manifest.duration_ms)
     backend_by_fingerprint = {fingerprint(item): item for item in manifest.backends}
@@ -925,13 +930,16 @@ def verify_transcript_bundle(
     media_manifest: MediaManifest,
     *,
     expected_config: TranscriptionConfig | None = None,
+    deep: bool = False,
 ) -> tuple[TranscriptManifest, tuple[TranscriptSegment, ...]]:
     manifest = _read_bounded_json_model(
         workspace.transcript_manifest_json,
         TranscriptManifest,
         code="TRANSCRIPT_MANIFEST_INVALID",
     )
-    return _verify_transcript_manifest(workspace, job, media_manifest, manifest, expected_config)
+    return _verify_transcript_manifest(
+        workspace, job, media_manifest, manifest, expected_config, deep=deep
+    )
 
 
 def load_transcription_result(
@@ -940,11 +948,12 @@ def load_transcription_result(
     media_manifest: MediaManifest | None = None,
     *,
     expected_config: TranscriptionConfig | None = None,
+    deep: bool = False,
 ) -> TranscriptionResult:
     if media_manifest is None:
         raise integrity_error("TRANSCRIPT_CONTEXT_MISSING", "media manifest is required")
     manifest, segments = verify_transcript_bundle(
-        workspace, job, media_manifest, expected_config=expected_config
+        workspace, job, media_manifest, expected_config=expected_config, deep=deep
     )
     stage = _read_bounded_json_model(
         workspace.transcription_stage_manifest_json,

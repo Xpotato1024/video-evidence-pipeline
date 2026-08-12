@@ -169,8 +169,8 @@ class TranscriptionConfig(StrictModel):
     gap_policy: GapPolicy = GapPolicy.RECORD
     overlap_policy: OverlapPolicy = OverlapPolicy.PRESERVE
     asr_language: str | None = Field(default=None, min_length=1, max_length=64)
-    asr_device: Literal["cpu"] = "cpu"
-    asr_compute_type: Literal["int8"] = "int8"
+    asr_device: Literal["auto", "cpu", "cuda"] = "auto"
+    asr_compute_type: Literal["auto", "int8", "float16"] = "auto"
     asr_beam_size: Literal[5] = 5
     asr_temperature: Literal[0.0] = 0.0
     asr_condition_on_previous_text: Literal[False] = False

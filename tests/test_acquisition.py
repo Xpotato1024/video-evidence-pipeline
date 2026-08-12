@@ -75,6 +75,32 @@ def test_valid_local_file_acquisition(tmp_path: Path) -> None:
     assert len(read_jsonl(job_path / "manifests/transitions.jsonl", TransitionRecord)) == 3
 
 
+def test_job_validation_reuses_hash_unless_deep_is_requested(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "synthetic.bin"
+    source.write_bytes(b"synthetic source bytes")
+    job_path = initialized_job(tmp_path, source)
+    authorize(job_path)
+    acquire_job(job_path)
+    import video_evidence_pipeline.acquisition.local_file as local_file_module
+
+    original = local_file_module.sha256_file
+    calls = 0
+
+    def counted(path: Path) -> str:
+        nonlocal calls
+        calls += 1
+        return original(path)
+
+    monkeypatch.setattr(local_file_module, "sha256_file", counted)
+
+    assert validate_job(job_path)["valid"] is True
+    assert calls == 0
+    assert validate_job(job_path, deep=True)["valid"] is True
+    assert calls == 1
+
+
 @pytest.mark.parametrize("kind", ["missing", "empty", "directory"])
 def test_invalid_local_sources_are_rejected(tmp_path: Path, kind: str) -> None:
     source = tmp_path / "source.bin"
