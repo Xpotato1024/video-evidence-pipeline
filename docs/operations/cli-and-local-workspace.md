@@ -38,6 +38,7 @@ vep --version
 vep job init
 vep job validate
 vep job recover PARENT NEW-JOB-ID --confirm --basis TEXT
+vep job validate --deep
 vep job authorize
 vep job status
 vep acquire
@@ -265,8 +266,10 @@ stable metadataで再検証するためpersistentまたは偶発的replacement�
 per-subtitle上限を`stat`で確認してから実行します。frame indexはseek要求値ではなくobserved FFmpeg PTSを保存し、
 要求candidateは理由とともに別フィールドへ残します。処理前snapshotと公開直前のstate／raw hashをlock下で再検証し、
 競合bundleのfingerprintが異なれば拒否します。decoder slotのdefaultはvideo 34,070,528、audio 1,048,576で、
-configでもこのhard capを超えられません。完全bundleの再実行、`job validate`、`job status`は保存済みtool identity込み
-fingerprint、全artifact hash、media manifest、normalization stage manifestを検証し、subprocessなしで再利用します。
+configでもこのhard capを超えられません。完全bundleの再実行、通常の`job validate`、`job status`は保存済みtool identity込み
+fingerprint、canonical path／regular file／link拒否／size／stable metadata、media manifest、normalization stage manifestを検証し、
+保存済みSHA-256をidentityとしてsubprocessと大容量artifactの再hashなしで再利用します。byte-level再検証は
+`job validate --deep`で明示します。
 partial manifestは検証可能な完全artifactがある場合だけ復旧します。
 
 audio primaryはspeech WAVだけを生成し、video proxy／subtitle／frame extractionを行いません。transcript primaryは
@@ -275,12 +278,16 @@ FFmpegを起動せず、raw artifactへ束縛したno-media normalization manife
 ## Transcription
 
 `vep transcribe JOB [--preferred-language LANG] [--minimum-caption-coverage N] [--asr-model-directory DIR]`
+`[--asr-device auto|cpu|cuda] [--asr-compute-type auto|int8|float16]`
 は検証済み`NORMALIZED` bundleだけを入力とします。cueがあるnormalized subtitleを言語、
 `official → embedded → sidecar`、default、non-forced、stream indexで決定的に選び、coverageが十分なら
 subtitleだけで`TRANSCRIBED`へ進みます。不足区間がある場合だけspeech audioをASRへ渡します。
 
 組込みfaster-whisper adapterは既存の完全なabsolute local model directoryだけを受け付け、
-`local_files_only`、offline環境、固定device／compute／decode optionでlazy loadします。packageやmodel fileが
+`local_files_only`、offline環境、固定decode optionでlazy loadします。device／computeの既定`auto`はCTranslate2の
+runtime probeを使い、usable CUDAでは`cuda`／`float16`、それ以外は`cpu`／`int8`を選びます。explicit `cuda`が
+利用不能な場合はCPUへfallbackせずstructured errorで停止します。resolved device／compute／device indexはbackend
+identityへ含めます。packageやmodel fileが
 ない場合はdownloadせずstructured errorで停止します。captionだけのjobはpackage／model不要です。
 segmentは連続ID、integer millisecond、gap／overlap、source／backend lineageを検証します。
 `raw_text`はadapter出力を保持し、`normalized_text`はNFKC＋空白正規化後の値です。subtitle source markupの
@@ -321,9 +328,9 @@ limitは1〜100、indexed textは64 MiB、DBは512 MiBに制限します。metad
 fingerprint、tokenizer、normalizer、query／builder／implementation version、SQLite capabilityを保持します。
 stale／corrupt cacheは専用lock下のprivate stagingで再構築し、SQLiteとFTS integrity check後にatomic publishします。
 
-`job validate`と`job status`は`TRANSCRIBED`以降でも全upstream artifact、transcript／evidence／authoring／audit／
-revision／human-review／approval／export manifest、ledger、lineageをfull verifyし、canonical JSON／JSONLからindexを再構築できることを
-確認します。
+`job validate`と`job status`は`TRANSCRIBED`以降でも全upstream binding、transcript／evidence／authoring／audit／
+revision／human-review／approval／export manifest、ledger、lineageを検証し、canonical JSON／JSONLからindexを再構築できることを
+確認します。通常経路ではimmutableな大容量mediaのstored SHA-256を再利用し、`job validate --deep`だけがbyte-level SHA-256を再計算します。
 
 ## Authoring／audit／revision exchange
 

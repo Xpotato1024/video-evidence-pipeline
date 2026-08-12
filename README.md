@@ -53,7 +53,8 @@ uv run vep job authorize .local/jobs/demo-report \
   --deny-external-api
 uv run vep acquire .local/jobs/demo-report
 uv run vep normalize .local/jobs/demo-report
-uv run vep transcribe .local/jobs/demo-report --preferred-language ja
+uv run vep transcribe .local/jobs/demo-report --preferred-language ja \
+  --asr-device auto --asr-compute-type auto
 uv run vep refine prepare .local/jobs/demo-report
 # refinement/request.jsonを固定入力として、認可済みresponse.jsonを別途用意する
 uv run vep refine import .local/jobs/demo-report --response /path/to/refinement-response.json
@@ -62,6 +63,8 @@ uv run vep evidence prepare .local/jobs/demo-report
 uv run vep evidence import .local/jobs/demo-report --response /path/to/response.json
 uv run vep index build .local/jobs/demo-report
 uv run vep search .local/jobs/demo-report "検索語" --limit 20
+# byte-level integrity investigationが必要な場合だけ大容量artifactも再hashする
+uv run vep job validate .local/jobs/demo-report --deep
 # author／audit（必要ならrevision）のvalidated exchange後、表示されたtarget SHAを人間が確認する
 uv run vep approve .local/jobs/demo-report \
   --approval-target-sha256 <reviewed-draft-sha256> \

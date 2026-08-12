@@ -6,7 +6,7 @@ import json
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import typer
 from pydantic import ValidationError
@@ -219,9 +219,10 @@ def job_init(
 @job_app.command("validate")
 def job_validate(
     workspace: Path,
+    deep: Annotated[bool, typer.Option("--deep")] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    result = _run(lambda: validate_job(workspace), json_output=json_output)
+    result = _run(lambda: validate_job(workspace, deep=deep), json_output=json_output)
     _emit({"ok": True, **result}, json_output=json_output)
 
 
@@ -469,6 +470,14 @@ def transcribe(
             help="Existing local faster-whisper model directory; never downloaded.",
         ),
     ] = None,
+    asr_device: Annotated[
+        Literal["auto", "cpu", "cuda"],
+        typer.Option("--asr-device"),
+    ] = "auto",
+    asr_compute_type: Annotated[
+        Literal["auto", "int8", "float16"],
+        typer.Option("--asr-compute-type"),
+    ] = "auto",
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     config = TranscriptionConfig(
@@ -477,6 +486,8 @@ def transcribe(
         gap_policy=gap_policy,
         overlap_policy=overlap_policy,
         asr_language=asr_language,
+        asr_device=asr_device,
+        asr_compute_type=asr_compute_type,
     )
     result = _run(
         lambda: transcribe_job(

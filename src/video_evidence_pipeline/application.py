@@ -320,6 +320,9 @@ def _load_recovery_manifest(workspace: JobWorkspace, job: JobSpec) -> RecoveryMa
         or tuple(manifest.parent_finding_ids) != parent.finding_ids
         or manifest.recovery_basis != authorization.authorization_basis
         or manifest.created_at != authorization.confirmed_at
+        or authorization.allow_local_processing != parent.authorization.allow_local_processing
+        or authorization.allow_network_acquisition != parent.authorization.allow_network_acquisition
+        or authorization.allow_external_api != parent.authorization.allow_external_api
     ):
         raise integrity_error(
             "RECOVERY_PROVENANCE_MISMATCH",
@@ -595,87 +598,109 @@ def recover_job(
         ),
     )
     jobs_root = qualified.workspace.jobs_root
-    pending_child = JobWorkspace(root=jobs_root / child_job.job_id, jobs_root=jobs_root)
-    target_was_absent = not pending_child.root.exists()
-    child = pending_child
-    child_created = False
-    try:
-        child = JobWorkspace.create(qualified.workspace.jobs_root.parent.parent, child_job.job_id)
-        child_created = True
-        atomic_write_new_bytes(
-            child.job_yaml,
-            job_to_yaml(child_job).encode("utf-8"),
-            private=True,
-        )
-        append_jsonl(
-            child.transitions_jsonl,
-            TransitionRecord(
-                sequence=1,
-                job_id=child_job.job_id,
-                from_state=None,
-                to_state=JobState.CREATED,
-                trigger="job.init",
-                occurred_at=datetime.now(UTC),
-                job_fingerprint=child_fingerprint,
-            ),
-        )
-        _copy_recovery_artifacts(qualified.workspace, child, artifacts)
-        atomic_write_json(child.source_manifest_json, child_source, private=True)
-        atomic_write_json(child.acquisition_manifest_json, child_source_stage, private=True)
-        atomic_write_json(child.media_manifest_json, child_media, private=True)
-        atomic_write_json(child.normalization_manifest_json, child_media_stage, private=True)
-        atomic_write_json(child.transcript_manifest_json, child_transcript, private=True)
-        atomic_write_json(
-            child.transcription_stage_manifest_json,
-            child_transcript_stage,
-            private=True,
-        )
-        if child_supporting is not None:
-            atomic_write_json(child.supporting_manifest_json, child_supporting, private=True)
-        atomic_write_json(child.recovery_manifest_json, recovery, private=True)
-        atomic_write_json(child.authorization_json, authorization, private=True)
-        with exclusive_append_lock(child.transitions_jsonl):
-            _append_transition_locked(
-                child,
-                child_job,
-                from_state=JobState.CREATED,
-                to_state=JobState.AUTHORIZED,
-                trigger="recovery.authorize",
+    recovery_lock = jobs_root / f".{child_job.job_id}.recovery.lock"
+    with exclusive_file_lock(
+        recovery_lock,
+        busy_code="RECOVERY_CHILD_BUSY",
+        busy_message="recovery child is already being created",
+        failure_code="RECOVERY_CHILD_LOCK_FAILED",
+        failure_message="recovery child creation could not be locked",
+    ):
+        pending_child = JobWorkspace(root=jobs_root / child_job.job_id, jobs_root=jobs_root)
+        target_was_absent = not pending_child.root.exists()
+        child = pending_child
+        child_created = False
+        try:
+            child = JobWorkspace.create(
+                qualified.workspace.jobs_root.parent.parent, child_job.job_id
             )
-            _append_transition_locked(
-                child,
-                child_job,
-                from_state=JobState.AUTHORIZED,
-                to_state=JobState.ACQUIRED,
-                trigger="recovery.reuse-source",
+            child_created = True
+            atomic_write_new_bytes(
+                child.job_yaml,
+                job_to_yaml(child_job).encode("utf-8"),
+                private=True,
             )
-            _append_transition_locked(
-                child,
-                child_job,
-                from_state=JobState.ACQUIRED,
-                to_state=JobState.NORMALIZED,
-                trigger="recovery.reuse-normalization",
+            append_jsonl(
+                child.transitions_jsonl,
+                TransitionRecord(
+                    sequence=1,
+                    job_id=child_job.job_id,
+                    from_state=None,
+                    to_state=JobState.CREATED,
+                    trigger="job.init",
+                    occurred_at=datetime.now(UTC),
+                    job_fingerprint=child_fingerprint,
+                ),
             )
-            _append_transition_locked(
-                child,
-                child_job,
-                from_state=JobState.NORMALIZED,
-                to_state=JobState.TRANSCRIBED,
-                trigger="recovery.reuse-transcript",
+            _copy_recovery_artifacts(qualified.workspace, child, artifacts)
+            atomic_write_json(child.source_manifest_json, child_source, private=True)
+            atomic_write_json(child.acquisition_manifest_json, child_source_stage, private=True)
+            atomic_write_json(child.media_manifest_json, child_media, private=True)
+            atomic_write_json(child.normalization_manifest_json, child_media_stage, private=True)
+            atomic_write_json(child.transcript_manifest_json, child_transcript, private=True)
+            atomic_write_json(
+                child.transcription_stage_manifest_json,
+                child_transcript_stage,
+                private=True,
             )
-        _load_recovery_manifest(child, child_job)
-        validate_job(child.root)
-    except Exception as exc:
-        create_conflict = isinstance(exc, VepError) and exc.code == "JOB_EXISTS"
-        if child_created or (target_was_absent and child.root.exists() and not create_conflict):
-            _discard_failed_recovery_child(child)
-        raise
+            if child_supporting is not None:
+                atomic_write_json(child.supporting_manifest_json, child_supporting, private=True)
+            atomic_write_json(child.recovery_manifest_json, recovery, private=True)
+            atomic_write_json(child.authorization_json, authorization, private=True)
+            with exclusive_append_lock(child.transitions_jsonl):
+                _append_transition_locked(
+                    child,
+                    child_job,
+                    from_state=JobState.CREATED,
+                    to_state=JobState.AUTHORIZED,
+                    trigger="recovery.authorize",
+                )
+                _append_transition_locked(
+                    child,
+                    child_job,
+                    from_state=JobState.AUTHORIZED,
+                    to_state=JobState.ACQUIRED,
+                    trigger="recovery.reuse-source",
+                )
+                _append_transition_locked(
+                    child,
+                    child_job,
+                    from_state=JobState.ACQUIRED,
+                    to_state=JobState.NORMALIZED,
+                    trigger="recovery.reuse-normalization",
+                )
+                _append_transition_locked(
+                    child,
+                    child_job,
+                    from_state=JobState.NORMALIZED,
+                    to_state=JobState.TRANSCRIBED,
+                    trigger="recovery.reuse-transcript",
+                )
+            _load_recovery_manifest(child, child_job)
+            validate_job(child.root)
+        except Exception as exc:
+            create_conflict = isinstance(exc, VepError) and exc.code == "JOB_EXISTS"
+            if child_created or (target_was_absent and child.root.exists() and not create_conflict):
+                _discard_failed_recovery_child(child)
+            raise
     return RecoveryResult(workspace=child, job=child_job, manifest=recovery)
 
 
-def _validate_job_unmapped(path: Path) -> dict[str, Any]:
+def _validate_job_unmapped(path: Path, *, deep: bool = False) -> dict[str, Any]:
     workspace, job, transitions, state = _load_context(path)
-    if workspace.recovery_manifest_json.exists():
+    recovery_triggers = (
+        "recovery.authorize",
+        "recovery.reuse-source",
+        "recovery.reuse-normalization",
+        "recovery.reuse-transcript",
+    )
+    is_recovery_child = tuple(record.trigger for record in transitions[1:5]) == recovery_triggers
+    if is_recovery_child and not workspace.recovery_manifest_json.exists():
+        raise integrity_error(
+            "RECOVERY_PROVENANCE_MISMATCH",
+            "recovery child is missing its required provenance manifest",
+        )
+    if is_recovery_child:
         _load_recovery_manifest(workspace, job)
     if state is not JobState.CREATED:
         authorization = _authorization(workspace)
@@ -707,11 +732,13 @@ def _validate_job_unmapped(path: Path) -> dict[str, Any]:
         *authoring_states,
     }
     if state in acquired_states:
-        raw_artifact = verify_acquired_bundle(workspace, job)
+        raw_artifact = verify_acquired_bundle(workspace, job, deep=deep)
         if state in normalized_states:
-            media_manifest = load_normalization_result(workspace, job, raw_artifact).media_manifest
+            media_manifest = load_normalization_result(
+                workspace, job, raw_artifact, deep=deep
+            ).media_manifest
             if state in {JobState.TRANSCRIBED, *refinement_states}:
-                transcription = load_transcription_result(workspace, job, media_manifest)
+                transcription = load_transcription_result(workspace, job, media_manifest, deep=deep)
                 evidence_manifest = transcription.transcript_manifest
                 evidence_segments = transcription.segments
                 if state in refinement_states:
@@ -756,10 +783,10 @@ def _validate_job_unmapped(path: Path) -> dict[str, Any]:
     }
 
 
-def validate_job(path: Path) -> dict[str, Any]:
+def validate_job(path: Path, *, deep: bool = False) -> dict[str, Any]:
     _workspace, _job, _transitions, state = _load_context(path)
     try:
-        return _validate_job_unmapped(path)
+        return _validate_job_unmapped(path, deep=deep)
     except VepError as exc:
         if (
             state in {JobState.HUMAN_APPROVED, JobState.EXPORTED}

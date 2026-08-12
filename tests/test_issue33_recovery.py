@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -531,6 +532,134 @@ def test_recovery_copy_failure_removes_partial_child_and_allows_same_id_retry(
     assert _file_bytes(parent.root) == parent_before
 
 
+def test_concurrent_recovery_same_child_id_fails_closed_and_preserves_winner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent, _blocked = _blocked_parent(tmp_path, "racep", category="content-integrity")
+    parent_before = _file_bytes(parent.root)
+    copy_started = threading.Event()
+    release_copy = threading.Event()
+    original_copy = application_module._copy_recovery_artifacts
+
+    def blocking_copy(*args, **kwargs) -> None:
+        copy_started.set()
+        if not release_copy.wait(timeout=5):
+            raise RuntimeError("concurrent recovery test timed out")
+        original_copy(*args, **kwargs)
+
+    monkeypatch.setattr(application_module, "_copy_recovery_artifacts", blocking_copy)
+    results = []
+    failures: list[BaseException] = []
+
+    def recover() -> None:
+        try:
+            results.append(
+                recover_job(
+                    parent.root,
+                    "racec",
+                    confirm=True,
+                    basis="serialize recovery creation for the same child ID",
+                )
+            )
+        except BaseException as exc:  # pragma: no cover - asserted below
+            failures.append(exc)
+
+    first = threading.Thread(target=recover)
+    second = threading.Thread(target=recover)
+    first.start()
+    assert copy_started.wait(timeout=5)
+    second.start()
+    second.join(timeout=5)
+    release_copy.set()
+    first.join(timeout=5)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert len(results) == 1
+    assert len(failures) == 1
+    assert isinstance(failures[0], VepError)
+    assert failures[0].code == "RECOVERY_CHILD_BUSY"
+    assert validate_job(results[0].workspace.root)["state"] == JobState.TRANSCRIBED.value
+    assert _file_bytes(parent.root) == parent_before
+
+
+def test_recovery_and_job_init_atomically_claim_same_child_id(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent, _blocked = _blocked_parent(tmp_path, "initracep", category="content-integrity")
+    parent_before = _file_bytes(parent.root)
+    child_id = "initracec"
+    child_root = parent.jobs_root / child_id
+    recovery_at_claim = threading.Event()
+    release_recovery = threading.Event()
+    path_type = type(child_root)
+    original_mkdir = path_type.mkdir
+
+    def synchronized_root_mkdir(path: Path, *args, **kwargs) -> None:
+        if (
+            path.name == child_id
+            and path.parent.name == "jobs"
+            and threading.current_thread().name == "recovery-claim"
+        ):
+            recovery_at_claim.set()
+            if not release_recovery.wait(timeout=10):
+                raise RuntimeError("recovery root claim test timed out")
+        original_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(path_type, "mkdir", synchronized_root_mkdir)
+    source = tmp_path / "ordinary-source.txt"
+    source.write_text("ordinary job source", encoding="utf-8")
+    results: dict[str, object] = {}
+    failures: list[BaseException] = []
+
+    def recover() -> None:
+        try:
+            results["recovery"] = recover_job(
+                parent.root,
+                child_id,
+                confirm=True,
+                basis="atomically claim the recovery child workspace",
+            )
+        except BaseException as exc:  # pragma: no cover - asserted below
+            failures.append(exc)
+
+    def initialize() -> None:
+        try:
+            results["ordinary"] = initialize_job(
+                parent.jobs_root.parent.parent,
+                job_id=child_id,
+                source_kind=SourceKind.LOCAL_FILE,
+                source=str(source),
+                task_type="report",
+                language="ja",
+                output_format="markdown",
+            )
+        except BaseException as exc:  # pragma: no cover - asserted below
+            failures.append(exc)
+
+    recovery_thread = threading.Thread(target=recover, name="recovery-claim")
+    ordinary_thread = threading.Thread(target=initialize)
+    recovery_thread.start()
+    assert recovery_at_claim.wait(timeout=10)
+    ordinary_thread.start()
+    ordinary_thread.join(timeout=10)
+    release_recovery.set()
+    recovery_thread.join(timeout=10)
+
+    assert not recovery_thread.is_alive()
+    assert not ordinary_thread.is_alive()
+    assert results.keys() == {"ordinary"}
+    assert len(failures) == 1
+    assert isinstance(failures[0], VepError)
+    assert failures[0].code == "JOB_EXISTS"
+    assert child_root.exists()
+    assert (child_root / "job.yaml").exists()
+    assert validate_job(child_root)["state"] == JobState.CREATED.value
+    assert _file_bytes(parent.root) == parent_before
+
+
 def test_recovery_provenance_tamper_is_rejected_against_the_parent(tmp_path: Path) -> None:
     parent, _blocked = _blocked_parent(tmp_path, "tamperp", category="content-integrity")
     recovered = recover_job(
@@ -542,6 +671,53 @@ def test_recovery_provenance_tamper_is_rejected_against_the_parent(tmp_path: Pat
     payload = json.loads(recovered.workspace.recovery_manifest_json.read_text("utf-8"))
     payload["parent_final_draft_sha256"] = "0" * 64
     recovered.workspace.recovery_manifest_json.write_text(
+        json.dumps(payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(VepError) as captured:
+        validate_job(recovered.workspace.root)
+    assert captured.value.code == "RECOVERY_PROVENANCE_MISMATCH"
+
+
+def test_recovery_provenance_manifest_deletion_is_rejected(tmp_path: Path) -> None:
+    parent, _blocked = _blocked_parent(tmp_path, "missingp", category="content-integrity")
+    recovered = recover_job(
+        parent.root,
+        "missingc",
+        confirm=True,
+        basis="recovery transitions require immutable provenance",
+    )
+    recovered.workspace.recovery_manifest_json.unlink()
+
+    with pytest.raises(VepError) as captured:
+        validate_job(recovered.workspace.root)
+    assert captured.value.code == "RECOVERY_PROVENANCE_MISMATCH"
+
+
+@pytest.mark.parametrize(
+    ("permission", "slug"),
+    [
+        ("allow_local_processing", "local"),
+        ("allow_network_acquisition", "network"),
+        ("allow_external_api", "external"),
+    ],
+)
+def test_recovery_authorization_permission_tamper_is_rejected_against_the_parent(
+    tmp_path: Path,
+    permission: str,
+    slug: str,
+) -> None:
+    parent, _blocked = _blocked_parent(tmp_path, f"auth-{slug}-p", category="content-integrity")
+    recovered = recover_job(
+        parent.root,
+        f"auth-{slug}-c",
+        confirm=True,
+        basis="preserve parent authorization permissions",
+    )
+    payload = json.loads(recovered.workspace.authorization_json.read_text("utf-8"))
+    payload[permission] = not payload[permission]
+    recovered.workspace.authorization_json.write_text(
         json.dumps(payload, ensure_ascii=False),
         encoding="utf-8",
     )
