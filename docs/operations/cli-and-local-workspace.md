@@ -37,6 +37,7 @@ primary指定を持たない既存v1 video jobは`TRANSCRIBED → EVIDENCE_READY
 vep --version
 vep job init
 vep job validate
+vep job recover PARENT NEW-JOB-ID --confirm --basis TEXT
 vep job validate --deep
 vep job authorize
 vep job status
@@ -82,6 +83,22 @@ vep job init demo-report \
   --requirement "separate facts from inference" \
   --output-format markdown
 ```
+
+## Bounded BLOCKED recovery
+
+`vep job recover PARENT NEW-JOB-ID --confirm --basis TEXT` is a narrow fork, not an
+in-place repair. It accepts only a parent whose latest transition is `AUDITED → BLOCKED`,
+whose draft revision count is 2, and whose material P0/P1 findings are all in the exact
+`content-integrity` category. It leaves the parent bytes, state, and transition log
+unchanged.
+
+The child receives a new job-bound authorization record with the parent's
+`allow_local_processing`, `allow_network_acquisition`, and `allow_external_api` values.
+It reuses and locally verifies only the source, normalization, canonical raw transcript,
+and declared supporting-input artifacts, writes `manifests/recovery-manifest.json`, and
+records fresh transitions through `TRANSCRIBED`. Refinement, evidence, authoring, audit,
+human review, approval, and export are not copied. Network source bundles, including Box,
+are rebound to the child and are never acquired again by recovery.
 
 ## Authorization flow
 

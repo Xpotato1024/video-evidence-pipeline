@@ -94,6 +94,25 @@ synthetic fixture実行は内部test routeだけです。
 `vep approve`はAI／Skill実行ではなく、対象SHA、reviewer、basis、`--confirm`を明示する人間操作です。
 reviewer identityはlocal CLIの自己申告lineageであり、暗号学的な本人確認ではありません。
 
+## Blocked-job recovery
+
+`vep job recover` is deliberately limited to a parent whose latest transition is
+`AUDITED → BLOCKED`, whose revision count reached 2, and whose material P0/P1
+findings are all `content-integrity`.
+
+```bash
+uv run vep job recover .local/jobs/blocked-report repaired-report \
+  --confirm \
+  --basis "restart semantic processing after content-integrity findings"
+```
+
+The parent workspace remains untouched. The child has a new job-bound authorization
+record with the same permission flags, reuses only source/normalization/transcript
+and declared supporting-input artifacts, and starts at `TRANSCRIBED`. Run refinement,
+evidence, authoring, and audit again as fresh child work. Existing network acquisition
+evidence (including Box) is rebound and verified locally; recovery never re-acquires it.
+See [CLI and local workspace operations](docs/operations/cli-and-local-workspace.md).
+
 ## Supported sources
 
 The matrix below describes the current VEP source contract. `Supported` means

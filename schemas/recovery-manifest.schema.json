@@ -1,0 +1,90 @@
+{
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/recovery-manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Bind a fresh child job to the minimal eligible parent provenance.",
+  "properties": {
+    "child_job_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Child Job Fingerprint",
+      "type": "string"
+    },
+    "child_job_id": {
+      "maxLength": 63,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+      "title": "Child Job Id",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "parent_audit_bundle_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Parent Audit Bundle Fingerprint",
+      "type": "string"
+    },
+    "parent_final_draft_sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Parent Final Draft Sha256",
+      "type": "string"
+    },
+    "parent_finding_ids": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100000,
+      "minItems": 1,
+      "title": "Parent Finding Ids",
+      "type": "array"
+    },
+    "parent_job_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Parent Job Fingerprint",
+      "type": "string"
+    },
+    "parent_job_id": {
+      "maxLength": 63,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+      "title": "Parent Job Id",
+      "type": "string"
+    },
+    "recovery_basis": {
+      "maxLength": 1024,
+      "minLength": 1,
+      "title": "Recovery Basis",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "parent_job_id",
+    "parent_job_fingerprint",
+    "parent_final_draft_sha256",
+    "parent_audit_bundle_fingerprint",
+    "parent_finding_ids",
+    "recovery_basis",
+    "child_job_id",
+    "child_job_fingerprint",
+    "created_at"
+  ],
+  "title": "RecoveryManifest",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

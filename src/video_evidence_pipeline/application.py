@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import getpass
+import shutil
+import stat
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -68,9 +71,15 @@ from video_evidence_pipeline.delivery import (
     load_approval,
     load_export,
 )
-from video_evidence_pipeline.domain.authoring import AuditDisposition, FixedEvidenceBundle
+from video_evidence_pipeline.domain.artifacts import ArtifactRef
+from video_evidence_pipeline.domain.authoring import (
+    AuditDisposition,
+    AuditSeverity,
+    FixedEvidenceBundle,
+)
 from video_evidence_pipeline.domain.authorization import AuthorizationRecord
 from video_evidence_pipeline.domain.delivery import ReviewerIdentity
+from video_evidence_pipeline.domain.hashing import sha256_file
 from video_evidence_pipeline.domain.job import (
     AssignmentSpec,
     JobSpec,
@@ -87,9 +96,12 @@ from video_evidence_pipeline.domain.job import (
     primary_input_kind,
     requires_transcript_refinement,
 )
+from video_evidence_pipeline.domain.manifests import SourceManifest, StageManifest
 from video_evidence_pipeline.domain.media import NormalizationConfig
+from video_evidence_pipeline.domain.recovery import RecoveryManifest
 from video_evidence_pipeline.domain.serialization import fingerprint
 from video_evidence_pipeline.domain.state import JobState
+from video_evidence_pipeline.domain.supporting import SupportingInputManifest
 from video_evidence_pipeline.domain.transcription import (
     TranscriptionConfig,
     TranscriptManifest,
@@ -105,6 +117,7 @@ from video_evidence_pipeline.errors import (
     VepError,
     configuration_error,
     integrity_error,
+    io_error,
     state_error,
 )
 from video_evidence_pipeline.evidence.pipeline import (
@@ -144,13 +157,16 @@ from video_evidence_pipeline.search import (
     search_index,
 )
 from video_evidence_pipeline.storage.atomic import (
+    atomic_copy_exclusive,
     atomic_write_json,
     atomic_write_new_bytes,
     read_json_model,
 )
 from video_evidence_pipeline.storage.jsonl import append_jsonl, exclusive_append_lock, read_jsonl
-from video_evidence_pipeline.storage.layout import JobWorkspace
+from video_evidence_pipeline.storage.layout import JobWorkspace, is_link_or_junction
 from video_evidence_pipeline.storage.locking import exclusive_file_lock
+from video_evidence_pipeline.storage.permissions import ensure_private_directory
+from video_evidence_pipeline.supporting import load_supporting_inputs, supporting_fingerprint
 from video_evidence_pipeline.transcription.base import AsrBackend
 from video_evidence_pipeline.transcription.pipeline import (
     TranscriptionResult,
@@ -260,8 +276,432 @@ def initialize_job(
     return workspace, job
 
 
+@dataclass(frozen=True, slots=True)
+class RecoveryResult:
+    workspace: JobWorkspace
+    job: JobSpec
+    manifest: RecoveryManifest
+
+
+@dataclass(frozen=True, slots=True)
+class _RecoveryParent:
+    workspace: JobWorkspace
+    job: JobSpec
+    authorization: AuthorizationRecord
+    source: SourceManifest
+    source_stage: StageManifest
+    media: NormalizationResult
+    transcript: TranscriptionResult
+    supporting: SupportingInputManifest | None
+    final_draft_sha256: str
+    audit_bundle_fingerprint: str
+    finding_ids: tuple[str, ...]
+
+
+def _load_recovery_manifest(workspace: JobWorkspace, job: JobSpec) -> RecoveryManifest:
+    manifest = read_json_model(
+        workspace.recovery_manifest_json,
+        RecoveryManifest,
+        code="RECOVERY_MANIFEST_INVALID",
+    )
+    if manifest.child_job_id != job.job_id or manifest.child_job_fingerprint != job_fingerprint(
+        job
+    ):
+        raise integrity_error(
+            "RECOVERY_MANIFEST_MISMATCH",
+            "recovery manifest does not match the child job",
+        )
+    parent = _recovery_parent(workspace.jobs_root / manifest.parent_job_id)
+    authorization = _authorization(workspace)
+    if (
+        manifest.parent_job_fingerprint != job_fingerprint(parent.job)
+        or manifest.parent_final_draft_sha256 != parent.final_draft_sha256
+        or manifest.parent_audit_bundle_fingerprint != parent.audit_bundle_fingerprint
+        or tuple(manifest.parent_finding_ids) != parent.finding_ids
+        or manifest.recovery_basis != authorization.authorization_basis
+        or manifest.created_at != authorization.confirmed_at
+        or authorization.allow_local_processing != parent.authorization.allow_local_processing
+        or authorization.allow_network_acquisition != parent.authorization.allow_network_acquisition
+        or authorization.allow_external_api != parent.authorization.allow_external_api
+    ):
+        raise integrity_error(
+            "RECOVERY_PROVENANCE_MISMATCH",
+            "recovery provenance does not match its immutable parent and child authorization",
+        )
+    return manifest
+
+
+def _discard_failed_recovery_child(child: JobWorkspace) -> None:
+    root = child.root.absolute()
+    jobs_root = child.jobs_root.absolute()
+    try:
+        relative = root.relative_to(jobs_root)
+    except ValueError as exc:
+        raise integrity_error(
+            "RECOVERY_CHILD_CLEANUP_REFUSED",
+            "failed recovery child is outside the jobs root",
+        ) from exc
+    if len(relative.parts) != 1 or is_link_or_junction(root):
+        raise integrity_error(
+            "RECOVERY_CHILD_CLEANUP_REFUSED",
+            "failed recovery child cannot be removed safely",
+        )
+    try:
+        shutil.rmtree(root)
+    except OSError as exc:
+        raise io_error(
+            "RECOVERY_CHILD_CLEANUP_FAILED",
+            "failed recovery child could not be removed",
+        ) from exc
+
+
+def _recovery_media_artifacts(media) -> tuple[ArtifactRef, ...]:
+    return tuple(
+        [
+            *([media.analysis_proxy.artifact] if media.analysis_proxy is not None else []),
+            *([media.speech_audio.artifact] if media.speech_audio is not None else []),
+            *(
+                artifact
+                for subtitle in media.subtitles
+                for artifact in (subtitle.webvtt_artifact, subtitle.cues_artifact)
+                if artifact is not None
+            ),
+            *(
+                record.artifact
+                for record in (media.frame_index.records if media.frame_index is not None else [])
+            ),
+            *([media.frame_index_artifact] if media.frame_index_artifact is not None else []),
+        ]
+    )
+
+
+def _recovery_supporting_artifacts(supporting) -> tuple[ArtifactRef, ...]:
+    return tuple(
+        artifact
+        for record in supporting.inputs
+        for artifact in (
+            record.original_artifact,
+            record.canonical_text_artifact,
+            *(page.artifact for page in record.rendered_pages),
+        )
+        if artifact is not None
+    )
+
+
+def _verify_recovery_copy(path: Path, artifact: ArtifactRef) -> None:
+    try:
+        metadata = path.stat(follow_symlinks=False)
+        if (
+            path.is_symlink()
+            or not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_size != artifact.size_bytes
+            or sha256_file(path) != artifact.content_sha256
+        ):
+            raise integrity_error(
+                "RECOVERY_COPY_INTEGRITY_FAILED",
+                "recovered artifact does not match its stored identity",
+            )
+    except OSError as exc:
+        raise integrity_error(
+            "RECOVERY_COPY_INTEGRITY_FAILED",
+            "recovered artifact is unavailable",
+        ) from exc
+
+
+def _copy_recovery_artifacts(
+    parent: JobWorkspace,
+    child: JobWorkspace,
+    artifacts: tuple[ArtifactRef, ...],
+) -> None:
+    copied: set[str] = set()
+    for artifact in artifacts:
+        if artifact.relative_storage_path in copied:
+            continue
+        copied.add(artifact.relative_storage_path)
+        source = parent.safe_path(artifact.relative_storage_path)
+        target = child.safe_path(artifact.relative_storage_path)
+        directory = child.root
+        for component in target.parent.relative_to(child.root).parts:
+            directory /= component
+            ensure_private_directory(directory)
+        result = atomic_copy_exclusive(
+            source,
+            target,
+            verifier=lambda candidate, artifact=artifact: _verify_recovery_copy(
+                candidate, artifact
+            ),
+        )
+        if not result.created:
+            _verify_recovery_copy(target, artifact)
+
+
+def _recovery_parent(
+    parent_path: Path,
+) -> _RecoveryParent:
+    workspace, job, transitions, state = _load_context(parent_path)
+    if (
+        state is not JobState.BLOCKED
+        or not transitions
+        or (
+            transitions[-1].from_state is not JobState.AUDITED
+            or transitions[-1].to_state is not JobState.BLOCKED
+        )
+    ):
+        raise state_error(
+            "RECOVERY_PARENT_NOT_ELIGIBLE",
+            "parent is not an audited blocked job",
+        )
+    _validate_job_unmapped(parent_path)
+    authorization = _authorization(workspace)
+    _fixed, history, _human_review = _load_authoring_state_integrity(workspace, job, state)
+    draft, audit = history[-1]
+    if (
+        audit is None
+        or audit.manifest.disposition is not AuditDisposition.BLOCKED
+        or draft.manifest.revision_count != 2
+    ):
+        raise state_error(
+            "RECOVERY_PARENT_NOT_ELIGIBLE",
+            "parent did not reach the revision limit through a blocked audit",
+        )
+    material_findings = tuple(
+        finding
+        for finding in audit.findings
+        if finding.severity in {AuditSeverity.P0, AuditSeverity.P1}
+    )
+    if not material_findings or any(
+        finding.category != "content-integrity" for finding in material_findings
+    ):
+        raise state_error(
+            "RECOVERY_PARENT_NOT_ELIGIBLE",
+            "parent does not have only material content-integrity findings",
+        )
+    raw_artifact = verify_acquired_bundle(workspace, job)
+    media = load_normalization_result(workspace, job, raw_artifact)
+    transcript = load_transcription_result(workspace, job, media.media_manifest)
+    source_manifest = read_json_model(
+        workspace.source_manifest_json,
+        SourceManifest,
+        code="SOURCE_MANIFEST_INVALID",
+    )
+    source_stage = read_json_model(
+        workspace.acquisition_manifest_json,
+        StageManifest,
+        code="STAGE_MANIFEST_INVALID",
+    )
+    supporting = load_supporting_inputs(workspace, job) if job.supporting_inputs else None
+    return _RecoveryParent(
+        workspace=workspace,
+        job=job,
+        authorization=authorization,
+        source=source_manifest,
+        source_stage=source_stage,
+        media=media,
+        transcript=transcript,
+        supporting=supporting,
+        final_draft_sha256=draft.manifest.draft_artifact.content_sha256,
+        audit_bundle_fingerprint=audit.manifest.bundle_fingerprint,
+        finding_ids=tuple(sorted(finding.finding_id for finding in material_findings)),
+    )
+
+
+def recover_job(
+    parent_path: Path,
+    new_job_id: str,
+    *,
+    confirm: bool,
+    basis: str,
+) -> RecoveryResult:
+    """Fork only an eligible blocked job at its raw-transcript reuse boundary."""
+
+    if not confirm:
+        raise state_error(
+            "RECOVERY_CONFIRMATION_REQUIRED",
+            "recovery requires explicit --confirm",
+        )
+    qualified = _recovery_parent(parent_path)
+    if new_job_id == qualified.job.job_id:
+        raise configuration_error(
+            "RECOVERY_CHILD_ID_INVALID",
+            "recovery child job ID must differ from its parent",
+        )
+    child_data = qualified.job.model_dump(mode="python")
+    child_data.update({"job_id": new_job_id, "created_at": datetime.now(UTC)})
+    if qualified.job.primary_input is None:
+        child_data["primary_input"] = PrimaryInputSpec(kind=PrimaryInputKind.VIDEO)
+    child_job = JobSpec.model_validate(child_data)
+    child_fingerprint = job_fingerprint(child_job)
+    recorded_at = datetime.now(UTC)
+    recovery = RecoveryManifest(
+        parent_job_id=qualified.job.job_id,
+        parent_job_fingerprint=job_fingerprint(qualified.job),
+        parent_final_draft_sha256=qualified.final_draft_sha256,
+        parent_audit_bundle_fingerprint=qualified.audit_bundle_fingerprint,
+        parent_finding_ids=list(qualified.finding_ids),
+        recovery_basis=basis,
+        child_job_id=child_job.job_id,
+        child_job_fingerprint=child_fingerprint,
+        created_at=recorded_at,
+    )
+    child_source = qualified.source.model_copy(
+        update={
+            "job_id": child_job.job_id,
+            "artifact_record": qualified.source.artifact_record.model_copy(
+                update={"configuration_sha256": child_fingerprint}
+            ),
+        }
+    )
+    child_source_stage = qualified.source_stage.model_copy(
+        update={"job_id": child_job.job_id, "configuration_sha256": child_fingerprint}
+    )
+    child_media = qualified.media.media_manifest.model_copy(update={"job_id": child_job.job_id})
+    child_media_stage = qualified.media.stage_manifest.model_copy(
+        update={"job_id": child_job.job_id}
+    )
+    child_transcript = qualified.transcript.transcript_manifest.model_copy(
+        update={"job_id": child_job.job_id}
+    )
+    child_transcript_stage = qualified.transcript.stage_manifest.model_copy(
+        update={"job_id": child_job.job_id}
+    )
+    child_supporting = (
+        qualified.supporting.model_copy(
+            update={
+                "job_id": child_job.job_id,
+                "supporting_fingerprint": supporting_fingerprint(
+                    child_job, qualified.supporting.inputs
+                ),
+            }
+        )
+        if qualified.supporting is not None
+        else None
+    )
+    authorization = AuthorizationRecord(
+        job_id=child_job.job_id,
+        job_fingerprint=child_fingerprint,
+        confirmed_by_user=True,
+        authorization_basis=basis,
+        allow_local_processing=qualified.authorization.allow_local_processing,
+        allow_network_acquisition=qualified.authorization.allow_network_acquisition,
+        allow_external_api=qualified.authorization.allow_external_api,
+        confirmed_at=recorded_at,
+        confirmer_identity=getpass.getuser() or "local-user",
+    )
+    artifacts = (
+        qualified.source.artifact_record.artifact,
+        *_recovery_media_artifacts(qualified.media.media_manifest),
+        qualified.transcript.transcript_manifest.segments_artifact,
+        *(
+            _recovery_supporting_artifacts(qualified.supporting)
+            if qualified.supporting is not None
+            else ()
+        ),
+    )
+    jobs_root = qualified.workspace.jobs_root
+    recovery_lock = jobs_root / f".{child_job.job_id}.recovery.lock"
+    with exclusive_file_lock(
+        recovery_lock,
+        busy_code="RECOVERY_CHILD_BUSY",
+        busy_message="recovery child is already being created",
+        failure_code="RECOVERY_CHILD_LOCK_FAILED",
+        failure_message="recovery child creation could not be locked",
+    ):
+        pending_child = JobWorkspace(root=jobs_root / child_job.job_id, jobs_root=jobs_root)
+        target_was_absent = not pending_child.root.exists()
+        child = pending_child
+        child_created = False
+        try:
+            child = JobWorkspace.create(
+                qualified.workspace.jobs_root.parent.parent, child_job.job_id
+            )
+            child_created = True
+            atomic_write_new_bytes(
+                child.job_yaml,
+                job_to_yaml(child_job).encode("utf-8"),
+                private=True,
+            )
+            append_jsonl(
+                child.transitions_jsonl,
+                TransitionRecord(
+                    sequence=1,
+                    job_id=child_job.job_id,
+                    from_state=None,
+                    to_state=JobState.CREATED,
+                    trigger="job.init",
+                    occurred_at=datetime.now(UTC),
+                    job_fingerprint=child_fingerprint,
+                ),
+            )
+            _copy_recovery_artifacts(qualified.workspace, child, artifacts)
+            atomic_write_json(child.source_manifest_json, child_source, private=True)
+            atomic_write_json(child.acquisition_manifest_json, child_source_stage, private=True)
+            atomic_write_json(child.media_manifest_json, child_media, private=True)
+            atomic_write_json(child.normalization_manifest_json, child_media_stage, private=True)
+            atomic_write_json(child.transcript_manifest_json, child_transcript, private=True)
+            atomic_write_json(
+                child.transcription_stage_manifest_json,
+                child_transcript_stage,
+                private=True,
+            )
+            if child_supporting is not None:
+                atomic_write_json(child.supporting_manifest_json, child_supporting, private=True)
+            atomic_write_json(child.recovery_manifest_json, recovery, private=True)
+            atomic_write_json(child.authorization_json, authorization, private=True)
+            with exclusive_append_lock(child.transitions_jsonl):
+                _append_transition_locked(
+                    child,
+                    child_job,
+                    from_state=JobState.CREATED,
+                    to_state=JobState.AUTHORIZED,
+                    trigger="recovery.authorize",
+                )
+                _append_transition_locked(
+                    child,
+                    child_job,
+                    from_state=JobState.AUTHORIZED,
+                    to_state=JobState.ACQUIRED,
+                    trigger="recovery.reuse-source",
+                )
+                _append_transition_locked(
+                    child,
+                    child_job,
+                    from_state=JobState.ACQUIRED,
+                    to_state=JobState.NORMALIZED,
+                    trigger="recovery.reuse-normalization",
+                )
+                _append_transition_locked(
+                    child,
+                    child_job,
+                    from_state=JobState.NORMALIZED,
+                    to_state=JobState.TRANSCRIBED,
+                    trigger="recovery.reuse-transcript",
+                )
+            _load_recovery_manifest(child, child_job)
+            validate_job(child.root)
+        except Exception as exc:
+            create_conflict = isinstance(exc, VepError) and exc.code == "JOB_EXISTS"
+            if child_created or (target_was_absent and child.root.exists() and not create_conflict):
+                _discard_failed_recovery_child(child)
+            raise
+    return RecoveryResult(workspace=child, job=child_job, manifest=recovery)
+
+
 def _validate_job_unmapped(path: Path, *, deep: bool = False) -> dict[str, Any]:
     workspace, job, transitions, state = _load_context(path)
+    recovery_triggers = (
+        "recovery.authorize",
+        "recovery.reuse-source",
+        "recovery.reuse-normalization",
+        "recovery.reuse-transcript",
+    )
+    is_recovery_child = tuple(record.trigger for record in transitions[1:5]) == recovery_triggers
+    if is_recovery_child and not workspace.recovery_manifest_json.exists():
+        raise integrity_error(
+            "RECOVERY_PROVENANCE_MISMATCH",
+            "recovery child is missing its required provenance manifest",
+        )
+    if is_recovery_child:
+        _load_recovery_manifest(workspace, job)
     if state is not JobState.CREATED:
         authorization = _authorization(workspace)
         _validate_authorization_binding(job, transitions, authorization)

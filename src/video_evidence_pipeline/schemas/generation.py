@@ -65,6 +65,7 @@ from video_evidence_pipeline.domain.media import (
     NormalizationConfig,
     NormalizedSubtitle,
 )
+from video_evidence_pipeline.domain.recovery import RecoveryManifest
 from video_evidence_pipeline.domain.refinement import (
     RefinementAmbiguityLedger,
     RefinementEditLedger,
@@ -153,6 +154,7 @@ SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "refinement-edit-ledger.schema.json": RefinementEditLedger,
     "refinement-ambiguity-ledger.schema.json": RefinementAmbiguityLedger,
     "refinement-manifest.schema.json": RefinementManifest,
+    "recovery-manifest.schema.json": RecoveryManifest,
     "source-ref.schema.json": SourceRef,
     "evidence-record.schema.json": EvidenceRecord,
     "ambiguity-record.schema.json": AmbiguityRecord,

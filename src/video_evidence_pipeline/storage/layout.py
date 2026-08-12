@@ -9,7 +9,11 @@ from pathlib import Path, PurePosixPath
 
 from video_evidence_pipeline.domain.identifiers import JobId, validate_relative_storage_path
 from video_evidence_pipeline.errors import configuration_error, integrity_error, io_error
-from video_evidence_pipeline.storage.permissions import ensure_private_directory
+from video_evidence_pipeline.storage.permissions import (
+    PRIVATE_DIRECTORY_MODE,
+    enforce_private_directory,
+    ensure_private_directory,
+)
 
 
 def is_link_or_junction(path: Path) -> bool:
@@ -73,13 +77,21 @@ class JobWorkspace:
         root = jobs_root / job_id
         _assert_no_links(repository_root, root)
         _assert_resolved_within(root, jobs_root)
-        if root.exists():
-            raise configuration_error("JOB_EXISTS", "job workspace already exists")
         local_root = repository_root / ".local"
+        for directory in (local_root, jobs_root):
+            ensure_private_directory(directory)
+            _assert_no_links(repository_root, directory)
+        try:
+            root.mkdir(mode=PRIVATE_DIRECTORY_MODE, exist_ok=False)
+        except FileExistsError as exc:
+            raise configuration_error("JOB_EXISTS", "job workspace already exists") from exc
+        except OSError as exc:
+            raise io_error(
+                "PRIVATE_DIRECTORY_FAILED", "private directory could not be created"
+            ) from exc
+        enforce_private_directory(root)
+        _assert_no_links(repository_root, root)
         directories = (
-            local_root,
-            jobs_root,
-            root,
             root / "authorization",
             root / "source",
             root / "source/raw",
@@ -260,6 +272,10 @@ class JobWorkspace:
     @property
     def export_stage_manifest_json(self) -> Path:
         return self.safe_path("manifests/stages/export.json")
+
+    @property
+    def recovery_manifest_json(self) -> Path:
+        return self.safe_path("manifests/recovery-manifest.json")
 
     @property
     def transitions_jsonl(self) -> Path:

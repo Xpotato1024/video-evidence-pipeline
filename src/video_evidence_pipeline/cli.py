@@ -36,6 +36,7 @@ from video_evidence_pipeline.application import (
     prepare_evidence_job,
     prepare_revision_job,
     prepare_transcript_refinement_job,
+    recover_job,
     search_job,
     transcribe_job,
     validate_job,
@@ -223,6 +224,32 @@ def job_validate(
 ) -> None:
     result = _run(lambda: validate_job(workspace, deep=deep), json_output=json_output)
     _emit({"ok": True, **result}, json_output=json_output)
+
+
+@job_app.command("recover")
+def job_recover(
+    parent: Path,
+    new_job_id: str,
+    basis: Annotated[str, typer.Option("--basis")],
+    confirm: Annotated[bool, typer.Option("--confirm")] = False,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    result = _run(
+        lambda: recover_job(parent, new_job_id, confirm=confirm, basis=basis),
+        json_output=json_output,
+    )
+    _emit(
+        {
+            "ok": True,
+            "job_id": result.job.job_id,
+            "state": "TRANSCRIBED",
+            "workspace": str(result.workspace.root),
+            "parent_job_id": result.manifest.parent_job_id,
+            "parent_finding_ids": result.manifest.parent_finding_ids,
+            "recovery_basis": result.manifest.recovery_basis,
+        },
+        json_output=json_output,
+    )
 
 
 @job_app.command("authorize")
