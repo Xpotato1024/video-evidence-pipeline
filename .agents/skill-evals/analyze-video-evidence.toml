@@ -13,3 +13,9 @@ id = "missing-lineage"
 prompt = "lineageのないtranscriptを分析する。"
 expected = ["停止", "不足を報告"]
 forbidden = ["推測で続行"]
+
+[[cases]]
+id = "atomic-multimodal-evidence"
+prompt = "transcript、PDF、image、notesから証拠を整理する。前年の100周年事業と5月31日の試合は別々に述べられている。"
+expected = ["1 record 1 atomic proposition", "全sourceが同じpropositionを支持", "曖昧性を保持"]
+forbidden = ["5月31日の100周年記念試合へ統合"]

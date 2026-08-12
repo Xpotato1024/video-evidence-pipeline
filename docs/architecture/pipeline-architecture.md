@@ -28,8 +28,9 @@ related_documents: ["VEP-ARCH-CONTEXT", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-STATE", 
 
 現在、Intake / Authorizationからevidence construction、bounded authoring／independent audit／revision、
 human-review package、明示的人間approval、byte-exact Markdown exportまで実装済みです。実動作する直線経路は
-`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → EVIDENCE_READY → DRAFTED → AUDITED → HUMAN_REVIEW_READY → HUMAN_APPROVED → EXPORTED`
+`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → TRANSCRIPT_REFINED → EVIDENCE_READY → DRAFTED → AUDITED → HUMAN_REVIEW_READY → HUMAN_APPROVED → EXPORTED`
 で、P0／P1が残る経路は最大2回のrevision後に`BLOCKED`です。
+既存v1 video jobは互換性のため`TRANSCRIBED → EVIDENCE_READY`を維持します。
 
 ## 2. 層
 
@@ -59,6 +60,9 @@ flowchart TD
 - 外部API送信可否
 - 課題文、字数、文体、引用、出力形式
 - user notes
+
+primary inputは`video`、`audio`、`transcript`だけ、supporting inputはlocalの`pdf`、`image`、`notes`だけです。
+primary指定を持たない既存jobはvideoとして扱い、既存job fingerprintとYAML形状を維持します。
 
 出力:
 
@@ -100,6 +104,9 @@ flowchart TD
 - normalized audio/video
 - subtitle segments
 - frame index
+
+audio primaryはspeech WAVだけを生成し、analysis proxy／subtitle／frameを生成しません。transcript primaryは
+FFmpegを起動せず、immutable raw transcriptを後段へ渡すno-media manifestだけを生成します。
 
 実装はsystem FFmpeg／ffprobeだけを固定argv、`shell=False`、stdin無効、wall-clock timeout、bounded
 stdout／stderrで起動します。入力protocolは`file`、demuxerはMVP allowlistへ限定し、playlist／external
@@ -170,8 +177,14 @@ identityはfingerprintへ含めます。model directoryのfull fingerprintはpro
 caption confidenceは`not_available`、ASRの`avg_logprob`／`no_speech_probability`等はbackend raw metricとして
 保存し、確率校正済みconfidenceへ読み替えません。
 
+supplied transcriptはASRを実行せずUTF-8 text／Markdown、または`text`と任意の`start_ms`／`end_ms`だけを持つ
+bounded JSONLからcanonical raw transcriptを生成します。時刻が提供されないsegmentへtimestampを捏造しません。
+新input宣言を持つjobはraw transcriptを上書きせず、`vep refine prepare`／`vep refine import`でrefined transcript、
+edit ledger、ambiguity ledger、validated response、refinement manifestを別artifactとして公開します。semantic correctionは
+frame／PDF／image／notesのsupport refを必須とし、根拠がなければambiguityを残します。
+
 `vep evidence prepare`はassignment、順序付きrequirements、exact transcript segment／SourceRef、frame
-record／artifact／SourceRef、承認済み外部artifact catalog、未解決ambiguityを固定requestへ束縛します。
+record／artifact／SourceRef、入力に存在するPDF page/text／image／notes、未解決ambiguityを固定requestへ束縛します。
 `vep evidence import`はprovider-neutral responseのrequest fingerprint、analyzer identity／execution mode／
 external API利用、全SourceRefの完全一致、timestamp、interpretation level、review status、未解決ambiguity保持を
 検証します。生成されたuser opinion、非直接解釈のvideo fact化、analyzer自身によるaccept／reject、未承認の
@@ -180,6 +193,8 @@ external fact sourceを拒否します。検証前responseはcanonicalにせず�
 transitionを最後に書きます。支持可能なrecordがないresponseも有効であり、evidenceを捏造せずcanonical
 zero-line JSONLとして表現します。metric availabilityはtyped confidenceに保持し、それ自体をambiguityへ昇格
 しません。その他の真正なsegment uncertainty flagは未解決ambiguityとして保持します。
+1 evidence recordは1つのatomic propositionに限定し、複数SourceRefはすべて同じpropositionを支持しなければ
+なりません。離れた発言を結合して、sourceが支持しない新しい関係を作ることは禁止します。
 
 SQLite FTS5 indexはcanonical evidenceではなく削除可能なprivate cacheです。`normalized_text`とevidence
 `observation`だけを明示`trigram` tokenizerで索引化し、1〜2文字は種類ごと4096件までのparameterized literal

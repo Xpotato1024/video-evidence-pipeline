@@ -14,6 +14,7 @@ from video_evidence_pipeline.domain.media import SubtitleProvenance
 
 
 class TranscriptSource(StrEnum):
+    SUPPLIED = "supplied"
     NORMALIZED_SUBTITLE = "normalized_subtitle"
     ASR = "asr"
 
@@ -90,8 +91,8 @@ class SegmentLineage(StrictModel):
 class TranscriptSegment(StrictModel):
     schema_version: Literal["1.0"] = "1.0"
     segment_id: str = Field(pattern=r"^T[0-9]{6}$")
-    start_ms: int = Field(ge=0)
-    end_ms: int = Field(gt=0)
+    start_ms: int | None = Field(default=None, ge=0)
+    end_ms: int | None = Field(default=None, gt=0)
     speaker: str | None = Field(default=None, min_length=1, max_length=256)
     raw_text: str = Field(min_length=1, max_length=65536)
     normalized_text: str = Field(min_length=1, max_length=65536)
@@ -118,8 +119,26 @@ class TranscriptSegment(StrictModel):
 
     @model_validator(mode="after")
     def interval_and_lineage_match(self) -> Self:
-        if self.end_ms <= self.start_ms:
+        has_interval = self.start_ms is not None and self.end_ms is not None
+        if (self.start_ms is None) != (self.end_ms is None):
+            raise ValueError("transcript segment timestamps must be both present or absent")
+        if (
+            has_interval
+            and self.end_ms is not None
+            and self.start_ms is not None
+            and self.end_ms <= self.start_ms
+        ):
             raise ValueError("transcript segment must end after it starts")
+        if self.source is TranscriptSource.SUPPLIED:
+            if (
+                self.lineage.source_stream_index is not None
+                or self.lineage.subtitle_provenance is not None
+                or self.confidence.kind is not TranscriptConfidenceKind.NOT_AVAILABLE
+            ):
+                raise ValueError("supplied transcript lineage is invalid")
+            return self
+        if not has_interval:
+            raise ValueError("media transcript segments require timestamps")
         if self.source is TranscriptSource.NORMALIZED_SUBTITLE:
             if self.lineage.source_stream_index is None or self.lineage.subtitle_provenance is None:
                 raise ValueError("subtitle transcript lineage requires stream and provenance")
@@ -235,7 +254,7 @@ class TranscriptManifest(StrictModel):
     caption_coverage: float | None = Field(default=None, ge=0.0, le=1.0, allow_inf_nan=False)
     segments_artifact: ArtifactRef
     segment_count: int = Field(ge=1)
-    duration_ms: int = Field(gt=0)
+    duration_ms: int | None = Field(default=None, gt=0)
     gaps: list[TranscriptInterval] = Field(default_factory=list)
     overlaps: list[TranscriptInterval] = Field(default_factory=list)
     started_at: UtcDateTime
@@ -265,11 +284,29 @@ class TranscriptManifest(StrictModel):
             raise ValueError("transcription backend identities must be unique")
         expected_backend_order = [
             source
-            for source in (TranscriptSource.NORMALIZED_SUBTITLE, TranscriptSource.ASR)
+            for source in (
+                TranscriptSource.SUPPLIED,
+                TranscriptSource.NORMALIZED_SUBTITLE,
+                TranscriptSource.ASR,
+            )
             if source in backend_sources
         ]
         if [item.source for item in self.backends] != expected_backend_order:
             raise ValueError("transcription backend identities are not canonical")
+        if TranscriptSource.SUPPLIED in backend_sources:
+            if (
+                backend_sources != {TranscriptSource.SUPPLIED}
+                or self.selected_subtitle_stream_index is not None
+                or self.selected_subtitle_provenance is not None
+                or self.caption_coverage is not None
+            ):
+                raise ValueError("supplied transcript metadata is inconsistent")
+            if self.duration_ms is None:
+                if self.gaps or self.overlaps:
+                    raise ValueError("timestamp-less supplied transcript cannot claim intervals")
+                return self
+        elif self.duration_ms is None:
+            raise ValueError("media transcript requires a duration")
         if TranscriptSource.NORMALIZED_SUBTITLE in backend_sources:
             if (
                 self.selected_subtitle_stream_index is None

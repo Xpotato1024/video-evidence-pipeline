@@ -1,0 +1,152 @@
+{
+  "$defs": {
+    "ArtifactRef": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "artifact_type": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Artifact Type",
+          "type": "string"
+        },
+        "content_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "relative_storage_path": {
+          "title": "Relative Storage Path",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "artifact_type",
+        "content_sha256",
+        "size_bytes",
+        "relative_storage_path"
+      ],
+      "title": "ArtifactRef",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/refinement-manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "ambiguity_artifact": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "ambiguity_count": {
+      "minimum": 0,
+      "title": "Ambiguity Count",
+      "type": "integer"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "edit_count": {
+      "minimum": 0,
+      "title": "Edit Count",
+      "type": "integer"
+    },
+    "edit_ledger_artifact": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "implementation_version": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Implementation Version",
+      "type": "string"
+    },
+    "job_id": {
+      "maxLength": 63,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+      "title": "Job Id",
+      "type": "string"
+    },
+    "raw_segments_artifact": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "raw_transcript_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Raw Transcript Fingerprint",
+      "type": "string"
+    },
+    "refined_segments_artifact": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "refined_transcript_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Refined Transcript Fingerprint",
+      "type": "string"
+    },
+    "request_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Request Fingerprint",
+      "type": "string"
+    },
+    "response_artifact": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "response_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Response Fingerprint",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "started_at": {
+      "format": "date-time",
+      "title": "Started At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "job_id",
+    "raw_transcript_fingerprint",
+    "refined_transcript_fingerprint",
+    "request_fingerprint",
+    "response_fingerprint",
+    "implementation_version",
+    "raw_segments_artifact",
+    "refined_segments_artifact",
+    "edit_ledger_artifact",
+    "ambiguity_artifact",
+    "response_artifact",
+    "edit_count",
+    "ambiguity_count",
+    "started_at",
+    "created_at"
+  ],
+  "title": "RefinementManifest",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

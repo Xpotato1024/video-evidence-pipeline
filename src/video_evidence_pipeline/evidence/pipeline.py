@@ -20,6 +20,7 @@ from video_evidence_pipeline.domain.artifacts import (
     ProducerKind,
 )
 from video_evidence_pipeline.domain.evidence import (
+    ATOMIC_PROPOSITION_RULE,
     AmbiguityLedger,
     AmbiguityRecord,
     AmbiguityStatus,
@@ -38,7 +39,7 @@ from video_evidence_pipeline.domain.evidence import (
     SourceRefKind,
 )
 from video_evidence_pipeline.domain.hashing import sha256_file
-from video_evidence_pipeline.domain.job import JobSpec
+from video_evidence_pipeline.domain.job import JobSpec, requires_transcript_refinement
 from video_evidence_pipeline.domain.manifests import StageManifest, StageStatus
 from video_evidence_pipeline.domain.media import FrameRecord, MediaManifest
 from video_evidence_pipeline.domain.serialization import (
@@ -47,6 +48,7 @@ from video_evidence_pipeline.domain.serialization import (
     pretty_json_bytes,
 )
 from video_evidence_pipeline.domain.state import JobState
+from video_evidence_pipeline.domain.supporting import SupportingInputManifest
 from video_evidence_pipeline.domain.transcription import TranscriptManifest, TranscriptSegment
 from video_evidence_pipeline.errors import integrity_error, state_error
 from video_evidence_pipeline.storage.atomic import (
@@ -59,7 +61,15 @@ from video_evidence_pipeline.storage.permissions import (
     enforce_private_file,
     ensure_private_directory,
 )
-from video_evidence_pipeline.transcription.pipeline import media_bundle_fingerprint
+from video_evidence_pipeline.supporting import load_supporting_inputs
+from video_evidence_pipeline.transcription.pipeline import (
+    load_transcription_result,
+    media_bundle_fingerprint,
+)
+from video_evidence_pipeline.transcription.refinement import (
+    evidence_transcript_projection,
+    load_refinement_result,
+)
 
 EVIDENCE_IMPLEMENTATION_VERSION = "evidence-v1"
 _ATTEMPT_NAME = re.compile(r"^[0-9a-f]{32}$")
@@ -133,6 +143,8 @@ def _transcript_ref(segment: TranscriptSegment) -> SourceRef:
 
 
 def _frame_refs(media_manifest: MediaManifest) -> list[SourceRef]:
+    if media_manifest.frame_index is None:
+        return []
     return [
         SourceRef(
             kind=SourceRefKind.FRAME,
@@ -153,8 +165,8 @@ def _request_ambiguities(
 
     def add(
         description: str,
-        start_ms: int,
-        end_ms: int,
+        start_ms: int | None,
+        end_ms: int | None,
         source_refs: list[SourceRef],
     ) -> None:
         if len(records) >= _MAXIMUM_AMBIGUITIES:
@@ -200,12 +212,124 @@ def _request_ambiguities(
     return records
 
 
+def _refinement_ambiguities(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    media_manifest: MediaManifest,
+    transcript_manifest: TranscriptManifest,
+    segments: tuple[TranscriptSegment, ...],
+    *,
+    first_id: int,
+) -> list[AmbiguityRecord]:
+    if not requires_transcript_refinement(job):
+        return []
+    raw = load_transcription_result(workspace, job, media_manifest)
+    refinement = load_refinement_result(
+        workspace,
+        job,
+        media_manifest,
+        raw.transcript_manifest,
+        raw.segments,
+    )
+    if (
+        evidence_transcript_projection(raw.transcript_manifest, refinement) != transcript_manifest
+        or refinement.segments != segments
+    ):
+        raise integrity_error(
+            "REFINEMENT_EVIDENCE_INPUT_MISMATCH",
+            "evidence input does not match the canonical refined transcript",
+        )
+    by_id = {item.segment_id: item for item in segments}
+    if first_id + len(refinement.ambiguities) - 1 > _MAXIMUM_AMBIGUITIES:
+        raise state_error(
+            "EVIDENCE_AMBIGUITY_LIMIT_EXCEEDED",
+            "transcript ambiguities exceed the evidence request limit",
+        )
+    return [
+        AmbiguityRecord(
+            ambiguity_id=f"A{first_id + index:06d}",
+            description=item.description,
+            start_ms=by_id[item.segment_id].start_ms,
+            end_ms=by_id[item.segment_id].end_ms,
+            source_refs=sorted(
+                [
+                    _transcript_ref(by_id[source.ref_id])
+                    if source.kind is SourceRefKind.TRANSCRIPT_SEGMENT
+                    else source
+                    for source in item.source_refs
+                ],
+                key=lambda source: (source.kind.value, source.ref_id),
+            ),
+            status=AmbiguityStatus.UNRESOLVED,
+        )
+        for index, item in enumerate(refinement.ambiguities)
+    ]
+
+
+def _supporting_catalog(
+    workspace: JobWorkspace, job: JobSpec
+) -> tuple[tuple[ArtifactRef, ...], tuple[SourceRef, ...]]:
+    if not job.supporting_inputs:
+        return (), ()
+    manifest: SupportingInputManifest = load_supporting_inputs(workspace, job)
+    pairs: list[tuple[ArtifactRef, SourceRef]] = []
+    for record in manifest.inputs:
+        if record.kind.value == "pdf":
+            pairs.append(
+                (
+                    record.original_artifact,
+                    SourceRef(
+                        kind=SourceRefKind.APPROVED_ARTIFACT,
+                        ref_id=record.original_artifact.artifact_id,
+                        content_sha256=record.original_artifact.content_sha256,
+                    ),
+                )
+            )
+            pairs.extend(
+                (
+                    page.artifact,
+                    SourceRef(
+                        kind=SourceRefKind.PDF_PAGE,
+                        ref_id=f"{record.input_id}:P{page.page_number:04d}",
+                        content_sha256=page.artifact.content_sha256,
+                    ),
+                )
+                for page in record.rendered_pages
+            )
+        elif record.kind.value == "image":
+            pairs.append(
+                (
+                    record.original_artifact,
+                    SourceRef(
+                        kind=SourceRefKind.IMAGE,
+                        ref_id=record.input_id,
+                        content_sha256=record.original_artifact.content_sha256,
+                    ),
+                )
+            )
+        else:
+            if record.canonical_text_artifact is None:
+                raise integrity_error("SUPPORTING_INPUT_MANIFEST_INVALID", "notes text is missing")
+            pairs.append(
+                (
+                    record.canonical_text_artifact,
+                    SourceRef(
+                        kind=SourceRefKind.NOTES,
+                        ref_id=record.input_id,
+                        content_sha256=record.canonical_text_artifact.content_sha256,
+                    ),
+                )
+            )
+    pairs.sort(key=lambda item: item[0].artifact_id)
+    return tuple(item[0] for item in pairs), tuple(item[1] for item in pairs)
+
+
 def evidence_request_fingerprint(
     *,
     job_id: str,
     transcript_fingerprint: str,
     media_fingerprint: str,
-    duration_ms: int,
+    duration_ms: int | None,
     assignment: EvidenceAssignmentContext,
     contract: AnalyzerContract,
     segments: tuple[TranscriptSegment, ...],
@@ -223,7 +347,7 @@ def evidence_request_fingerprint(
             "media_bundle_fingerprint": media_fingerprint,
             "duration_ms": duration_ms,
             "assignment": assignment.model_dump(mode="json"),
-            "analyzer_contract": contract.model_dump(mode="json"),
+            "analyzer_contract": contract.model_dump(mode="json", exclude_none=True),
             "transcript_segments": [item.model_dump(mode="json") for item in segments],
             "transcript_refs": [item.model_dump(mode="json") for item in transcript_refs],
             "frame_records": [item.model_dump(mode="json") for item in frame_records],
@@ -239,6 +363,7 @@ def evidence_request_fingerprint(
 
 
 def _expected_request(
+    workspace: JobWorkspace,
     job: JobSpec,
     media_manifest: MediaManifest,
     transcript_manifest: TranscriptManifest,
@@ -246,7 +371,11 @@ def _expected_request(
     *,
     created_at: datetime,
 ) -> EvidenceRequestManifest:
-    contract = AnalyzerContract()
+    contract = AnalyzerContract(
+        atomic_proposition_contract=(
+            ATOMIC_PROPOSITION_RULE if requires_transcript_refinement(job) else None
+        )
+    )
     assignment = EvidenceAssignmentContext(
         task_type=job.assignment.task_type,
         language=job.assignment.language,
@@ -256,17 +385,31 @@ def _expected_request(
         ],
     )
     transcript_refs = tuple(_transcript_ref(item) for item in segments)
-    frame_records = tuple(media_manifest.frame_index.records)
+    frame_records = tuple(
+        media_manifest.frame_index.records if media_manifest.frame_index is not None else ()
+    )
     frames = tuple(_frame_refs(media_manifest))
-    approved_artifacts: tuple[ArtifactRef, ...] = ()
-    approved_artifact_refs: tuple[SourceRef, ...] = ()
-    ambiguities = tuple(_request_ambiguities(transcript_manifest, segments))
+    approved_artifacts, approved_artifact_refs = _supporting_catalog(workspace, job)
+    request_ambiguities = _request_ambiguities(transcript_manifest, segments)
+    ambiguities = tuple(
+        [
+            *request_ambiguities,
+            *_refinement_ambiguities(
+                workspace,
+                job,
+                media_manifest,
+                transcript_manifest,
+                segments,
+                first_id=len(request_ambiguities) + 1,
+            ),
+        ]
+    )
     media_fingerprint = media_bundle_fingerprint(media_manifest)
     request_fingerprint = evidence_request_fingerprint(
         job_id=job.job_id,
         transcript_fingerprint=transcript_manifest.transcription_fingerprint,
         media_fingerprint=media_fingerprint,
-        duration_ms=media_manifest.probe.duration_ms,
+        duration_ms=media_manifest.probe.duration_ms if media_manifest.probe is not None else None,
         assignment=assignment,
         contract=contract,
         segments=segments,
@@ -282,7 +425,7 @@ def _expected_request(
         request_fingerprint=request_fingerprint,
         transcript_bundle_fingerprint=transcript_manifest.transcription_fingerprint,
         media_bundle_fingerprint=media_fingerprint,
-        duration_ms=media_manifest.probe.duration_ms,
+        duration_ms=media_manifest.probe.duration_ms if media_manifest.probe is not None else None,
         assignment=assignment,
         analyzer_contract=contract,
         transcript_segments=list(segments),
@@ -311,6 +454,7 @@ def prepare_evidence_request(
             code="EVIDENCE_REQUEST_INVALID",
         )
         expected = _expected_request(
+            workspace,
             job,
             media_manifest,
             transcript_manifest,
@@ -324,6 +468,7 @@ def prepare_evidence_request(
             )
         return EvidencePrepareResult(stored, reused=True)
     request = _expected_request(
+        workspace,
         job,
         media_manifest,
         transcript_manifest,
@@ -359,6 +504,7 @@ def load_evidence_request(
         code="EVIDENCE_REQUEST_INVALID",
     )
     expected = _expected_request(
+        workspace,
         job,
         media_manifest,
         transcript_manifest,
@@ -468,7 +614,11 @@ def _validate_response(
                 "ANALYZER_REVIEW_STATUS_FORBIDDEN",
                 "an analyzer cannot assign an ambiguity reviewer decision",
             )
-        if ambiguity.end_ms > request.duration_ms:
+        if (
+            request.duration_ms is not None
+            and ambiguity.end_ms is not None
+            and ambiguity.end_ms > request.duration_ms
+        ):
             raise integrity_error(
                 "AMBIGUITY_TIMESTAMP_INVALID", "ambiguity timestamp exceeds source duration"
             )
@@ -506,7 +656,11 @@ def evidence_bundle_fingerprint(
         {
             "transcript_bundle_fingerprint": transcript_manifest.transcription_fingerprint,
             "media_bundle_fingerprint": media_bundle_fingerprint(media_manifest),
-            "frame_index_artifact": media_manifest.frame_index_artifact.model_dump(mode="json"),
+            "frame_index_artifact": (
+                media_manifest.frame_index_artifact.model_dump(mode="json")
+                if media_manifest.frame_index_artifact is not None
+                else None
+            ),
             "request_fingerprint": request.request_fingerprint,
             "analyzer_contract": request.analyzer_contract.model_dump(mode="json"),
             "response": response.model_dump(mode="json"),
@@ -659,6 +813,7 @@ def _stage_manifest(
     manifest: EvidenceManifest,
     transcript: TranscriptManifest,
     media: MediaManifest,
+    request: EvidenceRequestManifest,
 ) -> StageManifest:
     return StageManifest(
         job_id=manifest.job_id,
@@ -667,7 +822,8 @@ def _stage_manifest(
         state_transition=JobState.EVIDENCE_READY,
         input_artifacts=[
             transcript.segments_artifact,
-            media.frame_index_artifact,
+            *([media.frame_index_artifact] if media.frame_index_artifact is not None else []),
+            *request.approved_artifacts,
         ],
         output_artifacts=[
             manifest.response_artifact,
@@ -785,7 +941,7 @@ def stage_evidence(
         manifest,
         evidence_records,
     )
-    stage = _stage_manifest(manifest, transcript_manifest, media_manifest)
+    stage = _stage_manifest(manifest, transcript_manifest, media_manifest, request)
     return EvidenceImportResult(
         manifest,
         stage,
@@ -816,7 +972,8 @@ def _validate_staged_evidence_binding(
         != evidence_bundle_fingerprint(transcript_manifest, media_manifest, request, response)
         or staged.evidence_records != tuple(response.evidence_records)
         or staged.ambiguity_records != tuple(response.ambiguity_records)
-        or staged.stage_manifest != _stage_manifest(manifest, transcript_manifest, media_manifest)
+        or staged.stage_manifest
+        != _stage_manifest(manifest, transcript_manifest, media_manifest, request)
     ):
         raise integrity_error(
             "EVIDENCE_SNAPSHOT_STALE", "staged evidence no longer matches its input snapshot"
@@ -1070,7 +1227,7 @@ def _verify_evidence_manifest(
         manifest,
         evidence_records,
     )
-    stage = _stage_manifest(manifest, transcript_manifest, media_manifest)
+    stage = _stage_manifest(manifest, transcript_manifest, media_manifest, request)
     return EvidenceImportResult(manifest, stage, evidence_records, ambiguity_records, reused=True)
 
 

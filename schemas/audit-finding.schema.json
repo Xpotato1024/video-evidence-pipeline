@@ -107,7 +107,11 @@
       "enum": [
         "transcript_segment",
         "frame",
-        "approved_artifact"
+        "approved_artifact",
+        "pdf_text",
+        "pdf_page",
+        "image",
+        "notes"
       ],
       "title": "SourceRefKind",
       "type": "string"

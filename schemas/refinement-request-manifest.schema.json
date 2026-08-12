@@ -1,0 +1,459 @@
+{
+  "$defs": {
+    "ArtifactRef": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "artifact_type": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Artifact Type",
+          "type": "string"
+        },
+        "content_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "relative_storage_path": {
+          "title": "Relative Storage Path",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "artifact_type",
+        "content_sha256",
+        "size_bytes",
+        "relative_storage_path"
+      ],
+      "title": "ArtifactRef",
+      "type": "object"
+    },
+    "SegmentLineage": {
+      "additionalProperties": false,
+      "properties": {
+        "backend_identity_fingerprint": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Backend Identity Fingerprint",
+          "type": "string"
+        },
+        "source_artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "source_record_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Source Record Id",
+          "type": "string"
+        },
+        "source_stream_index": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Stream Index"
+        },
+        "subtitle_provenance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SubtitleProvenance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "source_artifact",
+        "source_record_id",
+        "backend_identity_fingerprint"
+      ],
+      "title": "SegmentLineage",
+      "type": "object"
+    },
+    "SourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "content_sha256": {
+          "description": "Transcript-record semantic fingerprint or canonical frame artifact SHA-256",
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "end_ms": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Ms"
+        },
+        "kind": {
+          "$ref": "#/$defs/SourceRefKind"
+        },
+        "ref_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Ref Id",
+          "type": "string"
+        },
+        "start_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Ms"
+        }
+      },
+      "required": [
+        "kind",
+        "ref_id",
+        "content_sha256"
+      ],
+      "title": "SourceRef",
+      "type": "object"
+    },
+    "SourceRefKind": {
+      "enum": [
+        "transcript_segment",
+        "frame",
+        "approved_artifact",
+        "pdf_text",
+        "pdf_page",
+        "image",
+        "notes"
+      ],
+      "title": "SourceRefKind",
+      "type": "string"
+    },
+    "SubtitleProvenance": {
+      "enum": [
+        "embedded",
+        "official",
+        "sidecar"
+      ],
+      "title": "SubtitleProvenance",
+      "type": "string"
+    },
+    "TranscriptConfidence": {
+      "additionalProperties": false,
+      "description": "Raw confidence metadata, deliberately not a calibrated probability.",
+      "properties": {
+        "avg_logprob": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Avg Logprob"
+        },
+        "kind": {
+          "$ref": "#/$defs/TranscriptConfidenceKind"
+        },
+        "no_speech_probability": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "No Speech Probability"
+        },
+        "word_probability_count": {
+          "default": 0,
+          "maximum": 1000000,
+          "minimum": 0,
+          "title": "Word Probability Count",
+          "type": "integer"
+        },
+        "word_probability_max": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Word Probability Max"
+        },
+        "word_probability_mean": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Word Probability Mean"
+        },
+        "word_probability_min": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Word Probability Min"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "TranscriptConfidence",
+      "type": "object"
+    },
+    "TranscriptConfidenceKind": {
+      "enum": [
+        "not_available",
+        "backend_metric"
+      ],
+      "title": "TranscriptConfidenceKind",
+      "type": "string"
+    },
+    "TranscriptSegment": {
+      "additionalProperties": false,
+      "properties": {
+        "confidence": {
+          "$ref": "#/$defs/TranscriptConfidence"
+        },
+        "end_ms": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Ms"
+        },
+        "flags": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Flags",
+          "type": "array"
+        },
+        "lineage": {
+          "$ref": "#/$defs/SegmentLineage"
+        },
+        "normalized_text": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Normalized Text",
+          "type": "string"
+        },
+        "raw_text": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Raw Text",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "segment_id": {
+          "pattern": "^T[0-9]{6}$",
+          "title": "Segment Id",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/TranscriptSource"
+        },
+        "speaker": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Speaker"
+        },
+        "start_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Ms"
+        }
+      },
+      "required": [
+        "segment_id",
+        "raw_text",
+        "normalized_text",
+        "source",
+        "confidence",
+        "lineage"
+      ],
+      "title": "TranscriptSegment",
+      "type": "object"
+    },
+    "TranscriptSource": {
+      "enum": [
+        "supplied",
+        "normalized_subtitle",
+        "asr"
+      ],
+      "title": "TranscriptSource",
+      "type": "string"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/refinement-request-manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "available_source_refs": {
+      "items": {
+        "$ref": "#/$defs/SourceRef"
+      },
+      "maxItems": 200000,
+      "minItems": 1,
+      "title": "Available Source Refs",
+      "type": "array"
+    },
+    "available_support_artifacts": {
+      "items": {
+        "$ref": "#/$defs/ArtifactRef"
+      },
+      "maxItems": 1024,
+      "title": "Available Support Artifacts",
+      "type": "array"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "job_id": {
+      "maxLength": 63,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+      "title": "Job Id",
+      "type": "string"
+    },
+    "raw_segments_artifact": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "raw_transcript_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Raw Transcript Fingerprint",
+      "type": "string"
+    },
+    "request_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Request Fingerprint",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "semantic_correction_contract": {
+      "const": "Each semantic edit must refine exactly one transcript segment and cite a non-transcript supporting source; otherwise return one ambiguity and do not merge propositions.",
+      "default": "Each semantic edit must refine exactly one transcript segment and cite a non-transcript supporting source; otherwise return one ambiguity and do not merge propositions.",
+      "title": "Semantic Correction Contract",
+      "type": "string"
+    },
+    "transcript_segments": {
+      "items": {
+        "$ref": "#/$defs/TranscriptSegment"
+      },
+      "maxItems": 100000,
+      "minItems": 1,
+      "title": "Transcript Segments",
+      "type": "array"
+    }
+  },
+  "required": [
+    "job_id",
+    "request_fingerprint",
+    "raw_transcript_fingerprint",
+    "raw_segments_artifact",
+    "transcript_segments",
+    "available_source_refs",
+    "created_at"
+  ],
+  "title": "RefinementRequestManifest",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

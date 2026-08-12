@@ -89,6 +89,7 @@
         "ACQUIRED",
         "NORMALIZED",
         "TRANSCRIBED",
+        "TRANSCRIPT_REFINED",
         "EVIDENCE_READY",
         "DRAFTED",
         "AUDITED",

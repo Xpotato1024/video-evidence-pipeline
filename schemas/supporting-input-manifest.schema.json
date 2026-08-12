@@ -1,0 +1,177 @@
+{
+  "$defs": {
+    "ArtifactRef": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "artifact_type": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Artifact Type",
+          "type": "string"
+        },
+        "content_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "relative_storage_path": {
+          "title": "Relative Storage Path",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "artifact_type",
+        "content_sha256",
+        "size_bytes",
+        "relative_storage_path"
+      ],
+      "title": "ArtifactRef",
+      "type": "object"
+    },
+    "RenderedPdfPage": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "page_number": {
+          "maximum": 10000,
+          "minimum": 1,
+          "title": "Page Number",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "page_number",
+        "artifact"
+      ],
+      "title": "RenderedPdfPage",
+      "type": "object"
+    },
+    "SupportingInputKind": {
+      "enum": [
+        "pdf",
+        "image",
+        "notes"
+      ],
+      "title": "SupportingInputKind",
+      "type": "string"
+    },
+    "SupportingInputRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "canonical_text_artifact": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArtifactRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "input_id": {
+          "pattern": "^S[0-9]{6}$",
+          "title": "Input Id",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/SupportingInputKind"
+        },
+        "original_artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "rendered_pages": {
+          "items": {
+            "$ref": "#/$defs/RenderedPdfPage"
+          },
+          "maxItems": 32,
+          "title": "Rendered Pages",
+          "type": "array"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "input_id",
+        "kind",
+        "original_artifact"
+      ],
+      "title": "SupportingInputRecord",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/supporting-input-manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "implementation_version": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Implementation Version",
+      "type": "string"
+    },
+    "inputs": {
+      "items": {
+        "$ref": "#/$defs/SupportingInputRecord"
+      },
+      "maxItems": 32,
+      "title": "Inputs",
+      "type": "array"
+    },
+    "job_id": {
+      "maxLength": 63,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+      "title": "Job Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "supporting_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Supporting Fingerprint",
+      "type": "string"
+    }
+  },
+  "required": [
+    "job_id",
+    "supporting_fingerprint",
+    "implementation_version",
+    "created_at"
+  ],
+  "title": "SupportingInputManifest",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

@@ -1,0 +1,152 @@
+{
+  "$defs": {
+    "RefinementEdit": {
+      "additionalProperties": false,
+      "properties": {
+        "edit_id": {
+          "pattern": "^R[0-9]{6}$",
+          "title": "Edit Id",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/RefinementEditKind"
+        },
+        "original_segment_fingerprint": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Original Segment Fingerprint",
+          "type": "string"
+        },
+        "refined_text": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Refined Text",
+          "type": "string"
+        },
+        "segment_id": {
+          "pattern": "^T[0-9]{6}$",
+          "title": "Segment Id",
+          "type": "string"
+        },
+        "source_refs": {
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Source Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "edit_id",
+        "segment_id",
+        "original_segment_fingerprint",
+        "refined_text",
+        "kind",
+        "source_refs"
+      ],
+      "title": "RefinementEdit",
+      "type": "object"
+    },
+    "RefinementEditKind": {
+      "enum": [
+        "automatic",
+        "semantic"
+      ],
+      "title": "RefinementEditKind",
+      "type": "string"
+    },
+    "SourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "content_sha256": {
+          "description": "Transcript-record semantic fingerprint or canonical frame artifact SHA-256",
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "end_ms": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Ms"
+        },
+        "kind": {
+          "$ref": "#/$defs/SourceRefKind"
+        },
+        "ref_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Ref Id",
+          "type": "string"
+        },
+        "start_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Ms"
+        }
+      },
+      "required": [
+        "kind",
+        "ref_id",
+        "content_sha256"
+      ],
+      "title": "SourceRef",
+      "type": "object"
+    },
+    "SourceRefKind": {
+      "enum": [
+        "transcript_segment",
+        "frame",
+        "approved_artifact",
+        "pdf_text",
+        "pdf_page",
+        "image",
+        "notes"
+      ],
+      "title": "SourceRefKind",
+      "type": "string"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/refinement-edit-ledger.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "records": {
+      "items": {
+        "$ref": "#/$defs/RefinementEdit"
+      },
+      "maxItems": 100000,
+      "title": "Records",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "title": "RefinementEditLedger",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

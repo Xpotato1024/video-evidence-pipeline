@@ -76,7 +76,11 @@ class SearchHit(StrictModel):
         ):
             raise ValueError("search result record ID does not match its kind")
         if self.kind is SearchDocumentKind.TRANSCRIPT:
-            if self.start_ms is None or self.end_ms is None or self.end_ms <= self.start_ms:
+            if (self.start_ms is None) != (self.end_ms is None) or (
+                self.start_ms is not None
+                and self.end_ms is not None
+                and self.end_ms <= self.start_ms
+            ):
                 raise ValueError("transcript search result interval is invalid")
         elif self.start_ms is not None or self.end_ms is not None:
             raise ValueError("evidence search result must not infer an interval")

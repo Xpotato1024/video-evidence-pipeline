@@ -77,7 +77,11 @@
       "enum": [
         "transcript_segment",
         "frame",
-        "approved_artifact"
+        "approved_artifact",
+        "pdf_text",
+        "pdf_page",
+        "image",
+        "notes"
       ],
       "title": "SourceRefKind",
       "type": "string"
@@ -99,9 +103,17 @@
       "type": "string"
     },
     "end_ms": {
-      "exclusiveMinimum": 0,
-      "title": "End Ms",
-      "type": "integer"
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "End Ms"
     },
     "resolution": {
       "anyOf": [
@@ -136,9 +148,17 @@
       "type": "array"
     },
     "start_ms": {
-      "minimum": 0,
-      "title": "Start Ms",
-      "type": "integer"
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Start Ms"
     },
     "status": {
       "$ref": "#/$defs/AmbiguityStatus",
@@ -147,9 +167,7 @@
   },
   "required": [
     "ambiguity_id",
-    "description",
-    "start_ms",
-    "end_ms"
+    "description"
   ],
   "title": "AmbiguityRecord",
   "type": "object",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from enum import StrEnum
 from typing import Literal, Self
 
@@ -29,6 +30,10 @@ class SourceRefKind(StrEnum):
     TRANSCRIPT_SEGMENT = "transcript_segment"
     FRAME = "frame"
     APPROVED_ARTIFACT = "approved_artifact"
+    PDF_TEXT = "pdf_text"
+    PDF_PAGE = "pdf_page"
+    IMAGE = "image"
+    NOTES = "notes"
 
 
 class EvidenceConfidence(StrEnum):
@@ -54,6 +59,15 @@ class AnalyzerExecutionMode(StrEnum):
     TEST_FIXTURE = "test_fixture"
 
 
+AtomicPropositionContract = Literal[
+    "One record states one atomic proposition; every reference supports that same proposition; do not combine separate facts."
+]
+ATOMIC_PROPOSITION_RULE = (
+    "One record states one atomic proposition; every reference supports that same proposition; "
+    "do not combine separate facts."
+)
+
+
 class SourceRef(StrictModel):
     kind: SourceRefKind
     ref_id: str = Field(min_length=1, max_length=128)
@@ -70,9 +84,12 @@ class SourceRef(StrictModel):
                 len(self.ref_id) != 7
                 or not self.ref_id.startswith("T")
                 or not self.ref_id[1:].isdigit()
-                or self.start_ms is None
-                or self.end_ms is None
-                or self.end_ms <= self.start_ms
+                or ((self.start_ms is None) != (self.end_ms is None))
+                or (
+                    self.start_ms is not None
+                    and self.end_ms is not None
+                    and self.end_ms <= self.start_ms
+                )
             ):
                 raise ValueError("transcript source reference is invalid")
         elif self.kind is SourceRefKind.FRAME and (
@@ -83,10 +100,24 @@ class SourceRef(StrictModel):
             or self.end_ms is not None
         ):
             raise ValueError("frame source reference is invalid")
-        if self.kind is SourceRefKind.APPROVED_ARTIFACT and (
-            self.start_ms is not None or self.end_ms is not None
+        if self.kind in {
+            SourceRefKind.APPROVED_ARTIFACT,
+            SourceRefKind.PDF_TEXT,
+            SourceRefKind.PDF_PAGE,
+            SourceRefKind.IMAGE,
+            SourceRefKind.NOTES,
+        } and (self.start_ms is not None or self.end_ms is not None):
+            raise ValueError("supporting artifact reference must not invent a timestamp")
+        if self.kind in {SourceRefKind.PDF_TEXT, SourceRefKind.IMAGE, SourceRefKind.NOTES} and (
+            len(self.ref_id) != 7
+            or not self.ref_id.startswith("S")
+            or not self.ref_id[1:].isdigit()
         ):
-            raise ValueError("approved artifact reference must not invent a timestamp")
+            raise ValueError("supporting artifact reference is invalid")
+        if self.kind is SourceRefKind.PDF_PAGE and (
+            re.fullmatch(r"S[0-9]{6}:P[0-9]{4}", self.ref_id) is None
+        ):
+            raise ValueError("PDF page reference is invalid")
         return self
 
 
@@ -104,7 +135,7 @@ class EvidenceRecord(StrictModel):
     @field_validator("observation")
     @classmethod
     def observation_is_not_blank(cls, value: str) -> str:
-        if not value.strip():
+        if not value.strip() or "\n" in value or "\r" in value:
             raise ValueError("evidence observation must not be blank")
         return value
 
@@ -132,6 +163,10 @@ class EvidenceRecord(StrictModel):
         }
         if self.asserted_as_video_fact and self.interpretation_level not in direct_video_levels:
             raise ValueError("non-direct interpretation cannot be asserted as video fact")
+        if self.asserted_as_video_fact and any(
+            item.kind is SourceRefKind.NOTES for item in self.source_refs
+        ):
+            raise ValueError("notes cannot be asserted as a video fact")
         if self.interpretation_level in {
             InterpretationLevel.VERBATIM,
             InterpretationLevel.EXPLICIT_STATEMENT,
@@ -142,7 +177,15 @@ class EvidenceRecord(StrictModel):
         ):
             raise ValueError("visual observation requires a frame source")
         if self.interpretation_level is InterpretationLevel.EXTERNAL_FACT and not any(
-            item.kind is SourceRefKind.APPROVED_ARTIFACT for item in self.source_refs
+            item.kind
+            in {
+                SourceRefKind.APPROVED_ARTIFACT,
+                SourceRefKind.PDF_TEXT,
+                SourceRefKind.PDF_PAGE,
+                SourceRefKind.IMAGE,
+                SourceRefKind.NOTES,
+            }
+            for item in self.source_refs
         ):
             raise ValueError("external fact requires an approved artifact source")
         return self
@@ -152,8 +195,8 @@ class AmbiguityRecord(StrictModel):
     schema_version: Literal["1.0"] = "1.0"
     ambiguity_id: str = Field(pattern=r"^A[0-9]{6}$")
     description: str = Field(min_length=1, max_length=65536)
-    start_ms: int = Field(ge=0)
-    end_ms: int = Field(gt=0)
+    start_ms: int | None = Field(default=None, ge=0)
+    end_ms: int | None = Field(default=None, gt=0)
     source_refs: list[SourceRef] = Field(default_factory=list, max_length=128)
     status: AmbiguityStatus = AmbiguityStatus.UNRESOLVED
     resolution: str | None = Field(default=None, min_length=1, max_length=65536)
@@ -169,8 +212,12 @@ class AmbiguityRecord(StrictModel):
 
     @model_validator(mode="after")
     def resolution_matches_status(self) -> Self:
-        if not self.description.strip() or self.end_ms <= self.start_ms:
+        if not self.description.strip() or (self.start_ms is None) != (self.end_ms is None):
             raise ValueError("ambiguity description must not be blank")
+        if self.start_ms is not None and self.end_ms is not None and self.end_ms <= self.start_ms:
+            raise ValueError("ambiguity timestamps are invalid")
+        if self.start_ms is None and not self.source_refs:
+            raise ValueError("timestamp-less ambiguity requires a source reference")
         if self.status is AmbiguityStatus.UNRESOLVED and self.resolution is not None:
             raise ValueError("unresolved ambiguity cannot contain a resolution")
         if self.status is AmbiguityStatus.RESOLVED and (
@@ -184,6 +231,10 @@ class AnalyzerContract(StrictModel):
     name: Literal["video-evidence-analyzer"] = "video-evidence-analyzer"
     version: Literal["1.0"] = "1.0"
     response_schema_version: Literal["1.0"] = "1.0"
+    atomic_proposition_contract: AtomicPropositionContract | None = Field(
+        default=None,
+        description="Semantic request rule for new input/refinement jobs; absent in v1 requests.",
+    )
 
 
 class AnalyzerIdentity(StrictModel):
@@ -233,7 +284,7 @@ class EvidenceRequestManifest(StrictModel):
     request_fingerprint: Sha256
     transcript_bundle_fingerprint: Sha256
     media_bundle_fingerprint: Sha256
-    duration_ms: int = Field(gt=0)
+    duration_ms: int | None = Field(default=None, gt=0)
     assignment: EvidenceAssignmentContext
     analyzer_contract: AnalyzerContract
     transcript_segments: list[TranscriptSegment] = Field(min_length=1, max_length=100_000)
@@ -262,7 +313,20 @@ class EvidenceRequestManifest(StrictModel):
             for item, segment in zip(self.transcript_refs, self.transcript_segments, strict=True)
         ):
             raise ValueError("request transcript reference fingerprints are inconsistent")
-        if any(item.end_ms > self.duration_ms for item in self.transcript_segments):
+        if self.duration_ms is None:
+            if (
+                any(
+                    item.start_ms is not None or item.end_ms is not None
+                    for item in self.transcript_segments
+                )
+                or self.frame_records
+                or self.frame_refs
+            ):
+                raise ValueError("timestamp-less request cannot claim media timestamps")
+        elif any(
+            item.end_ms is None or item.end_ms > self.duration_ms
+            for item in self.transcript_segments
+        ):
             raise ValueError("request transcript timestamp exceeds media duration")
         frame_ids = [item.frame_id for item in self.frame_records]
         if frame_ids != [f"F{index:06d}" for index in range(1, len(frame_ids) + 1)]:
@@ -276,14 +340,26 @@ class EvidenceRequestManifest(StrictModel):
             for source, record in zip(self.frame_refs, self.frame_records, strict=True)
         ):
             raise ValueError("request frame records and references are inconsistent")
-        if any(item.start_ms > self.duration_ms for item in self.frame_refs):
+        if self.duration_ms is not None and any(
+            item.start_ms > self.duration_ms for item in self.frame_refs
+        ):
             raise ValueError("request frame timestamp exceeds media duration")
         artifact_ids = [item.artifact_id for item in self.approved_artifacts]
         if artifact_ids != sorted(set(artifact_ids)):
             raise ValueError("approved artifacts must be sorted and unique")
         if len(self.approved_artifacts) != len(self.approved_artifact_refs) or any(
-            source.kind is not SourceRefKind.APPROVED_ARTIFACT
-            or source.ref_id != artifact.artifact_id
+            source.kind
+            not in {
+                SourceRefKind.APPROVED_ARTIFACT,
+                SourceRefKind.PDF_TEXT,
+                SourceRefKind.PDF_PAGE,
+                SourceRefKind.IMAGE,
+                SourceRefKind.NOTES,
+            }
+            or (
+                source.kind is SourceRefKind.APPROVED_ARTIFACT
+                and source.ref_id != artifact.artifact_id
+            )
             or source.start_ms is not None
             or source.end_ms is not None
             or source.content_sha256 != artifact.content_sha256
@@ -299,7 +375,10 @@ class EvidenceRequestManifest(StrictModel):
             item.status is not AmbiguityStatus.UNRESOLVED for item in self.unresolved_ambiguities
         ):
             raise ValueError("request ambiguities must remain unresolved")
-        if any(item.end_ms > self.duration_ms for item in self.unresolved_ambiguities):
+        if self.duration_ms is not None and any(
+            item.end_ms is not None and item.end_ms > self.duration_ms
+            for item in self.unresolved_ambiguities
+        ):
             raise ValueError("request ambiguity exceeds media duration")
         return self
 
