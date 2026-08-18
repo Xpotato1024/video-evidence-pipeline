@@ -398,7 +398,7 @@ def _box_transcribed_parent(
 def test_recovery_fork_reuses_only_pre_semantic_artifacts_and_keeps_parent_immutable(
     tmp_path: Path,
 ) -> None:
-    parent, blocked = _blocked_parent(tmp_path, "p", category="content-integrity")
+    parent, _blocked = _blocked_parent(tmp_path, "p", category="content-integrity")
     parent_before = _file_bytes(parent.root)
     parent_transitions_before = parent.transitions_jsonl.read_bytes()
 
@@ -421,7 +421,7 @@ def test_recovery_fork_reuses_only_pre_semantic_artifacts_and_keeps_parent_immut
     payload = json.loads(invoked.stdout)
     assert payload["state"] == JobState.TRANSCRIBED.value
     assert payload["parent_job_id"] == parent.root.name
-    assert payload["parent_finding_ids"] == ["AF000001"]
+    assert payload["parent_finding_ids"] == []
     child_root = Path(payload["workspace"])
     assert validate_job(child_root)["state"] == JobState.TRANSCRIBED.value
     child_job = load_job_yaml(child_root / "job.yaml")
@@ -457,23 +457,21 @@ def test_recovery_fork_reuses_only_pre_semantic_artifacts_and_keeps_parent_immut
 
     recovery = json.loads((child / "manifests" / "recovery-manifest.json").read_text("utf-8"))
     assert recovery["parent_job_id"] == parent.root.name
-    assert recovery["parent_final_draft_sha256"] == blocked.manifest.target_draft_sha256
-    assert recovery["parent_finding_ids"] == ["AF000001"]
+    assert recovery["parent_final_draft_sha256"] is None
+    assert recovery["parent_finding_ids"] == []
 
 
-def test_recovery_rejects_a_blocked_parent_with_another_material_category(tmp_path: Path) -> None:
+def test_recovery_accepts_a_blocked_parent_without_category_gate(tmp_path: Path) -> None:
     parent, _blocked = _blocked_parent(tmp_path, "q", category="evidence-binding")
 
-    with pytest.raises(VepError) as captured:
-        recover_job(
-            parent.root,
-            "d",
-            confirm=True,
-            basis="this category must not be recovered",
-        )
+    recovered = recover_job(
+        parent.root,
+        "d",
+        confirm=True,
+        basis="recover from the pre-semantic boundary",
+    )
 
-    assert captured.value.code == "RECOVERY_PARENT_NOT_ELIGIBLE"
-    assert not (parent.jobs_root / "d").exists()
+    assert validate_job(recovered.workspace.root)["state"] == JobState.TRANSCRIBED.value
 
 
 def test_recovery_copy_failure_removes_partial_child_and_allows_same_id_retry(
@@ -669,7 +667,7 @@ def test_recovery_provenance_tamper_is_rejected_against_the_parent(tmp_path: Pat
         basis="preserve the immutable parent provenance",
     )
     payload = json.loads(recovered.workspace.recovery_manifest_json.read_text("utf-8"))
-    payload["parent_final_draft_sha256"] = "0" * 64
+    payload["parent_job_fingerprint"] = "0" * 64
     recovered.workspace.recovery_manifest_json.write_text(
         json.dumps(payload, ensure_ascii=False),
         encoding="utf-8",

@@ -96,14 +96,15 @@ reviewer identityはlocal CLIの自己申告lineageであり、暗号学的な�
 
 ## Blocked-job recovery
 
-`vep job recover` is deliberately limited to a parent whose latest transition is
-`AUDITED → BLOCKED`, whose revision count reached 2, and whose material P0/P1
-findings are all `content-integrity`.
+`vep job recover` is deliberately limited to a readable `BLOCKED` parent with
+the pre-semantic source, normalization, raw-transcript, and supporting-input
+artifacts still present. Recovery does not require a finding category, an old
+draft/audit fingerprint, or any other semantic history to match.
 
 ```bash
 uv run vep job recover .local/jobs/blocked-report repaired-report \
   --confirm \
-  --basis "restart semantic processing after content-integrity findings"
+  --basis "restart semantic processing from the blocked parent"
 ```
 
 The parent workspace remains untouched. The child has a new job-bound authorization

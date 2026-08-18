@@ -16,9 +16,9 @@ class RecoveryManifest(StrictModel):
     schema_version: Literal["1.0"] = "1.0"
     parent_job_id: JobId
     parent_job_fingerprint: Sha256
-    parent_final_draft_sha256: Sha256
-    parent_audit_bundle_fingerprint: Sha256
-    parent_finding_ids: list[str] = Field(min_length=1, max_length=100_000)
+    parent_final_draft_sha256: Sha256 | None = None
+    parent_audit_bundle_fingerprint: Sha256 | None = None
+    parent_finding_ids: list[str] = Field(default_factory=list, max_length=100_000)
     recovery_basis: str = Field(min_length=1, max_length=1024)
     child_job_id: JobId
     child_job_fingerprint: Sha256

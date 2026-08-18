@@ -242,7 +242,7 @@ def test_normalization_publication_hashes_staged_bytes_once(
     assert target.read_bytes() == staged.read_bytes()
 
 
-def test_normalization_publication_rejects_mismatched_existing_target(
+def test_normalization_publication_defers_existing_target_integrity_to_deep(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     workspace, _job = initialize_job(
@@ -269,16 +269,18 @@ def test_normalization_publication_rejects_mismatched_existing_target(
 
     monkeypatch.setattr(normalization_module, "sha256_file", counted)
 
-    with pytest.raises(VepError) as captured:
-        normalization_module._artifact_for(
-            workspace,
-            staged,
-            artifact_prefix="analysis",
-            artifact_type="analysis_proxy",
-            relative_directory="analysis",
-            filename="analysis.mp4",
-        )
+    artifact = normalization_module._artifact_for(
+        workspace,
+        staged,
+        artifact_prefix="analysis",
+        artifact_type="analysis_proxy",
+        relative_directory="analysis",
+        filename="analysis.mp4",
+    )
 
+    assert hashed == [staged]
+    with pytest.raises(VepError) as captured:
+        normalization_module._verify_artifact_path(target, artifact, deep=True)
     assert captured.value.code == "NORMALIZED_BUNDLE_TAMPERED"
     assert hashed == [staged, target]
 

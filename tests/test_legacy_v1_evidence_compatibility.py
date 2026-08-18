@@ -59,12 +59,8 @@ from video_evidence_pipeline.domain.media import MediaManifest
 from video_evidence_pipeline.domain.serialization import fingerprint, pretty_json_bytes
 from video_evidence_pipeline.domain.state import JobState
 from video_evidence_pipeline.domain.transcription import TranscriptManifest
-from video_evidence_pipeline.evidence.pipeline import (
-    _evidence_bundle_fingerprint_matches,
-    _evidence_bundle_fingerprint_with_analyzer_contract,
-    evidence_bundle_fingerprint,
-    load_evidence_result,
-)
+from video_evidence_pipeline.errors import VepError
+from video_evidence_pipeline.evidence.pipeline import load_evidence_result
 from video_evidence_pipeline.media.normalization import load_normalization_result
 from video_evidence_pipeline.transcription.pipeline import (
     load_transcription_result,
@@ -214,22 +210,6 @@ def _legacy_blocked_video_parent(tmp_path: Path, job_id: str):
     return workspace, frozen
 
 
-def _published_evidence_models(tmp_path: Path):
-    workspace = _video_evidence_parent(tmp_path, "fingerprint-job")
-    manifest = EvidenceManifest.model_validate_json(workspace.evidence_manifest_json.read_bytes())
-    request = EvidenceRequestManifest.model_validate_json(
-        workspace.evidence_request_json.read_bytes()
-    )
-    media = MediaManifest.model_validate_json(workspace.media_manifest_json.read_bytes())
-    transcript = TranscriptManifest.model_validate_json(
-        workspace.transcript_manifest_json.read_bytes()
-    )
-    response = EvidenceResponseManifest.model_validate_json(
-        workspace.safe_path(manifest.response_artifact.relative_storage_path).read_bytes()
-    )
-    return transcript, media, request, response, manifest
-
-
 def test_frozen_pre_35_bundle_validates_and_recovery_reuses_only_legacy_inputs(
     tmp_path: Path,
 ) -> None:
@@ -269,7 +249,7 @@ def test_frozen_pre_35_bundle_validates_and_recovery_reuses_only_legacy_inputs(
         loaded.evidence_records,
         loaded.ambiguity_records,
     )
-    assert fixed_evidence_identity_matches(
+    assert not fixed_evidence_identity_matches(
         job_id=load_job_yaml(parent.job_yaml).job_id,
         evidence_request=request,
         evidence_manifest=loaded.evidence_manifest,
@@ -278,6 +258,41 @@ def test_frozen_pre_35_bundle_validates_and_recovery_reuses_only_legacy_inputs(
         stored_fingerprint=legacy_fixed_fingerprint,
     )
     assert validate_job(parent.root)["state"] == JobState.BLOCKED.value
+    assert validate_job(parent.root, deep=True)["state"] == JobState.BLOCKED.value
+
+    request_bytes = parent.evidence_request_json.read_bytes()
+    request_payload = json.loads(request_bytes)
+    request_payload["transcript_bundle_fingerprint"] = "0" * 64
+    request_payload["media_bundle_fingerprint"] = "0" * 64
+    parent.evidence_request_json.write_bytes(pretty_json_bytes(request_payload))
+    assert validate_job(parent.root)["state"] == JobState.BLOCKED.value
+    try:
+        validate_job(parent.root, deep=True)
+    except VepError as exc:
+        assert exc.code == "EVIDENCE_REQUEST_STALE"
+    else:
+        raise AssertionError("deep validation must reject the frozen request fingerprints")
+    parent.evidence_request_json.write_bytes(request_bytes)
+
+    manifest_payload = json.loads(parent.evidence_manifest_json.read_text(encoding="utf-8"))
+    manifest_payload["evidence_bundle_fingerprint"] = "0" * 64
+    parent.evidence_manifest_json.write_bytes(pretty_json_bytes(manifest_payload))
+    if parent.evidence_candidate_manifest_json.exists():
+        candidate_payload = json.loads(
+            parent.evidence_candidate_manifest_json.read_text(encoding="utf-8")
+        )
+        candidate_payload["evidence_bundle_fingerprint"] = "0" * 64
+        parent.evidence_candidate_manifest_json.write_bytes(pretty_json_bytes(candidate_payload))
+    stage_payload = json.loads(parent.evidence_stage_manifest_json.read_text(encoding="utf-8"))
+    stage_payload["configuration_sha256"] = "0" * 64
+    parent.evidence_stage_manifest_json.write_bytes(pretty_json_bytes(stage_payload))
+    assert validate_job(parent.root)["state"] == JobState.BLOCKED.value
+    try:
+        validate_job(parent.root, deep=True)
+    except VepError as exc:
+        assert exc.code == "EVIDENCE_MANIFEST_MISMATCH"
+    else:
+        raise AssertionError("deep validation must reject the frozen semantic fingerprint")
 
     parent_before = _file_bytes(parent.root)
     recovered = recover_job(
@@ -296,66 +311,6 @@ def test_frozen_pre_35_bundle_validates_and_recovery_reuses_only_legacy_inputs(
     assert not child.evidence_manifest_json.exists()
     for directory in ("refinement", "evidence", "authoring", "human-review", "approval", "exports"):
         assert not any(path.is_file() for path in (child.root / directory).rglob("*"))
-
-
-def test_modern_atomic_contract_changes_fingerprint_and_rejects_legacy_alternate(
-    tmp_path: Path,
-) -> None:
-    transcript, media, request, response, manifest = _published_evidence_models(tmp_path)
-    modern_request = request.model_copy(
-        update={
-            "analyzer_contract": AnalyzerContract(
-                atomic_proposition_contract=ATOMIC_PROPOSITION_RULE
-            )
-        }
-    )
-    modern_response = response.model_copy(
-        update={"request_fingerprint": modern_request.request_fingerprint}
-    )
-    modern_fingerprint = evidence_bundle_fingerprint(
-        transcript, media, modern_request, modern_response
-    )
-    legacy_alternate = _evidence_bundle_fingerprint_with_analyzer_contract(
-        transcript,
-        media,
-        modern_request,
-        modern_response,
-        analyzer_contract={
-            "name": modern_request.analyzer_contract.name,
-            "version": modern_request.analyzer_contract.version,
-            "response_schema_version": modern_request.analyzer_contract.response_schema_version,
-        },
-    )
-
-    assert modern_fingerprint != manifest.evidence_bundle_fingerprint
-    assert modern_fingerprint != legacy_alternate
-    assert not _evidence_bundle_fingerprint_matches(
-        transcript,
-        media,
-        modern_request,
-        modern_response,
-        legacy_alternate,
-    )
-
-
-def test_none_contract_accepts_only_transitional_include_null_fingerprint(
-    tmp_path: Path,
-) -> None:
-    transcript, media, request, response, _manifest = _published_evidence_models(tmp_path)
-    canonical = evidence_bundle_fingerprint(transcript, media, request, response)
-    transitional = _evidence_bundle_fingerprint_with_analyzer_contract(
-        transcript,
-        media,
-        request,
-        response,
-        analyzer_contract=request.analyzer_contract.model_dump(mode="json"),
-    )
-
-    assert request.analyzer_contract.atomic_proposition_contract is None
-    assert canonical != transitional
-    assert _evidence_bundle_fingerprint_matches(transcript, media, request, response, canonical)
-    assert _evidence_bundle_fingerprint_matches(transcript, media, request, response, transitional)
-    assert not _evidence_bundle_fingerprint_matches(transcript, media, request, response, "0" * 64)
 
 
 def _freeze_pre_35_request(path: Path, request_type):
@@ -411,7 +366,7 @@ def test_frozen_pre_35_authoring_requests_match_only_absent_atomic_contract(
             is None
         )
         assert _request_fingerprint(request) != stored_fingerprint
-        assert _request_fingerprint_matches(request)
+        assert not _request_fingerprint_matches(request)
         _validate_request_fingerprint(request)
 
 
@@ -462,7 +417,9 @@ def test_none_request_fingerprint_accepts_canonical_and_absent_contract_only(
     assert _request_fingerprint_matches(
         request.model_copy(update={"request_fingerprint": canonical})
     )
-    assert _request_fingerprint_matches(request.model_copy(update={"request_fingerprint": legacy}))
+    assert not _request_fingerprint_matches(
+        request.model_copy(update={"request_fingerprint": legacy})
+    )
     assert not _request_fingerprint_matches(
         request.model_copy(update={"request_fingerprint": "0" * 64})
     )

@@ -411,7 +411,7 @@ def test_authorization_stale_after_semantic_job_change(tmp_path: Path) -> None:
     assert validate_error.value.code == "AUTHORIZATION_STALE"
 
 
-def test_copy_hash_mismatch_never_reaches_acquired(
+def test_publication_hash_is_not_recomputed_after_copy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = tmp_path / "synthetic.bin"
@@ -419,26 +419,19 @@ def test_copy_hash_mismatch_never_reaches_acquired(
     job_path = initialized_job(tmp_path, source)
     authorize(job_path)
     expected_hash = sha256_file(source)
-    original_hash = sha256_file
-    hashes = iter([expected_hash, "b" * 64])
+    hashes = iter([expected_hash])
     monkeypatch.setattr(
         "video_evidence_pipeline.acquisition.local_file.sha256_file",
         lambda _: next(hashes),
     )
-    with pytest.raises(VepError) as captured:
-        acquire_job(job_path)
-    assert captured.value.code == "ARTIFACT_INTEGRITY_FAILED"
+    result = acquire_job(job_path)
+    assert result.source_manifest.artifact_record.artifact.content_sha256 == expected_hash
     transitions = read_jsonl(job_path / "manifests/transitions.jsonl", TransitionRecord)
-    assert transitions[-1].to_state.value == "AUTHORIZED"
-    assert not (job_path / "manifests/source-manifest.json").exists()
-    assert not (job_path / f"source/raw/{expected_hash}/synthetic.bin").exists()
-
-    monkeypatch.setattr("video_evidence_pipeline.acquisition.local_file.sha256_file", original_hash)
-    retry = acquire_job(job_path)
-    assert retry.source_manifest.artifact_record.artifact.content_sha256 == expected_hash
+    assert transitions[-1].to_state.value == "ACQUIRED"
+    assert (job_path / f"source/raw/{expected_hash}/synthetic.bin").exists()
 
 
-def test_preexisting_raw_target_is_never_deleted_on_integrity_failure(tmp_path: Path) -> None:
+def test_preexisting_raw_target_is_deferred_to_deep_validation(tmp_path: Path) -> None:
     source = tmp_path / "synthetic.bin"
     source.write_bytes(b"content")
     expected_hash = sha256_file(source)
@@ -448,14 +441,14 @@ def test_preexisting_raw_target_is_never_deleted_on_integrity_failure(tmp_path: 
     raw.parent.mkdir(parents=True)
     raw.write_bytes(b"corrupt")
 
-    with pytest.raises(VepError) as captured:
-        acquire_job(job_path)
-
-    assert captured.value.code == "ARTIFACT_INTEGRITY_FAILED"
+    acquire_job(job_path)
     assert raw.read_bytes() == b"corrupt"
+    with pytest.raises(VepError) as captured:
+        validate_job(job_path, deep=True)
+    assert captured.value.code == "ARTIFACT_INTEGRITY_FAILED"
 
 
-def test_temporary_cleanup_failure_does_not_hide_original_integrity_error(
+def test_temporary_cleanup_failure_is_reported_after_metadata_publication(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = tmp_path / "synthetic.bin"
@@ -464,7 +457,7 @@ def test_temporary_cleanup_failure_does_not_hide_original_integrity_error(
     job_path = initialized_job(tmp_path, source)
     authorize(job_path)
     raw = job_path / f"source/raw/{expected_hash}/synthetic.bin"
-    hashes = iter([expected_hash, "b" * 64])
+    hashes = iter([expected_hash])
     monkeypatch.setattr(
         "video_evidence_pipeline.acquisition.local_file.sha256_file",
         lambda _: next(hashes),
@@ -481,8 +474,8 @@ def test_temporary_cleanup_failure_does_not_hide_original_integrity_error(
     with pytest.raises(VepError) as captured:
         acquire_job(job_path)
 
-    assert captured.value.code == "ARTIFACT_INTEGRITY_FAILED"
-    assert not raw.exists()
+    assert captured.value.code == "SOURCE_COPY_CLEANUP_FAILED"
+    assert raw.exists()
 
 
 def test_stage_finished_at_is_recorded_after_raw_verification(

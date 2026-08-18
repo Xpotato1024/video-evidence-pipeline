@@ -12,7 +12,6 @@ from video_evidence_pipeline.domain import StrictModel, UtcDateTime
 from video_evidence_pipeline.domain.artifacts import ArtifactRef, EvidenceLedgerArtifactRef
 from video_evidence_pipeline.domain.identifiers import JobId, Sha256
 from video_evidence_pipeline.domain.media import FrameRecord
-from video_evidence_pipeline.domain.serialization import fingerprint
 from video_evidence_pipeline.domain.transcription import TranscriptSegment
 
 
@@ -308,11 +307,6 @@ class EvidenceRequestManifest(StrictModel):
             for item, segment in zip(self.transcript_refs, self.transcript_segments, strict=True)
         ):
             raise ValueError("request transcript reference catalog is inconsistent")
-        if any(
-            item.content_sha256 != fingerprint(segment)
-            for item, segment in zip(self.transcript_refs, self.transcript_segments, strict=True)
-        ):
-            raise ValueError("request transcript reference fingerprints are inconsistent")
         if self.duration_ms is None:
             if (
                 any(

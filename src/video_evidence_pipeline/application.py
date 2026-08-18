@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import getpass
 import shutil
-import stat
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -71,15 +70,13 @@ from video_evidence_pipeline.delivery import (
     load_approval,
     load_export,
 )
-from video_evidence_pipeline.domain.artifacts import ArtifactRef
+from video_evidence_pipeline.domain.artifacts import ArtifactRef, artifact_file_matches
 from video_evidence_pipeline.domain.authoring import (
     AuditDisposition,
-    AuditSeverity,
     FixedEvidenceBundle,
 )
 from video_evidence_pipeline.domain.authorization import AuthorizationRecord
 from video_evidence_pipeline.domain.delivery import ReviewerIdentity
-from video_evidence_pipeline.domain.hashing import sha256_file
 from video_evidence_pipeline.domain.job import (
     AssignmentSpec,
     JobSpec,
@@ -293,8 +290,8 @@ class _RecoveryParent:
     media: NormalizationResult
     transcript: TranscriptionResult
     supporting: SupportingInputManifest | None
-    final_draft_sha256: str
-    audit_bundle_fingerprint: str
+    final_draft_sha256: str | None
+    audit_bundle_fingerprint: str | None
     finding_ids: tuple[str, ...]
 
 
@@ -315,9 +312,6 @@ def _load_recovery_manifest(workspace: JobWorkspace, job: JobSpec) -> RecoveryMa
     authorization = _authorization(workspace)
     if (
         manifest.parent_job_fingerprint != job_fingerprint(parent.job)
-        or manifest.parent_final_draft_sha256 != parent.final_draft_sha256
-        or manifest.parent_audit_bundle_fingerprint != parent.audit_bundle_fingerprint
-        or tuple(manifest.parent_finding_ids) != parent.finding_ids
         or manifest.recovery_basis != authorization.authorization_basis
         or manifest.created_at != authorization.confirmed_at
         or authorization.allow_local_processing != parent.authorization.allow_local_processing
@@ -390,13 +384,7 @@ def _recovery_supporting_artifacts(supporting) -> tuple[ArtifactRef, ...]:
 
 def _verify_recovery_copy(path: Path, artifact: ArtifactRef) -> None:
     try:
-        metadata = path.stat(follow_symlinks=False)
-        if (
-            path.is_symlink()
-            or not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_size != artifact.size_bytes
-            or sha256_file(path) != artifact.content_sha256
-        ):
+        if not artifact_file_matches(path, artifact):
             raise integrity_error(
                 "RECOVERY_COPY_INTEGRITY_FAILED",
                 "recovered artifact does not match its stored identity",
@@ -439,43 +427,14 @@ def _recovery_parent(
     parent_path: Path,
 ) -> _RecoveryParent:
     workspace, job, transitions, state = _load_context(parent_path)
-    if (
-        state is not JobState.BLOCKED
-        or not transitions
-        or (
-            transitions[-1].from_state is not JobState.AUDITED
-            or transitions[-1].to_state is not JobState.BLOCKED
-        )
-    ):
+    if state is not JobState.BLOCKED:
         raise state_error(
             "RECOVERY_PARENT_NOT_ELIGIBLE",
-            "parent is not an audited blocked job",
+            "recovery parent must be BLOCKED",
         )
-    _validate_job_unmapped(parent_path)
     authorization = _authorization(workspace)
-    _fixed, history, _human_review = _load_authoring_state_integrity(workspace, job, state)
-    draft, audit = history[-1]
-    if (
-        audit is None
-        or audit.manifest.disposition is not AuditDisposition.BLOCKED
-        or draft.manifest.revision_count != 2
-    ):
-        raise state_error(
-            "RECOVERY_PARENT_NOT_ELIGIBLE",
-            "parent did not reach the revision limit through a blocked audit",
-        )
-    material_findings = tuple(
-        finding
-        for finding in audit.findings
-        if finding.severity in {AuditSeverity.P0, AuditSeverity.P1}
-    )
-    if not material_findings or any(
-        finding.category != "content-integrity" for finding in material_findings
-    ):
-        raise state_error(
-            "RECOVERY_PARENT_NOT_ELIGIBLE",
-            "parent does not have only material content-integrity findings",
-        )
+    _validate_authorization_binding(job, transitions, authorization)
+    _require_current_authorization_fingerprint(job, authorization)
     raw_artifact = verify_acquired_bundle(workspace, job)
     media = load_normalization_result(workspace, job, raw_artifact)
     transcript = load_transcription_result(workspace, job, media.media_manifest)
@@ -499,9 +458,9 @@ def _recovery_parent(
         media=media,
         transcript=transcript,
         supporting=supporting,
-        final_draft_sha256=draft.manifest.draft_artifact.content_sha256,
-        audit_bundle_fingerprint=audit.manifest.bundle_fingerprint,
-        finding_ids=tuple(sorted(finding.finding_id for finding in material_findings)),
+        final_draft_sha256=None,
+        audit_bundle_fingerprint=None,
+        finding_ids=(),
     )
 
 
@@ -743,7 +702,7 @@ def _validate_job_unmapped(path: Path, *, deep: bool = False) -> dict[str, Any]:
                 evidence_segments = transcription.segments
                 if state in refinement_states:
                     evidence_manifest, evidence_segments = _evidence_transcript_inputs(
-                        workspace, job, media_manifest, transcription
+                        workspace, job, media_manifest, transcription, deep=deep
                     )
                 if state in {JobState.EVIDENCE_READY, *authoring_states}:
                     load_evidence_result(
@@ -752,11 +711,12 @@ def _validate_job_unmapped(path: Path, *, deep: bool = False) -> dict[str, Any]:
                         media_manifest,
                         evidence_manifest,
                         evidence_segments,
+                        deep=deep,
                     )
                     if state in authoring_states:
                         try:
                             fixed, history, human_review = _load_authoring_state_integrity(
-                                workspace, job, state
+                                workspace, job, state, deep=deep
                             )
                         except VepError as exc:
                             if state not in {JobState.HUMAN_APPROVED, JobState.EXPORTED}:
@@ -771,9 +731,11 @@ def _validate_job_unmapped(path: Path, *, deep: bool = False) -> dict[str, Any]:
                                 raise integrity_error(
                                     "APPROVAL_STALE", "approval upstream is incomplete"
                                 )
-                            approval = load_approval(workspace, job, draft, audit, human_review)
+                            approval = load_approval(
+                                workspace, job, draft, audit, human_review, deep=deep
+                            )
                             if state is JobState.EXPORTED:
-                                load_export(workspace, job, fixed, approval)
+                                load_export(workspace, job, fixed, approval, deep=deep)
     return {
         "valid": True,
         "job_id": job.job_id,
@@ -1275,6 +1237,8 @@ def _evidence_transcript_inputs(
     job: JobSpec,
     media_manifest,
     transcription: TranscriptionResult,
+    *,
+    deep: bool = False,
 ) -> tuple:
     """Select raw v1 transcript or the explicit refined projection for downstream stages."""
 
@@ -1286,6 +1250,7 @@ def _evidence_transcript_inputs(
         media_manifest,
         transcription.transcript_manifest,
         transcription.segments,
+        deep=deep,
     )
     return evidence_transcript_projection(
         transcription.transcript_manifest, refinement
@@ -1703,12 +1668,12 @@ def _import_evidence_job_locked(
                     raise
 
 
-def _load_fixed_evidence(workspace: JobWorkspace, job: JobSpec):
-    raw_artifact = verify_acquired_bundle(workspace, job)
-    media = load_normalization_result(workspace, job, raw_artifact).media_manifest
-    transcription = load_transcription_result(workspace, job, media)
+def _load_fixed_evidence(workspace: JobWorkspace, job: JobSpec, *, deep: bool = False):
+    raw_artifact = verify_acquired_bundle(workspace, job, deep=deep)
+    media = load_normalization_result(workspace, job, raw_artifact, deep=deep).media_manifest
+    transcription = load_transcription_result(workspace, job, media, deep=deep)
     evidence_transcript, evidence_segments = _evidence_transcript_inputs(
-        workspace, job, media, transcription
+        workspace, job, media, transcription, deep=deep
     )
     evidence = load_evidence_result(
         workspace,
@@ -1716,6 +1681,7 @@ def _load_fixed_evidence(workspace: JobWorkspace, job: JobSpec):
         media,
         evidence_transcript,
         evidence_segments,
+        deep=deep,
     )
     request = load_evidence_request(
         workspace,
@@ -1723,6 +1689,7 @@ def _load_fixed_evidence(workspace: JobWorkspace, job: JobSpec):
         media,
         evidence_transcript,
         evidence_segments,
+        deep=deep,
     )
     return build_fixed_evidence_bundle(
         job,
@@ -1751,6 +1718,8 @@ def _load_authoring_history(
     workspace: JobWorkspace,
     job: JobSpec,
     fixed,
+    *,
+    deep: bool = False,
 ) -> tuple[tuple[DraftResult, AuditResult | None], ...]:
     latest = _latest_draft_version(workspace)
     if latest is None:
@@ -1760,8 +1729,8 @@ def _load_authoring_history(
     for index in range(1, count + 1):
         version = f"v{index:03d}"
         if index == 1:
-            draft = load_draft(workspace, job, version, fixed)
-            request = load_authoring_request(workspace, job, fixed)
+            draft = load_draft(workspace, job, version, fixed, deep=deep)
+            request = load_authoring_request(workspace, job, fixed, deep=deep)
             if (
                 draft.manifest.request_fingerprint != request.request_fingerprint
                 or draft.agent_run.skill != request.skill
@@ -1781,6 +1750,7 @@ def _load_authoring_history(
                 fixed,
                 predecessor,
                 predecessor_audit,
+                deep=deep,
             )
             revision = load_revision(
                 workspace,
@@ -1791,12 +1761,13 @@ def _load_authoring_history(
                 predecessor_audit,
                 request,
                 tuple(history),
+                deep=deep,
             )
             draft = revision.draft
         audit_path = workspace.safe_path(f"manifests/authoring/audit-{version}.json")
         pending_history = (*history, (draft, None))
         audit = (
-            load_audit(workspace, job, draft, fixed, pending_history)
+            load_audit(workspace, job, draft, fixed, pending_history, deep=deep)
             if audit_path.exists()
             else None
         )
@@ -1808,13 +1779,15 @@ def _load_authoring_state_integrity(
     workspace: JobWorkspace,
     job: JobSpec,
     state: JobState,
+    *,
+    deep: bool = False,
 ) -> tuple[
     FixedEvidenceBundle,
     tuple[tuple[DraftResult, AuditResult | None], ...],
     HumanReviewResult | None,
 ]:
-    fixed = _load_fixed_evidence(workspace, job)
-    history = _load_authoring_history(workspace, job, fixed)
+    fixed = _load_fixed_evidence(workspace, job, deep=deep)
+    history = _load_authoring_history(workspace, job, fixed, deep=deep)
     if not history:
         raise integrity_error("DRAFT_HISTORY_INVALID", "draft history is absent")
     draft, audit = history[-1]
@@ -1837,7 +1810,7 @@ def _load_authoring_state_integrity(
         JobState.HUMAN_APPROVED,
         JobState.EXPORTED,
     }:
-        human_review = load_human_review(workspace, job, fixed, draft, audit, history)
+        human_review = load_human_review(workspace, job, fixed, draft, audit, history, deep=deep)
     return fixed, history, human_review
 
 

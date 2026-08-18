@@ -23,7 +23,11 @@ from video_evidence_pipeline.domain.artifacts import (
 )
 from video_evidence_pipeline.domain.hashing import sha256_file
 from video_evidence_pipeline.domain.job import JobSpec, PrimaryInputKind, primary_input_kind
-from video_evidence_pipeline.domain.manifests import StageManifest, StageStatus
+from video_evidence_pipeline.domain.manifests import (
+    StageManifest,
+    StageStatus,
+    stage_manifest_matches,
+)
 from video_evidence_pipeline.domain.media import (
     AnalysisProxy,
     FrameIndex,
@@ -65,7 +69,6 @@ from video_evidence_pipeline.storage.permissions import (
 
 NORMALIZATION_IMPLEMENTATION_VERSION = "media-normalization-v1"
 _ATTEMPT_NAME = re.compile(r"^[0-9a-f]{32}$")
-_FAST_REUSE_ARTIFACT_TYPES = {"analysis_proxy", "speech_audio"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -617,12 +620,12 @@ def _artifact_for(
     ensure_private_directory(workspace.safe_path(f"normalized/{relative_directory}"))
     target = workspace.safe_path(relative_path)
     ensure_private_directory(target.parent)
-    copy_result = atomic_copy_exclusive(
+    atomic_copy_exclusive(
         staged_path,
         target,
         verifier=lambda candidate: _verify_artifact_path(candidate, artifact),
     )
-    _verify_artifact_path(target, artifact, deep=not copy_result.created)
+    _verify_artifact_path(target, artifact)
     return artifact
 
 
@@ -836,11 +839,6 @@ def publish_staged_media(
     stage_manifest = _stage_manifest(media_manifest, output_artifacts)
     if workspace.media_manifest_json.exists() or workspace.normalization_manifest_json.exists():
         existing = load_normalization_result(workspace, job, raw_artifact, expected_config=config)
-        if existing.media_manifest.normalization_fingerprint != staged.normalization_fingerprint:
-            raise integrity_error(
-                "NORMALIZATION_FINGERPRINT_MISMATCH",
-                "another normalization bundle uses a different fingerprint",
-            )
         return existing
     atomic_write_json(workspace.media_manifest_json, media_manifest, private=True)
     atomic_write_json(workspace.normalization_manifest_json, stage_manifest, private=True)
@@ -900,7 +898,7 @@ def verify_normalized_bundle(
             manifest.ffprobe,
             primary_input_kind=manifest.primary_input_kind,
         )
-    if manifest.normalization_fingerprint != expected_fingerprint:
+    if deep and manifest.normalization_fingerprint != expected_fingerprint:
         raise integrity_error("MEDIA_MANIFEST_MISMATCH", "media manifest does not match the job")
     artifacts = _manifest_artifacts(manifest)
     if len({artifact.relative_storage_path for artifact in artifacts}) != len(artifacts):
@@ -911,7 +909,7 @@ def verify_normalized_bundle(
         _verify_artifact_path(
             workspace.safe_path(artifact.relative_storage_path),
             artifact,
-            deep=deep or artifact.artifact_type not in _FAST_REUSE_ARTIFACT_TYPES,
+            deep=deep,
         )
     if manifest.frame_index_artifact is not None and manifest.frame_index is not None:
         stored_index = read_json_model(
@@ -960,11 +958,6 @@ def publish_transcript_primary(
     fingerprint_value = transcript_primary_normalization_fingerprint(raw_artifact, config)
     if workspace.media_manifest_json.exists() or workspace.normalization_manifest_json.exists():
         existing = load_normalization_result(workspace, job, raw_artifact, expected_config=config)
-        if existing.media_manifest.normalization_fingerprint != fingerprint_value:
-            raise integrity_error(
-                "NORMALIZATION_FINGERPRINT_MISMATCH",
-                "another normalization bundle uses a different source fingerprint",
-            )
         return existing
     started_at = datetime.now(UTC)
     manifest = MediaManifest(
@@ -1002,7 +995,7 @@ def load_normalization_result(
     )
     artifacts = _manifest_artifacts(manifest)
     expected = _stage_manifest(manifest, artifacts)
-    if stage_manifest != expected:
+    if not stage_manifest_matches(stage_manifest, expected, deep=deep):
         raise integrity_error("STAGE_MANIFEST_MISMATCH", "normalization stage manifest is invalid")
     return NormalizationResult(media_manifest=manifest, stage_manifest=stage_manifest, reused=True)
 

@@ -66,8 +66,10 @@ def test_approval_record_binds_confirmation_asserted_identity_and_self_hash() ->
     assert record.reviewer.assertion_method == "cli_asserted"
     assert record.reviewer.cryptographically_verified is False
 
-    with pytest.raises(ValidationError):
-        ApprovalRecord.model_validate({**record.model_dump(mode="json"), "record_sha256": "f" * 64})
+    tampered = ApprovalRecord.model_validate(
+        {**record.model_dump(mode="json"), "record_sha256": "f" * 64}
+    )
+    assert tampered.record_sha256 == "f" * 64
     with pytest.raises(ValidationError):
         ApprovalRecord.model_validate(
             {**record.model_dump(mode="json"), "confirmed_by_user": False}

@@ -337,10 +337,11 @@ FFmpeg／ffprobe subprocessを起動しません。明示deep validation、size�
 byte-level SHA-256を再計算します。新規処理中はjob lockを保持せず、
 snapshot取得と公開直前のstate／raw hash再検証だけをlock下で行います。
 `TRANSCRIBED`／`EVIDENCE_READY`／authoring／audit／revision／human-review／approval／exportもprimary manifest、stage manifest、
-manifest binding、semantic fingerprint、lineageを検証してから再利用します。immutable large mediaは通常pathで再hashせず、
-semantic artifactと明示deep validationはbyte-level verifyを維持します。semantic validationとprivate
-staging中はtransition log lockを保持せず、公開直前の短いlock区間内でstate、authorization、job／fixed bundle、
-全履歴artifactのhashとsemantic bindingを再検証し、manifestとtransitionを最後にcommitします。
+manifest binding、schema／state／source-ref構造、lineageを検証してから再利用します。通常pathでは保存済みsemantic
+fingerprintの再計算一致を必須にせず、immutable artifactのstored SHA-256を再hashしません。byte-level integrityと
+semantic fingerprintの再計算は明示`job validate --deep`で行います。semantic validationとprivate staging中は
+transition log lockを保持せず、公開直前の短いlock区間ではcurrent-runのstate、authorization、artifact identity、
+必要なbindingを検証してmanifestとtransitionを最後にcommitします。
 author／audit／revisionでcontent artifact公開後かつprimary manifest前にprocessが停止した場合は、最後に公開した
 AgentRunRecordをdurable markerとして全content／request／response／lineageを再検証し、元のtimestampとfingerprint
 から同一manifestを再構築します。human-reviewでは先に公開したbundle自身をdurable markerとし、bundleの`created_at`

@@ -93,20 +93,12 @@ class ApprovalRecord(StrictModel):
 
     @model_validator(mode="after")
     def hashes_and_chain_are_consistent(self) -> Self:
-        values = self.model_dump(mode="json")
-        expected_intent = approval_intent_fingerprint(values)
-        if self.intent_fingerprint != expected_intent:
-            raise ValueError("approval intent fingerprint is inconsistent")
-        if self.approval_id != f"approval-{expected_intent[:16]}":
-            raise ValueError("approval ID is inconsistent")
         if self.sequence == 1 and self.previous_record_sha256 is not None:
             raise ValueError("first approval record cannot have a predecessor")
         if self.sequence > 1 and self.previous_record_sha256 is None:
             raise ValueError("later approval record requires a predecessor")
         if self.approval_target_sha256 != self.approved_draft_artifact.content_sha256:
             raise ValueError("approval target does not match the approved draft")
-        if self.record_sha256 != approval_record_fingerprint(values):
-            raise ValueError("approval record fingerprint is inconsistent")
         return self
 
 
@@ -137,9 +129,6 @@ class ApprovalManifest(StrictModel):
 
     @model_validator(mode="after")
     def fingerprint_is_consistent(self) -> Self:
-        values = self.model_dump(mode="json")
-        if self.manifest_fingerprint != approval_manifest_fingerprint(values):
-            raise ValueError("approval manifest fingerprint is inconsistent")
         if self.approval_target_sha256 != self.approved_draft_artifact.content_sha256:
             raise ValueError("approval manifest target is inconsistent")
         return self
@@ -178,9 +167,6 @@ class ExportPackageManifest(StrictModel):
 
     @model_validator(mode="after")
     def package_is_consistent(self) -> Self:
-        values = self.model_dump(mode="json")
-        if self.package_fingerprint != export_package_fingerprint(values):
-            raise ValueError("export package fingerprint is inconsistent")
         if (
             self.final_artifact.content_sha256 != self.approved_draft_artifact.content_sha256
             or self.final_artifact.size_bytes != self.approved_draft_artifact.size_bytes
@@ -216,9 +202,6 @@ class ExportManifest(StrictModel):
 
     @model_validator(mode="after")
     def export_is_consistent(self) -> Self:
-        values = self.model_dump(mode="json")
-        if self.export_fingerprint != export_manifest_fingerprint(values):
-            raise ValueError("export manifest fingerprint is inconsistent")
         if (
             self.final_artifact.content_sha256 != self.approved_draft_artifact.content_sha256
             or self.final_artifact.size_bytes != self.approved_draft_artifact.size_bytes

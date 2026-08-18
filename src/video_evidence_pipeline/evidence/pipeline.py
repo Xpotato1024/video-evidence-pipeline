@@ -18,6 +18,7 @@ from video_evidence_pipeline.domain.artifacts import (
     EvidenceLedgerArtifactRef,
     ProducerIdentity,
     ProducerKind,
+    artifact_file_matches,
 )
 from video_evidence_pipeline.domain.evidence import (
     ATOMIC_PROPOSITION_RULE,
@@ -40,7 +41,11 @@ from video_evidence_pipeline.domain.evidence import (
 )
 from video_evidence_pipeline.domain.hashing import sha256_file
 from video_evidence_pipeline.domain.job import JobSpec, requires_transcript_refinement
-from video_evidence_pipeline.domain.manifests import StageManifest, StageStatus
+from video_evidence_pipeline.domain.manifests import (
+    StageManifest,
+    StageStatus,
+    stage_manifest_matches,
+)
 from video_evidence_pipeline.domain.media import FrameRecord, MediaManifest
 from video_evidence_pipeline.domain.serialization import (
     canonical_json_bytes,
@@ -220,16 +225,18 @@ def _refinement_ambiguities(
     segments: tuple[TranscriptSegment, ...],
     *,
     first_id: int,
+    deep: bool = False,
 ) -> list[AmbiguityRecord]:
     if not requires_transcript_refinement(job):
         return []
-    raw = load_transcription_result(workspace, job, media_manifest)
+    raw = load_transcription_result(workspace, job, media_manifest, deep=deep)
     refinement = load_refinement_result(
         workspace,
         job,
         media_manifest,
         raw.transcript_manifest,
         raw.segments,
+        deep=deep,
     )
     if (
         evidence_transcript_projection(raw.transcript_manifest, refinement) != transcript_manifest
@@ -267,11 +274,11 @@ def _refinement_ambiguities(
 
 
 def _supporting_catalog(
-    workspace: JobWorkspace, job: JobSpec
+    workspace: JobWorkspace, job: JobSpec, *, deep: bool = False
 ) -> tuple[tuple[ArtifactRef, ...], tuple[SourceRef, ...]]:
     if not job.supporting_inputs:
         return (), ()
-    manifest: SupportingInputManifest = load_supporting_inputs(workspace, job)
+    manifest: SupportingInputManifest = load_supporting_inputs(workspace, job, deep=deep)
     pairs: list[tuple[ArtifactRef, SourceRef]] = []
     for record in manifest.inputs:
         if record.kind.value == "pdf":
@@ -370,6 +377,7 @@ def _expected_request(
     segments: tuple[TranscriptSegment, ...],
     *,
     created_at: datetime,
+    deep: bool = False,
 ) -> EvidenceRequestManifest:
     contract = AnalyzerContract(
         atomic_proposition_contract=(
@@ -389,7 +397,7 @@ def _expected_request(
         media_manifest.frame_index.records if media_manifest.frame_index is not None else ()
     )
     frames = tuple(_frame_refs(media_manifest))
-    approved_artifacts, approved_artifact_refs = _supporting_catalog(workspace, job)
+    approved_artifacts, approved_artifact_refs = _supporting_catalog(workspace, job, deep=deep)
     request_ambiguities = _request_ambiguities(transcript_manifest, segments)
     ambiguities = tuple(
         [
@@ -401,6 +409,7 @@ def _expected_request(
                 transcript_manifest,
                 segments,
                 first_id=len(request_ambiguities) + 1,
+                deep=deep,
             ),
         ]
     )
@@ -445,6 +454,8 @@ def prepare_evidence_request(
     media_manifest: MediaManifest,
     transcript_manifest: TranscriptManifest,
     segments: tuple[TranscriptSegment, ...],
+    *,
+    deep: bool = False,
 ) -> EvidencePrepareResult:
     if workspace.evidence_request_json.exists():
         stored = _read_bounded_model(
@@ -460,8 +471,17 @@ def prepare_evidence_request(
             transcript_manifest,
             segments,
             created_at=stored.created_at,
+            deep=deep,
         )
-        if stored != expected:
+        stored_values = stored.model_dump(mode="json", exclude={"request_fingerprint"})
+        expected_values = expected.model_dump(mode="json", exclude={"request_fingerprint"})
+        stored_values.pop("transcript_bundle_fingerprint", None)
+        expected_values.pop("transcript_bundle_fingerprint", None)
+        stored_values.pop("media_bundle_fingerprint", None)
+        expected_values.pop("media_bundle_fingerprint", None)
+        stored_values["analyzer_contract"].pop("atomic_proposition_contract", None)
+        expected_values["analyzer_contract"].pop("atomic_proposition_contract", None)
+        if stored_values != expected_values:
             raise state_error(
                 "EVIDENCE_REQUEST_STALE",
                 "prepared evidence request no longer matches canonical inputs",
@@ -474,6 +494,7 @@ def prepare_evidence_request(
         transcript_manifest,
         segments,
         created_at=datetime.now(UTC),
+        deep=deep,
     )
     payload = pretty_json_bytes(request)
     if len(payload) > _MAXIMUM_REQUEST_BYTES:
@@ -496,6 +517,8 @@ def load_evidence_request(
     media_manifest: MediaManifest,
     transcript_manifest: TranscriptManifest,
     segments: tuple[TranscriptSegment, ...],
+    *,
+    deep: bool = False,
 ) -> EvidenceRequestManifest:
     stored = _read_bounded_model(
         workspace.evidence_request_json,
@@ -510,8 +533,21 @@ def load_evidence_request(
         transcript_manifest,
         segments,
         created_at=stored.created_at,
+        deep=deep,
     )
-    if stored != expected:
+    if deep:
+        request_matches = stored == expected
+    else:
+        stored_values = stored.model_dump(mode="json", exclude={"request_fingerprint"})
+        expected_values = expected.model_dump(mode="json", exclude={"request_fingerprint"})
+        stored_values.pop("transcript_bundle_fingerprint", None)
+        expected_values.pop("transcript_bundle_fingerprint", None)
+        stored_values.pop("media_bundle_fingerprint", None)
+        expected_values.pop("media_bundle_fingerprint", None)
+        stored_values["analyzer_contract"].pop("atomic_proposition_contract", None)
+        expected_values["analyzer_contract"].pop("atomic_proposition_contract", None)
+        request_matches = stored_values == expected_values
+    if not request_matches:
         raise state_error("EVIDENCE_REQUEST_STALE", "evidence request is stale")
     return stored
 
@@ -533,8 +569,9 @@ def _validate_response(
     response: EvidenceResponseManifest,
     *,
     allow_fixture: bool,
+    check_fingerprints: bool = True,
 ) -> None:
-    if response.request_fingerprint != request.request_fingerprint:
+    if check_fingerprints and response.request_fingerprint != request.request_fingerprint:
         raise state_error("EVIDENCE_RESPONSE_STALE", "evidence response targets another request")
     if response.created_at < request.created_at:
         raise integrity_error(
@@ -652,23 +689,6 @@ def evidence_bundle_fingerprint(
     request: EvidenceRequestManifest,
     response: EvidenceResponseManifest,
 ) -> str:
-    return _evidence_bundle_fingerprint_with_analyzer_contract(
-        transcript_manifest,
-        media_manifest,
-        request,
-        response,
-        analyzer_contract=request.analyzer_contract.model_dump(mode="json", exclude_none=True),
-    )
-
-
-def _evidence_bundle_fingerprint_with_analyzer_contract(
-    transcript_manifest: TranscriptManifest,
-    media_manifest: MediaManifest,
-    request: EvidenceRequestManifest,
-    response: EvidenceResponseManifest,
-    *,
-    analyzer_contract: dict[str, object],
-) -> str:
     return fingerprint(
         {
             "transcript_bundle_fingerprint": transcript_manifest.transcription_fingerprint,
@@ -679,7 +699,9 @@ def _evidence_bundle_fingerprint_with_analyzer_contract(
                 else None
             ),
             "request_fingerprint": request.request_fingerprint,
-            "analyzer_contract": analyzer_contract,
+            "analyzer_contract": request.analyzer_contract.model_dump(
+                mode="json", exclude_none=True
+            ),
             "response": response.model_dump(mode="json"),
             "implementation_version": EVIDENCE_IMPLEMENTATION_VERSION,
         }
@@ -693,21 +715,9 @@ def _evidence_bundle_fingerprint_matches(
     response: EvidenceResponseManifest,
     stored_fingerprint: str,
 ) -> bool:
-    canonical_fingerprint = evidence_bundle_fingerprint(
+    return stored_fingerprint == evidence_bundle_fingerprint(
         transcript_manifest, media_manifest, request, response
     )
-    if stored_fingerprint == canonical_fingerprint:
-        return True
-    if request.analyzer_contract.atomic_proposition_contract is None:
-        transitional_fingerprint = _evidence_bundle_fingerprint_with_analyzer_contract(
-            transcript_manifest,
-            media_manifest,
-            request,
-            response,
-            analyzer_contract=request.analyzer_contract.model_dump(mode="json"),
-        )
-        return stored_fingerprint == transitional_fingerprint
-    return False
 
 
 def _staging_root(workspace: JobWorkspace) -> Path:
@@ -756,15 +766,9 @@ def cleanup_attempt(workspace: JobWorkspace, attempt: Path) -> None:
     shutil.rmtree(attempt)
 
 
-def _verify_artifact(path: Path, artifact: ArtifactRef) -> None:
+def _verify_artifact(path: Path, artifact: ArtifactRef, *, deep: bool = False) -> None:
     try:
-        metadata = path.stat(follow_symlinks=False)
-        if (
-            path.is_symlink()
-            or not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_size != artifact.size_bytes
-            or sha256_file(path) != artifact.content_sha256
-        ):
+        if not artifact_file_matches(path, artifact, deep=deep, hasher=sha256_file):
             raise integrity_error("EVIDENCE_BUNDLE_TAMPERED", "evidence artifact is invalid")
         enforce_private_file(path)
     except OSError:
@@ -823,7 +827,7 @@ def _staged_artifact(
 
 
 def _read_evidence_records(
-    path: Path, artifact: EvidenceLedgerArtifactRef
+    path: Path, artifact: EvidenceLedgerArtifactRef, *, deep: bool = False
 ) -> tuple[EvidenceRecord, ...]:
     try:
         metadata = path.stat(follow_symlinks=False)
@@ -831,7 +835,7 @@ def _read_evidence_records(
         raise integrity_error("EVIDENCE_LEDGER_INVALID", "evidence ledger is unavailable") from None
     if artifact.size_bytes > _MAXIMUM_LEDGER_BYTES or metadata.st_size > _MAXIMUM_LEDGER_BYTES:
         raise integrity_error("EVIDENCE_LEDGER_INVALID", "evidence ledger exceeds its limit")
-    _verify_artifact(path, artifact)
+    _verify_artifact(path, artifact, deep=deep)
     payload = path.read_bytes()
     if not payload:
         return ()
@@ -1204,19 +1208,23 @@ def _verify_evidence_manifest(
     transcript_manifest: TranscriptManifest,
     segments: tuple[TranscriptSegment, ...],
     manifest: EvidenceManifest,
+    *,
+    deep: bool = False,
 ) -> EvidenceImportResult:
-    request = load_evidence_request(workspace, job, media_manifest, transcript_manifest, segments)
+    request = load_evidence_request(
+        workspace, job, media_manifest, transcript_manifest, segments, deep=deep
+    )
     response_path = workspace.safe_path(manifest.response_artifact.relative_storage_path)
     evidence_path = workspace.safe_path(manifest.evidence_artifact.relative_storage_path)
     ambiguity_path = workspace.safe_path(manifest.ambiguity_artifact.relative_storage_path)
-    evidence_records = _read_evidence_records(evidence_path, manifest.evidence_artifact)
+    evidence_records = _read_evidence_records(evidence_path, manifest.evidence_artifact, deep=deep)
     ambiguity_ledger = _read_bounded_model(
         ambiguity_path,
         AmbiguityLedger,
         maximum_bytes=_MAXIMUM_LEDGER_BYTES,
         code="AMBIGUITY_LEDGER_INVALID",
     )
-    _verify_artifact(ambiguity_path, manifest.ambiguity_artifact)
+    _verify_artifact(ambiguity_path, manifest.ambiguity_artifact, deep=deep)
     ambiguity_records = tuple(ambiguity_ledger.records)
     if manifest.response_artifact.size_bytes > _MAXIMUM_RESPONSE_BYTES:
         raise integrity_error(
@@ -1228,7 +1236,7 @@ def _verify_evidence_manifest(
         maximum_bytes=_MAXIMUM_RESPONSE_BYTES,
         code="EVIDENCE_RESPONSE_INVALID",
     )
-    _verify_artifact(response_path, manifest.response_artifact)
+    _verify_artifact(response_path, manifest.response_artifact, deep=deep)
     if (
         response.request_fingerprint != manifest.request_fingerprint
         or response.analyzer != manifest.analyzer
@@ -1239,11 +1247,20 @@ def _verify_evidence_manifest(
         raise integrity_error(
             "EVIDENCE_MANIFEST_MISMATCH", "validated response and ledgers disagree"
         )
-    _validate_response(request, response, allow_fixture=True)
+    _validate_response(request, response, allow_fixture=True, check_fingerprints=deep)
     if (
         manifest.job_id != job.job_id
         or manifest.implementation_version != EVIDENCE_IMPLEMENTATION_VERSION
-        or manifest.transcript_bundle_fingerprint != transcript_manifest.transcription_fingerprint
+        or manifest.evidence_count != len(evidence_records)
+        or manifest.ambiguity_count != len(ambiguity_records)
+        or not manifest.response_artifact.relative_storage_path.startswith("evidence/responses/")
+        or manifest.evidence_artifact.relative_storage_path
+        != (f"evidence/records/{manifest.evidence_artifact.content_sha256}/evidence.jsonl")
+        or not manifest.ambiguity_artifact.relative_storage_path.startswith("evidence/ambiguities/")
+    ):
+        raise integrity_error("EVIDENCE_MANIFEST_MISMATCH", "evidence bundle is inconsistent")
+    if deep and (
+        manifest.transcript_bundle_fingerprint != transcript_manifest.transcription_fingerprint
         or manifest.media_bundle_fingerprint != media_bundle_fingerprint(media_manifest)
         or manifest.request_fingerprint != request.request_fingerprint
         or manifest.response_fingerprint != fingerprint(response)
@@ -1254,14 +1271,10 @@ def _verify_evidence_manifest(
             response,
             manifest.evidence_bundle_fingerprint,
         )
-        or manifest.evidence_count != len(evidence_records)
-        or manifest.ambiguity_count != len(ambiguity_records)
-        or not manifest.response_artifact.relative_storage_path.startswith("evidence/responses/")
-        or manifest.evidence_artifact.relative_storage_path
-        != (f"evidence/records/{manifest.evidence_artifact.content_sha256}/evidence.jsonl")
-        or not manifest.ambiguity_artifact.relative_storage_path.startswith("evidence/ambiguities/")
     ):
-        raise integrity_error("EVIDENCE_MANIFEST_MISMATCH", "evidence bundle is inconsistent")
+        raise integrity_error(
+            "EVIDENCE_MANIFEST_MISMATCH", "evidence bundle fingerprint is invalid"
+        )
     from video_evidence_pipeline.search import verify_index_rebuildable
 
     verify_index_rebuildable(
@@ -1281,6 +1294,8 @@ def load_evidence_result(
     media_manifest: MediaManifest,
     transcript_manifest: TranscriptManifest,
     segments: tuple[TranscriptSegment, ...],
+    *,
+    deep: bool = False,
 ) -> EvidenceImportResult:
     manifest = _read_bounded_model(
         workspace.evidence_manifest_json,
@@ -1289,7 +1304,7 @@ def load_evidence_result(
         code="EVIDENCE_MANIFEST_INVALID",
     )
     result = _verify_evidence_manifest(
-        workspace, job, media_manifest, transcript_manifest, segments, manifest
+        workspace, job, media_manifest, transcript_manifest, segments, manifest, deep=deep
     )
     stage = _read_bounded_model(
         workspace.evidence_stage_manifest_json,
@@ -1297,7 +1312,7 @@ def load_evidence_result(
         maximum_bytes=_MAXIMUM_RESPONSE_BYTES,
         code="STAGE_MANIFEST_INVALID",
     )
-    if stage != result.stage_manifest:
+    if not stage_manifest_matches(stage, result.stage_manifest, deep=deep):
         raise integrity_error("STAGE_MANIFEST_MISMATCH", "evidence stage manifest is invalid")
     if workspace.evidence_candidate_manifest_json.exists():
         candidate = _read_bounded_model(
