@@ -603,8 +603,30 @@ def _request_fingerprint(value: BaseModel) -> str:
     return fingerprint(payload)
 
 
-def _validate_request_fingerprint(value: BaseModel) -> None:
-    if value.request_fingerprint != _request_fingerprint(value):
+_AuthoringRequestManifest = (
+    AuthoringRequestManifest | AuditRequestManifest | RevisionRequestManifest
+)
+
+
+def _request_fingerprint_matches(value: _AuthoringRequestManifest) -> bool:
+    if value.request_fingerprint == _request_fingerprint(value):
+        return True
+    if (
+        value.fixed_evidence.evidence_request.analyzer_contract.atomic_proposition_contract
+        is not None
+    ):
+        return False
+    legacy_payload = value.model_dump(mode="json", exclude={"request_fingerprint"})
+    legacy_payload["fixed_evidence"]["evidence_request"]["analyzer_contract"] = (
+        value.fixed_evidence.evidence_request.analyzer_contract.model_dump(
+            mode="json", exclude_none=True
+        )
+    )
+    return value.request_fingerprint == fingerprint(legacy_payload)
+
+
+def _validate_request_fingerprint(value: _AuthoringRequestManifest) -> None:
+    if not _request_fingerprint_matches(value):
         raise integrity_error("AUTHORING_REQUEST_INVALID", "request fingerprint is inconsistent")
 
 

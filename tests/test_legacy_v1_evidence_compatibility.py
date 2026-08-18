@@ -30,7 +30,17 @@ from video_evidence_pipeline.application import (
     transcribe_job,
     validate_job,
 )
-from video_evidence_pipeline.domain.authoring import fixed_evidence_identity_matches
+from video_evidence_pipeline.authoring.pipeline import (
+    _request_fingerprint,
+    _request_fingerprint_matches,
+    _validate_request_fingerprint,
+)
+from video_evidence_pipeline.domain.authoring import (
+    AuditRequestManifest,
+    AuthoringRequestManifest,
+    RevisionRequestManifest,
+    fixed_evidence_identity_matches,
+)
 from video_evidence_pipeline.domain.evidence import (
     ATOMIC_PROPOSITION_RULE,
     AnalyzerContract,
@@ -346,3 +356,113 @@ def test_none_contract_accepts_only_transitional_include_null_fingerprint(
     assert _evidence_bundle_fingerprint_matches(transcript, media, request, response, canonical)
     assert _evidence_bundle_fingerprint_matches(transcript, media, request, response, transitional)
     assert not _evidence_bundle_fingerprint_matches(transcript, media, request, response, "0" * 64)
+
+
+def _freeze_pre_35_request(path: Path, request_type):
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    analyzer_contract = payload["fixed_evidence"]["evidence_request"]["analyzer_contract"]
+    assert analyzer_contract == {
+        "name": "video-evidence-analyzer",
+        "version": "1.0",
+        "response_schema_version": "1.0",
+        "atomic_proposition_contract": None,
+    }
+    analyzer_contract.pop("atomic_proposition_contract")
+    stored_payload = {key: value for key, value in payload.items() if key != "request_fingerprint"}
+    stored_fingerprint = fingerprint(stored_payload)
+    payload["request_fingerprint"] = stored_fingerprint
+    path.write_bytes(pretty_json_bytes(payload))
+    return request_type.model_validate(payload), stored_fingerprint, payload
+
+
+def _request_fingerprint_without_atomic_contract(request) -> str:
+    payload = request.model_dump(mode="json", exclude={"request_fingerprint"})
+    analyzer_contract = request.fixed_evidence.evidence_request.analyzer_contract.model_dump(
+        mode="json", exclude_none=True
+    )
+    analyzer_contract.pop("atomic_proposition_contract", None)
+    payload["fixed_evidence"]["evidence_request"]["analyzer_contract"] = analyzer_contract
+    return fingerprint(payload)
+
+
+def test_frozen_pre_35_authoring_requests_match_only_absent_atomic_contract(
+    tmp_path: Path,
+) -> None:
+    parent, _frozen = _legacy_blocked_video_parent(tmp_path, "legacy-v1-requests")
+    request_specs = (
+        ("author-v001", AuthoringRequestManifest),
+        ("audit-v001", AuditRequestManifest),
+        ("revision-v002", RevisionRequestManifest),
+    )
+
+    for name, request_type in request_specs:
+        request, stored_fingerprint, raw_payload = _freeze_pre_35_request(
+            parent.safe_path(f"authoring/requests/{name}.json"),
+            request_type,
+        )
+        assert raw_payload["fixed_evidence"]["evidence_request"]["analyzer_contract"] == {
+            "name": "video-evidence-analyzer",
+            "version": "1.0",
+            "response_schema_version": "1.0",
+        }
+        assert request.request_fingerprint == stored_fingerprint
+        assert (
+            request.fixed_evidence.evidence_request.analyzer_contract.atomic_proposition_contract
+            is None
+        )
+        assert _request_fingerprint(request) != stored_fingerprint
+        assert _request_fingerprint_matches(request)
+        _validate_request_fingerprint(request)
+
+
+def test_modern_request_fingerprint_rejects_absent_atomic_contract_alternate(
+    tmp_path: Path,
+) -> None:
+    workspace = _video_evidence_parent(tmp_path, "modern-request")
+    request = prepare_authoring_job(workspace.root, "draft-video-report").request
+    modern_evidence_request = request.fixed_evidence.evidence_request.model_copy(
+        update={
+            "analyzer_contract": AnalyzerContract(
+                atomic_proposition_contract=ATOMIC_PROPOSITION_RULE,
+            )
+        }
+    )
+    modern_fixed = request.fixed_evidence.model_copy(
+        update={"evidence_request": modern_evidence_request}
+    )
+    modern = request.model_copy(update={"fixed_evidence": modern_fixed})
+    modern_fingerprint = _request_fingerprint(modern)
+    modern = modern.model_copy(update={"request_fingerprint": modern_fingerprint})
+    legacy_fingerprint = _request_fingerprint_without_atomic_contract(modern)
+
+    assert (
+        modern.fixed_evidence.evidence_request.analyzer_contract.atomic_proposition_contract
+        is not None
+    )
+    assert _request_fingerprint_matches(modern)
+    assert modern_fingerprint != legacy_fingerprint
+    assert not _request_fingerprint_matches(
+        modern.model_copy(update={"request_fingerprint": legacy_fingerprint})
+    )
+
+
+def test_none_request_fingerprint_accepts_canonical_and_absent_contract_only(
+    tmp_path: Path,
+) -> None:
+    workspace = _video_evidence_parent(tmp_path, "transitional-request")
+    request = prepare_authoring_job(workspace.root, "draft-video-report").request
+    assert (
+        request.fixed_evidence.evidence_request.analyzer_contract.atomic_proposition_contract
+        is None
+    )
+
+    canonical = _request_fingerprint(request)
+    legacy = _request_fingerprint_without_atomic_contract(request)
+    assert canonical != legacy
+    assert _request_fingerprint_matches(
+        request.model_copy(update={"request_fingerprint": canonical})
+    )
+    assert _request_fingerprint_matches(request.model_copy(update={"request_fingerprint": legacy}))
+    assert not _request_fingerprint_matches(
+        request.model_copy(update={"request_fingerprint": "0" * 64})
+    )
