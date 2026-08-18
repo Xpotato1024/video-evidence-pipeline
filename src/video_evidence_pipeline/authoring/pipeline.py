@@ -56,6 +56,7 @@ from video_evidence_pipeline.domain.authoring import (
     RevisionResponseManifest,
     SkillSnapshot,
     fixed_evidence_identity,
+    fixed_evidence_identity_matches,
 )
 from video_evidence_pipeline.domain.evidence import (
     AmbiguityRecord,
@@ -158,6 +159,34 @@ class HumanReviewResult:
 AuthoringHistory = tuple[tuple[DraftResult, AuditResult | None], ...]
 
 
+def _fixed_evidence_fingerprint_matches(
+    fixed: FixedEvidenceBundle,
+    stored_fingerprint: str,
+) -> bool:
+    return fixed_evidence_identity_matches(
+        job_id=fixed.job_id,
+        evidence_request=fixed.evidence_request,
+        evidence_manifest=fixed.evidence_manifest,
+        evidence_records=fixed.evidence_records,
+        ambiguity_records=fixed.ambiguity_records,
+        stored_fingerprint=stored_fingerprint,
+    )
+
+
+def _fixed_evidence_bundle_matches(
+    stored: FixedEvidenceBundle,
+    fixed: FixedEvidenceBundle,
+) -> bool:
+    return (
+        stored.job_id == fixed.job_id
+        and stored.evidence_request == fixed.evidence_request
+        and stored.evidence_manifest == fixed.evidence_manifest
+        and stored.evidence_records == fixed.evidence_records
+        and stored.ambiguity_records == fixed.ambiguity_records
+        and _fixed_evidence_fingerprint_matches(fixed, stored.fixed_evidence_fingerprint)
+    )
+
+
 def _validated_history_contexts(
     history: AuthoringHistory,
     *,
@@ -175,7 +204,9 @@ def _validated_history_contexts(
         expected_version = f"v{index + 1:03d}"
         if (
             draft.manifest.job_id != job.job_id
-            or draft.manifest.fixed_evidence_fingerprint != fixed.fixed_evidence_fingerprint
+            or not _fixed_evidence_fingerprint_matches(
+                fixed, draft.manifest.fixed_evidence_fingerprint
+            )
             or draft.manifest.draft_version != expected_version
             or draft.manifest.revision_count != index
         ):
@@ -192,7 +223,9 @@ def _validated_history_contexts(
         if audit is not None:
             if (
                 audit.manifest.job_id != job.job_id
-                or audit.manifest.fixed_evidence_fingerprint != fixed.fixed_evidence_fingerprint
+                or not _fixed_evidence_fingerprint_matches(
+                    fixed, audit.manifest.fixed_evidence_fingerprint
+                )
                 or audit.manifest.target_draft_version != expected_version
                 or audit.manifest.target_draft_sha256
                 != draft.manifest.draft_artifact.content_sha256
@@ -593,7 +626,7 @@ def prepare_authoring_request(
         _validate_request_fingerprint(request)
         if (
             request.job_id != job.job_id
-            or request.fixed_evidence != fixed
+            or not _fixed_evidence_bundle_matches(request.fixed_evidence, fixed)
             or request.output_constraints != _constraints(job, fixed)
             or request.skill.skill_id != skill_id
         ):
@@ -632,7 +665,9 @@ def load_authoring_request(
         code="AUTHORING_REQUEST_INVALID",
     )
     _validate_request_fingerprint(request)
-    if request.job_id != job.job_id or request.fixed_evidence != fixed:
+    if request.job_id != job.job_id or not _fixed_evidence_bundle_matches(
+        request.fixed_evidence, fixed
+    ):
         raise integrity_error("AUTHORING_REQUEST_STALE", "authoring request is stale")
     if request.output_constraints != _constraints(job, fixed):
         raise integrity_error("AUTHORING_REQUEST_STALE", "authoring request is stale")
@@ -1169,7 +1204,7 @@ def load_draft(
     if (
         manifest.job_id != job.job_id
         or manifest.draft_version != version
-        or manifest.fixed_evidence_fingerprint != fixed.fixed_evidence_fingerprint
+        or not _fixed_evidence_fingerprint_matches(fixed, manifest.fixed_evidence_fingerprint)
         or manifest.bundle_fingerprint != _draft_fingerprint(manifest)
         or stage.job_id != job.job_id
         or stage.configuration_sha256 != manifest.bundle_fingerprint
@@ -1308,7 +1343,7 @@ def _validate_audit_target_lineage(
     _validate_fixed_job(job, fixed, code=code)
     if (
         draft.manifest.job_id != job.job_id
-        or draft.manifest.fixed_evidence_fingerprint != fixed.fixed_evidence_fingerprint
+        or not _fixed_evidence_fingerprint_matches(fixed, draft.manifest.fixed_evidence_fingerprint)
         or draft.manifest.draft_version != f"v{draft.manifest.revision_count + 1:03d}"
     ):
         raise integrity_error(code, "audit target lineage is invalid")
@@ -1334,7 +1369,7 @@ def prepare_audit_request(
         _validate_request_fingerprint(request)
         if (
             request.job_id != job.job_id
-            or request.fixed_evidence != fixed
+            or not _fixed_evidence_bundle_matches(request.fixed_evidence, fixed)
             or request.target_draft_sha256 != draft.manifest.draft_artifact.content_sha256
             or request.target_draft_markdown != text
             or request.skill.skill_id != skill_id
@@ -1382,7 +1417,7 @@ def load_audit_request(
     _validate_request_fingerprint(request)
     if (
         request.job_id != job.job_id
-        or request.fixed_evidence != fixed
+        or not _fixed_evidence_bundle_matches(request.fixed_evidence, fixed)
         or request.target_draft_artifact != draft.manifest.draft_artifact
         or request.target_draft_markdown != _draft_text(workspace, draft)
         or request.output_constraints != _constraints(job, fixed)
@@ -1633,8 +1668,9 @@ def stage_audit(
     if (
         request.job_id != job.job_id
         or request.target_draft_version != draft.manifest.draft_version
-        or request.fixed_evidence.fixed_evidence_fingerprint
-        != draft.manifest.fixed_evidence_fingerprint
+        or not _fixed_evidence_fingerprint_matches(
+            request.fixed_evidence, draft.manifest.fixed_evidence_fingerprint
+        )
         or response.request_fingerprint != request.request_fingerprint
         or draft.manifest.job_id != job.job_id
     ):
@@ -2040,7 +2076,7 @@ def load_audit(
         manifest.job_id != job.job_id
         or manifest.target_draft_version != version
         or manifest.target_draft_sha256 != draft.manifest.draft_artifact.content_sha256
-        or manifest.fixed_evidence_fingerprint != fixed.fixed_evidence_fingerprint
+        or not _fixed_evidence_fingerprint_matches(fixed, manifest.fixed_evidence_fingerprint)
         or manifest.request_fingerprint != request.request_fingerprint
         or manifest.authoring_context_ids != list(authoring_context_ids)
         or manifest.prior_auditor_context_ids != list(prior_auditor_context_ids)
@@ -2158,9 +2194,9 @@ def _validate_revision_lineage(
     if (
         fixed.job_id != job.job_id
         or draft.manifest.job_id != job.job_id
-        or draft.manifest.fixed_evidence_fingerprint != fixed.fixed_evidence_fingerprint
+        or not _fixed_evidence_fingerprint_matches(fixed, draft.manifest.fixed_evidence_fingerprint)
         or audit.manifest.job_id != job.job_id
-        or audit.manifest.fixed_evidence_fingerprint != fixed.fixed_evidence_fingerprint
+        or not _fixed_evidence_fingerprint_matches(fixed, audit.manifest.fixed_evidence_fingerprint)
         or audit.manifest.target_draft_version != draft.manifest.draft_version
         or audit.manifest.target_draft_sha256 != draft.manifest.draft_artifact.content_sha256
         or audit.manifest.disposition is not AuditDisposition.REVISION_REQUIRED
@@ -2179,7 +2215,7 @@ def _revision_request_is_bound(
     expected_count = draft.manifest.revision_count + 1
     return (
         request.job_id == job.job_id
-        and request.fixed_evidence == fixed
+        and _fixed_evidence_bundle_matches(request.fixed_evidence, fixed)
         and request.target_draft_version == draft.manifest.draft_version
         and request.next_draft_version == f"v{expected_count + 1:03d}"
         and request.revision_count == expected_count
@@ -3292,7 +3328,7 @@ def load_human_review(
     )
     if (
         manifest.job_id != job.job_id
-        or manifest.fixed_evidence_fingerprint != fixed.fixed_evidence_fingerprint
+        or not _fixed_evidence_fingerprint_matches(fixed, manifest.fixed_evidence_fingerprint)
         or manifest.draft_bundle_fingerprint != draft.manifest.bundle_fingerprint
         or manifest.audit_bundle_fingerprint != audit.manifest.bundle_fingerprint
         or manifest.approval_target_sha256 != draft.manifest.draft_artifact.content_sha256
