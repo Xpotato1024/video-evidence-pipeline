@@ -267,8 +267,6 @@ class LocalFileAdapter(AcquisitionAdapter):
     @staticmethod
     def _verify_publication(path: Path, artifact: ArtifactRef) -> None:
         LocalFileAdapter._verify_raw(path, artifact)
-        if sha256_file(path) != artifact.content_sha256:
-            raise integrity_error("ARTIFACT_INTEGRITY_FAILED", "raw artifact hash is invalid")
 
 
 def verify_acquired_bundle(

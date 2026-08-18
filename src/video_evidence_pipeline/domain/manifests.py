@@ -154,3 +154,20 @@ class StageManifest(StrictModel):
     finished_at: UtcDateTime
     warnings: list[str] = Field(default_factory=list)
     redacted_error: str | None = Field(default=None, max_length=1024)
+
+
+def stage_manifest_matches(
+    stored: StageManifest,
+    expected: StageManifest,
+    *,
+    deep: bool = False,
+) -> bool:
+    """Compare stage structure normally and the stored configuration identity only deeply."""
+
+    if deep:
+        return stored == expected
+    stored_values = stored.model_dump(mode="json")
+    expected_values = expected.model_dump(mode="json")
+    stored_values.pop("configuration_sha256", None)
+    expected_values.pop("configuration_sha256", None)
+    return stored_values == expected_values

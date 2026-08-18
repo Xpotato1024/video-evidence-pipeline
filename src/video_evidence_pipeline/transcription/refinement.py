@@ -10,7 +10,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
 
-from video_evidence_pipeline.domain.artifacts import ArtifactRef
+from video_evidence_pipeline.domain.artifacts import ArtifactRef, artifact_file_matches
 from video_evidence_pipeline.domain.evidence import SourceRef, SourceRefKind
 from video_evidence_pipeline.domain.hashing import sha256_bytes, sha256_file
 from video_evidence_pipeline.domain.job import JobSpec
@@ -84,15 +84,9 @@ def _read_model[ModelT: BaseModel](path: Path, model: type[ModelT], *, code: str
         raise integrity_error(code, "refinement artifact is malformed") from None
 
 
-def _verify_artifact(path: Path, artifact: ArtifactRef) -> None:
+def _verify_artifact(path: Path, artifact: ArtifactRef, *, deep: bool = False) -> None:
     try:
-        metadata = path.stat(follow_symlinks=False)
-        if (
-            path.is_symlink()
-            or not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_size != artifact.size_bytes
-            or sha256_file(path) != artifact.content_sha256
-        ):
+        if not artifact_file_matches(path, artifact, deep=deep, hasher=sha256_file):
             raise integrity_error("REFINEMENT_BUNDLE_TAMPERED", "refinement artifact is invalid")
         enforce_private_file(path)
     except OSError:
@@ -250,8 +244,11 @@ def _expected_request(
     raw_segments: tuple[TranscriptSegment, ...],
     *,
     created_at: datetime,
+    deep: bool = False,
 ) -> RefinementRequestManifest:
-    supporting = load_supporting_inputs(workspace, job) if job.supporting_inputs else None
+    supporting = (
+        load_supporting_inputs(workspace, job, deep=deep) if job.supporting_inputs else None
+    )
     support_artifacts, source_refs = _source_catalog(media_manifest, raw_segments, supporting)
     return RefinementRequestManifest(
         job_id=job.job_id,
@@ -277,6 +274,8 @@ def prepare_refinement_request(
     media_manifest: MediaManifest,
     raw_manifest: TranscriptManifest,
     raw_segments: tuple[TranscriptSegment, ...],
+    *,
+    deep: bool = False,
 ) -> RefinementPrepareResult:
     if job.supporting_inputs:
         prepare_supporting_inputs(workspace, job)
@@ -293,8 +292,21 @@ def prepare_refinement_request(
             raw_manifest,
             raw_segments,
             created_at=stored.created_at,
+            deep=deep,
         )
-        if stored != expected:
+        request_matches = (
+            stored == expected
+            if deep
+            else stored.model_dump(
+                mode="json",
+                exclude={"request_fingerprint", "raw_transcript_fingerprint"},
+            )
+            == expected.model_dump(
+                mode="json",
+                exclude={"request_fingerprint", "raw_transcript_fingerprint"},
+            )
+        )
+        if not request_matches:
             raise state_error("REFINEMENT_REQUEST_STALE", "refinement request is stale")
         return RefinementPrepareResult(stored, reused=True)
     request = _expected_request(
@@ -304,6 +316,7 @@ def prepare_refinement_request(
         raw_manifest,
         raw_segments,
         created_at=datetime.now(UTC),
+        deep=deep,
     )
     atomic_write_bytes(workspace.refinement_request_json, pretty_json_bytes(request), private=True)
     return RefinementPrepareResult(request, reused=False)
@@ -315,9 +328,11 @@ def load_refinement_request(
     media_manifest: MediaManifest,
     raw_manifest: TranscriptManifest,
     raw_segments: tuple[TranscriptSegment, ...],
+    *,
+    deep: bool = False,
 ) -> RefinementRequestManifest:
     return prepare_refinement_request(
-        workspace, job, media_manifest, raw_manifest, raw_segments
+        workspace, job, media_manifest, raw_manifest, raw_segments, deep=deep
     ).request
 
 
@@ -342,8 +357,9 @@ def _validate_response(
     response: RefinementResponseManifest,
     *,
     allow_fixture: bool,
+    check_fingerprints: bool = True,
 ) -> None:
-    if response.request_fingerprint != request.request_fingerprint:
+    if check_fingerprints and response.request_fingerprint != request.request_fingerprint:
         raise state_error(
             "REFINEMENT_RESPONSE_STALE", "refinement response targets another request"
         )
@@ -373,9 +389,9 @@ def _validate_response(
             raise integrity_error(
                 "REFINEMENT_RESPONSE_INVALID", "external response may only contain semantic edits"
             )
-        if (
-            edit.segment_id not in known_segments
-            or edit.original_segment_fingerprint != fingerprint(known_segments[edit.segment_id])
+        if edit.segment_id not in known_segments or (
+            check_fingerprints
+            and edit.original_segment_fingerprint != fingerprint(known_segments[edit.segment_id])
         ):
             raise integrity_error(
                 "REFINEMENT_SOURCE_INVALID", "semantic edit targets an altered segment"
@@ -585,9 +601,11 @@ def _read_refined_segments(
     artifact: ArtifactRef,
     raw_segments: tuple[TranscriptSegment, ...],
     ledger: RefinementEditLedger,
+    *,
+    deep: bool = False,
 ) -> tuple[TranscriptSegment, ...]:
     path = workspace.safe_path(artifact.relative_storage_path)
-    _verify_artifact(path, artifact)
+    _verify_artifact(path, artifact, deep=deep)
     payload = path.read_bytes()
     if not payload.endswith(b"\n"):
         raise integrity_error("REFINEMENT_BUNDLE_INVALID", "refined transcript JSONL is incomplete")
@@ -625,14 +643,14 @@ def _read_refined_segments(
 
 
 def _load_ledgers(
-    workspace: JobWorkspace, manifest: RefinementManifest
+    workspace: JobWorkspace, manifest: RefinementManifest, *, deep: bool = False
 ) -> tuple[RefinementEditLedger, RefinementAmbiguityLedger, RefinementResponseManifest]:
     edit_path = workspace.safe_path(manifest.edit_ledger_artifact.relative_storage_path)
     ambiguity_path = workspace.safe_path(manifest.ambiguity_artifact.relative_storage_path)
     response_path = workspace.safe_path(manifest.response_artifact.relative_storage_path)
-    _verify_artifact(edit_path, manifest.edit_ledger_artifact)
-    _verify_artifact(ambiguity_path, manifest.ambiguity_artifact)
-    _verify_artifact(response_path, manifest.response_artifact)
+    _verify_artifact(edit_path, manifest.edit_ledger_artifact, deep=deep)
+    _verify_artifact(ambiguity_path, manifest.ambiguity_artifact, deep=deep)
+    _verify_artifact(response_path, manifest.response_artifact, deep=deep)
     return (
         _read_model(edit_path, RefinementEditLedger, code="REFINEMENT_BUNDLE_INVALID"),
         _read_model(ambiguity_path, RefinementAmbiguityLedger, code="REFINEMENT_BUNDLE_INVALID"),
@@ -648,43 +666,49 @@ def load_refinement_result(
     raw_segments: tuple[TranscriptSegment, ...],
     *,
     request: RefinementRequestManifest | None = None,
+    deep: bool = False,
 ) -> RefinementResult:
     if request is None:
         if media_manifest is None:
             raise integrity_error("REFINEMENT_CONTEXT_MISSING", "media manifest is required")
         request = load_refinement_request(
-            workspace, job, media_manifest, raw_manifest, raw_segments
+            workspace, job, media_manifest, raw_manifest, raw_segments, deep=deep
         )
     manifest = _read_model(
         workspace.refinement_manifest_json,
         RefinementManifest,
         code="REFINEMENT_MANIFEST_INVALID",
     )
-    ledger, ambiguities, response = _load_ledgers(workspace, manifest)
+    ledger, ambiguities, response = _load_ledgers(workspace, manifest, deep=deep)
     segments = _read_refined_segments(
-        workspace, manifest.refined_segments_artifact, raw_segments, ledger
+        workspace, manifest.refined_segments_artifact, raw_segments, ledger, deep=deep
     )
     if (
         manifest.job_id != job.job_id
-        or manifest.raw_transcript_fingerprint != raw_manifest.transcription_fingerprint
         or manifest.raw_segments_artifact != raw_manifest.segments_artifact
-        or manifest.request_fingerprint != request.request_fingerprint
-        or manifest.response_fingerprint != fingerprint(response)
         or manifest.implementation_version != REFINEMENT_IMPLEMENTATION_VERSION
-        or manifest.refined_transcript_fingerprint
-        != refined_transcript_fingerprint(
-            raw_manifest,
-            manifest.refined_segments_artifact,
-            manifest.edit_ledger_artifact,
-            manifest.ambiguity_artifact,
-            request,
-            response,
-        )
         or manifest.edit_count != len(ledger.records)
         or manifest.ambiguity_count != len(ambiguities.records)
+        or (
+            deep
+            and (
+                manifest.raw_transcript_fingerprint != raw_manifest.transcription_fingerprint
+                or manifest.request_fingerprint != request.request_fingerprint
+                or manifest.response_fingerprint != fingerprint(response)
+                or manifest.refined_transcript_fingerprint
+                != refined_transcript_fingerprint(
+                    raw_manifest,
+                    manifest.refined_segments_artifact,
+                    manifest.edit_ledger_artifact,
+                    manifest.ambiguity_artifact,
+                    request,
+                    response,
+                )
+            )
+        )
     ):
         raise integrity_error("REFINEMENT_MANIFEST_MISMATCH", "refinement manifest is inconsistent")
-    _validate_response(request, response, allow_fixture=True)
+    _validate_response(request, response, allow_fixture=True, check_fingerprints=deep)
     return RefinementResult(
         refinement_manifest=manifest,
         segments=segments,

@@ -53,8 +53,8 @@ def _assert_no_links(start: Path, target: Path) -> None:
 
 
 def _assert_resolved_within(target: Path, root: Path) -> None:
-    resolved_target = target.resolve(strict=False)
-    resolved_root = root.resolve(strict=False)
+    resolved_target = _path_for_commonpath(target.resolve(strict=False))
+    resolved_root = _path_for_commonpath(root.resolve(strict=False))
     try:
         common = Path(os.path.commonpath([resolved_target, resolved_root]))
     except ValueError as exc:
@@ -63,6 +63,19 @@ def _assert_resolved_within(target: Path, root: Path) -> None:
         ) from exc
     if common != resolved_root:
         raise integrity_error("WORKSPACE_ESCAPE", "workspace path escapes its allowed root")
+
+
+def _path_for_commonpath(path: Path) -> Path:
+    """Normalize Windows extended paths before comparing resolved roots."""
+    value = os.fspath(path)
+    if os.name == "nt":
+        if value.startswith("\\\\?\\UNC\\"):
+            value = "\\\\" + value[8:]
+        elif value.startswith("//?/UNC/"):
+            value = "//" + value[8:]
+        elif value.startswith("\\\\?\\") or value.startswith("//?/"):
+            value = value[4:]
+    return Path(os.path.normcase(os.path.normpath(value)))
 
 
 @dataclass(frozen=True, slots=True)

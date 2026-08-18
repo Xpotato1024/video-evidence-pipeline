@@ -396,9 +396,32 @@ def test_approval_ledger_tampering_is_bounded_and_approval_specific(tmp_path: Pa
     for name, contents in variants.items():
         clone = _clone_workspace(workspace, tmp_path / name)
         clone.approval_records_jsonl.write_bytes(contents)
+        if name in {"noncanonical", "self"}:
+            assert len(read_approval_records(clone)) == 1
+            if name == "self":
+                with pytest.raises(VepError):
+                    validate_job(clone.root, deep=True)
+            continue
         with pytest.raises(VepError) as captured:
             read_approval_records(clone)
         assert captured.value.code == "APPROVAL_LEDGER_INVALID"
+
+
+def test_normal_approval_validation_does_not_rehash_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, _draft, audit = _human_review_ready(tmp_path, "issue16-normal-hash-count")
+    _approve(workspace, audit.human_review.approval_target_sha256)
+    calls = 0
+
+    def counted(path: Path) -> str:
+        nonlocal calls
+        calls += 1
+        raise AssertionError(f"normal approval validation hashed {path}")
+
+    monkeypatch.setattr(delivery_pipeline_module, "sha256_file", counted)
+    assert validate_job(workspace.root)["valid"] is True
+    assert calls == 0
 
 
 def test_export_rejects_stale_upstream_and_unsupported_format_without_transition(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import threading
 from datetime import UTC, datetime
@@ -458,6 +459,7 @@ def test_straight_author_audit_human_review_and_cli_contract(
     evidence_artifact = author_request.fixed_evidence.evidence_manifest.evidence_artifact
     evidence_path = workspace.safe_path(evidence_artifact.relative_storage_path)
     evidence_bytes = evidence_path.read_bytes()
+    evidence_metadata = evidence_path.stat()
     original_stage_initial = application_module.stage_initial_draft
 
     def tamper_after_stage(*args, **kwargs):
@@ -472,6 +474,10 @@ def test_straight_author_audit_human_review_and_cli_contract(
         _import_authoring_fixture(workspace.root, author_path)
     assert not workspace.safe_path("manifests/authoring/draft-v001.json").exists()
     evidence_path.write_bytes(evidence_bytes)
+    os.utime(
+        evidence_path,
+        ns=(evidence_metadata.st_atime_ns, evidence_metadata.st_mtime_ns),
+    )
     monkeypatch.setattr(application_module, "stage_initial_draft", original_stage_initial)
     draft = _import_authoring_fixture(workspace.root, author_path)
     assert draft.manifest.draft_version == "v001"

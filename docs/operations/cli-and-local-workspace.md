@@ -87,10 +87,10 @@ vep job init demo-report \
 ## Bounded BLOCKED recovery
 
 `vep job recover PARENT NEW-JOB-ID --confirm --basis TEXT` is a narrow fork, not an
-in-place repair. It accepts only a parent whose latest transition is `AUDITED → BLOCKED`,
-whose draft revision count is 2, and whose material P0/P1 findings are all in the exact
-`content-integrity` category. It leaves the parent bytes, state, and transition log
-unchanged.
+in-place repair. It accepts a readable `BLOCKED` parent whose pre-semantic source,
+normalization, raw-transcript, and supporting-input artifacts are present. Finding
+categories, old semantic fingerprints, and draft/audit history are not recovery gates.
+It leaves the parent bytes, state, and transition log unchanged.
 
 The child receives a new job-bound authorization record with the parent's
 `allow_local_processing`, `allow_network_acquisition`, and `allow_external_api` values.

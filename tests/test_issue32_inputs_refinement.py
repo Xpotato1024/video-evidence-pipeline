@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -79,7 +80,7 @@ from video_evidence_pipeline.media.normalization import (
     transcript_primary_normalization_fingerprint,
 )
 from video_evidence_pipeline.storage.layout import JobWorkspace
-from video_evidence_pipeline.supporting import prepare_supporting_inputs
+from video_evidence_pipeline.supporting import load_supporting_inputs, prepare_supporting_inputs
 from video_evidence_pipeline.transcription.pipeline import (
     create_attempt_directory as create_transcription_attempt,
 )
@@ -715,6 +716,25 @@ def test_pdf_and_image_supporting_inputs_keep_validated_originals_without_cheap_
     assert any(item.kind is SourceRefKind.PDF_PAGE for item in evidence_refs) is (
         rendered_page is not None
     )
+
+
+def test_normal_supporting_validation_defers_fingerprint_to_deep(tmp_path: Path) -> None:
+    notes = tmp_path / "supporting-notes.txt"
+    notes.write_text("legacy supporting note\n", encoding="utf-8")
+    job = _job(notes=notes)
+    workspace = JobWorkspace.create(tmp_path, job.job_id)
+    prepare_supporting_inputs(workspace, job)
+
+    payload = json.loads(workspace.supporting_manifest_json.read_text(encoding="utf-8"))
+    payload["supporting_fingerprint"] = "0" * 64
+    workspace.supporting_manifest_json.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+
+    assert load_supporting_inputs(workspace, job).supporting_fingerprint == "0" * 64
+    with pytest.raises(VepError) as captured:
+        load_supporting_inputs(workspace, job, deep=True)
+    assert captured.value.code == "SUPPORTING_INPUT_STALE"
 
     invalid_image = tmp_path / "invalid.png"
     invalid_image.write_bytes(b"not-an-image")

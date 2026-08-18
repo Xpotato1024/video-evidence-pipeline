@@ -12,7 +12,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from video_evidence_pipeline.domain.artifacts import ArtifactRef
+from video_evidence_pipeline.domain.artifacts import ArtifactRef, artifact_file_matches
 from video_evidence_pipeline.domain.hashing import sha256_bytes, sha256_file
 from video_evidence_pipeline.domain.job import JobSpec, SupportingInputKind
 from video_evidence_pipeline.domain.serialization import fingerprint, pretty_json_bytes
@@ -48,15 +48,9 @@ def _is_image(payload: bytes) -> bool:
     )
 
 
-def _verify_artifact(path: Path, artifact: ArtifactRef) -> None:
+def _verify_artifact(path: Path, artifact: ArtifactRef, *, deep: bool = False) -> None:
     try:
-        metadata = path.stat(follow_symlinks=False)
-        if (
-            path.is_symlink()
-            or not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_size != artifact.size_bytes
-            or sha256_file(path) != artifact.content_sha256
-        ):
+        if not artifact_file_matches(path, artifact, deep=deep, hasher=sha256_file):
             raise integrity_error("SUPPORTING_INPUT_TAMPERED", "supporting artifact is invalid")
         enforce_private_file(path)
     except OSError:
@@ -282,7 +276,9 @@ def prepare_supporting_inputs(workspace: JobWorkspace, job: JobSpec) -> Supporti
     return load_supporting_inputs(workspace, job)
 
 
-def load_supporting_inputs(workspace: JobWorkspace, job: JobSpec) -> SupportingInputManifest:
+def load_supporting_inputs(
+    workspace: JobWorkspace, job: JobSpec, *, deep: bool = False
+) -> SupportingInputManifest:
     try:
         manifest = read_json_model(
             workspace.supporting_manifest_json,
@@ -296,7 +292,9 @@ def load_supporting_inputs(workspace: JobWorkspace, job: JobSpec) -> SupportingI
     if (
         manifest.job_id != job.job_id
         or manifest.implementation_version != SUPPORTING_INPUT_IMPLEMENTATION_VERSION
-        or manifest.supporting_fingerprint != supporting_fingerprint(job, manifest.inputs)
+        or (
+            deep and manifest.supporting_fingerprint != supporting_fingerprint(job, manifest.inputs)
+        )
         or len(manifest.inputs) != len(job.supporting_inputs)
         or [item.kind for item in manifest.inputs] != [item.kind for item in job.supporting_inputs]
     ):
@@ -308,5 +306,7 @@ def load_supporting_inputs(workspace: JobWorkspace, job: JobSpec) -> SupportingI
             *(page.artifact for page in record.rendered_pages),
         ):
             if artifact is not None:
-                _verify_artifact(workspace.safe_path(artifact.relative_storage_path), artifact)
+                _verify_artifact(
+                    workspace.safe_path(artifact.relative_storage_path), artifact, deep=deep
+                )
     return manifest

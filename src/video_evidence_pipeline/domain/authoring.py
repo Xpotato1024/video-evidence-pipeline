@@ -240,31 +240,11 @@ def fixed_evidence_identity(
     evidence_records: list[EvidenceRecord],
     ambiguity_records: list[AmbiguityRecord],
 ) -> str:
-    return _fixed_evidence_identity_with_analyzer_contract(
-        job_id=job_id,
-        evidence_request=evidence_request,
-        evidence_manifest=evidence_manifest,
-        evidence_records=evidence_records,
-        ambiguity_records=ambiguity_records,
-        analyzer_contract=evidence_request.analyzer_contract.model_dump(mode="json"),
-    )
-
-
-def _fixed_evidence_identity_with_analyzer_contract(
-    *,
-    job_id: str,
-    evidence_request: EvidenceRequestManifest,
-    evidence_manifest: EvidenceManifest,
-    evidence_records: list[EvidenceRecord],
-    ambiguity_records: list[AmbiguityRecord],
-    analyzer_contract: dict[str, object],
-) -> str:
     return fingerprint(
         {
             "job_id": job_id,
             "evidence_request": {
                 **evidence_request.model_dump(mode="json"),
-                "analyzer_contract": analyzer_contract,
             },
             "evidence_manifest": evidence_manifest.model_dump(mode="json"),
             "evidence_records": [item.model_dump(mode="json") for item in evidence_records],
@@ -282,27 +262,13 @@ def fixed_evidence_identity_matches(
     ambiguity_records: list[AmbiguityRecord],
     stored_fingerprint: str,
 ) -> bool:
-    if stored_fingerprint == fixed_evidence_identity(
+    return stored_fingerprint == fixed_evidence_identity(
         job_id=job_id,
         evidence_request=evidence_request,
         evidence_manifest=evidence_manifest,
         evidence_records=evidence_records,
         ambiguity_records=ambiguity_records,
-    ):
-        return True
-    if evidence_request.analyzer_contract.atomic_proposition_contract is None:
-        legacy_fingerprint = _fixed_evidence_identity_with_analyzer_contract(
-            job_id=job_id,
-            evidence_request=evidence_request,
-            evidence_manifest=evidence_manifest,
-            evidence_records=evidence_records,
-            ambiguity_records=ambiguity_records,
-            analyzer_contract=evidence_request.analyzer_contract.model_dump(
-                mode="json", exclude_none=True
-            ),
-        )
-        return stored_fingerprint == legacy_fingerprint
-    return False
+    )
 
 
 class FixedEvidenceBundle(StrictModel):
@@ -333,15 +299,6 @@ class FixedEvidenceBundle(StrictModel):
             self.evidence_records
         ) or self.evidence_manifest.ambiguity_count != len(self.ambiguity_records):
             raise ValueError("fixed evidence counts are inconsistent")
-        if not fixed_evidence_identity_matches(
-            job_id=self.job_id,
-            evidence_request=self.evidence_request,
-            evidence_manifest=self.evidence_manifest,
-            evidence_records=self.evidence_records,
-            ambiguity_records=self.ambiguity_records,
-            stored_fingerprint=self.fixed_evidence_fingerprint,
-        ):
-            raise ValueError("fixed evidence fingerprint is inconsistent")
         return self
 
 

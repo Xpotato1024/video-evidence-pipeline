@@ -14,7 +14,12 @@ from pydantic import BaseModel, ValidationError
 
 from video_evidence_pipeline.authoring.pipeline import AuditResult, DraftResult, HumanReviewResult
 from video_evidence_pipeline.delivery.markdown import MarkdownByteExactAdapter
-from video_evidence_pipeline.domain.artifacts import ArtifactRef, ProducerIdentity, ProducerKind
+from video_evidence_pipeline.domain.artifacts import (
+    ArtifactRef,
+    ProducerIdentity,
+    ProducerKind,
+    artifact_file_matches,
+)
 from video_evidence_pipeline.domain.authoring import FixedEvidenceBundle
 from video_evidence_pipeline.domain.delivery import (
     ApprovalManifest,
@@ -30,7 +35,11 @@ from video_evidence_pipeline.domain.delivery import (
 )
 from video_evidence_pipeline.domain.hashing import sha256_bytes, sha256_file
 from video_evidence_pipeline.domain.job import JobSpec, job_fingerprint
-from video_evidence_pipeline.domain.manifests import StageManifest, StageStatus
+from video_evidence_pipeline.domain.manifests import (
+    StageManifest,
+    StageStatus,
+    stage_manifest_matches,
+)
 from video_evidence_pipeline.domain.serialization import canonical_json_bytes, pretty_json_bytes
 from video_evidence_pipeline.domain.state import JobState
 from video_evidence_pipeline.errors import VepError, integrity_error, io_error, state_error
@@ -186,21 +195,36 @@ def _artifact(path: Path, *, artifact_id: str, artifact_type: str, relative: str
     )
 
 
-def _verify_artifact(workspace: JobWorkspace, artifact: ArtifactRef, *, code: str) -> None:
+def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON object key")
+        result[key] = value
+    return result
+
+
+def _verify_artifact(
+    workspace: JobWorkspace, artifact: ArtifactRef, *, code: str, deep: bool = False
+) -> None:
     path = workspace.safe_path(artifact.relative_storage_path)
     try:
-        size = path.stat().st_size
+        matches = artifact_file_matches(path, artifact, deep=deep, hasher=sha256_file)
     except FileNotFoundError as exc:
         raise integrity_error(code, "bound delivery artifact does not exist") from exc
     except OSError as exc:
         raise io_error(code, "bound delivery artifact could not be inspected") from exc
-    if size != artifact.size_bytes or sha256_file(path) != artifact.content_sha256:
+    if not matches:
         raise integrity_error(code, "bound delivery artifact does not match its reference")
 
 
-def _read_verified_bytes(path: Path, artifact: ArtifactRef, *, code: str) -> bytes:
+def _read_verified_bytes(
+    path: Path, artifact: ArtifactRef, *, code: str, deep: bool = False
+) -> bytes:
     payload = _read_bounded(path, maximum=_MAX_DRAFT_BYTES, code=code)
-    if len(payload) != artifact.size_bytes or sha256_bytes(payload) != artifact.content_sha256:
+    if len(payload) != artifact.size_bytes or (
+        deep and sha256_bytes(payload) != artifact.content_sha256
+    ):
         raise integrity_error(code, "bound delivery artifact changed during verification")
     return payload
 
@@ -210,9 +234,10 @@ def _verified_draft_bytes(
     artifact: ArtifactRef,
     *,
     code: str,
+    deep: bool = False,
 ) -> bytes:
     return _read_verified_bytes(
-        workspace.safe_path(artifact.relative_storage_path), artifact, code=code
+        workspace.safe_path(artifact.relative_storage_path), artifact, code=code, deep=deep
     )
 
 
@@ -318,7 +343,9 @@ def _build_approval_record(
     return ApprovalRecord.model_validate(payload)
 
 
-def read_approval_records(workspace: JobWorkspace) -> tuple[ApprovalRecord, ...]:
+def read_approval_records(
+    workspace: JobWorkspace, *, deep: bool = False
+) -> tuple[ApprovalRecord, ...]:
     payload = _read_bounded(
         workspace.approval_records_jsonl,
         maximum=_MAX_APPROVAL_LEDGER_BYTES,
@@ -332,8 +359,10 @@ def read_approval_records(workspace: JobWorkspace) -> tuple[ApprovalRecord, ...]
     records: list[ApprovalRecord] = []
     try:
         for line in payload.splitlines():
-            record = ApprovalRecord.model_validate(json.loads(line.decode("utf-8")))
-            if line != canonical_json_bytes(record):
+            record = ApprovalRecord.model_validate(
+                json.loads(line.decode("utf-8"), object_pairs_hook=_reject_duplicate_json_keys)
+            )
+            if deep and line != canonical_json_bytes(record):
                 raise ValueError("approval record is not canonical JSON")
             records.append(record)
     except (UnicodeError, json.JSONDecodeError, ValidationError, ValueError) as exc:
@@ -364,6 +393,8 @@ def _validate_record_upstream(
     draft: DraftResult,
     audit: AuditResult,
     human_review: HumanReviewResult,
+    *,
+    deep: bool = False,
 ) -> None:
     expected = _approval_intent_values(
         job,
@@ -376,12 +407,20 @@ def _validate_record_upstream(
     )
     if (
         record.job_id != job.job_id
-        or record.job_fingerprint != job_fingerprint(job)
-        or record.intent_fingerprint != approval_intent_fingerprint(expected)
         or record.human_review_artifact != human_review.manifest.bundle_artifact
         or record.current_audit_findings_artifact != audit.manifest.findings_artifact
         or record.approved_draft_artifact != draft.manifest.draft_artifact
         or record.approval_target_sha256 != human_review.manifest.approval_target_sha256
+        or (
+            deep
+            and (
+                record.job_fingerprint != job_fingerprint(job)
+                or record.intent_fingerprint != approval_intent_fingerprint(expected)
+                or record.approval_id != f"approval-{approval_intent_fingerprint(expected)[:16]}"
+                or record.record_sha256
+                != approval_record_fingerprint(record.model_dump(mode="json"))
+            )
+        )
     ):
         raise integrity_error(
             "APPROVAL_STALE", "approval no longer matches verified upstream state"
@@ -439,19 +478,25 @@ def _load_approval_manifests(
     job: JobSpec,
     record: ApprovalRecord,
     ledger_artifact: ArtifactRef,
+    *,
+    deep: bool = False,
+    manifest: ApprovalManifest | None = None,
 ) -> ApprovalResult:
     expected_manifest, expected_stage = _build_approval_manifests(job, record, ledger_artifact)
-    manifest = _read_model(
-        workspace.approval_manifest_json,
-        ApprovalManifest,
-        code="APPROVAL_MANIFEST_INVALID",
-    )
+    if manifest is None:
+        manifest = _read_model(
+            workspace.approval_manifest_json,
+            ApprovalManifest,
+            code="APPROVAL_MANIFEST_INVALID",
+        )
     stage = _read_model(
         workspace.approval_stage_manifest_json,
         StageManifest,
         code="APPROVAL_STAGE_INVALID",
     )
-    if manifest != expected_manifest or stage != expected_stage:
+    if not _export_model_matches(
+        manifest, expected_manifest, deep=deep
+    ) or not stage_manifest_matches(stage, expected_stage, deep=deep):
         raise integrity_error("APPROVAL_MANIFEST_INVALID", "approval manifests are inconsistent")
     return ApprovalResult(record=record, manifest=manifest, stage_manifest=stage, reused=True)
 
@@ -462,9 +507,11 @@ def load_approval(
     draft: DraftResult,
     audit: AuditResult,
     human_review: HumanReviewResult,
+    *,
+    deep: bool = False,
 ) -> ApprovalResult:
-    record = read_approval_records(workspace)[0]
-    _validate_record_upstream(record, job, draft, audit, human_review)
+    record = read_approval_records(workspace, deep=deep)[0]
+    _validate_record_upstream(record, job, draft, audit, human_review, deep=deep)
     try:
         ensure_approval_confirmation_resolved(workspace, draft, human_review)
     except VepError as exc:
@@ -474,9 +521,21 @@ def load_approval(
             "APPROVAL_STALE",
             "approval contains unresolved confirmation content",
         ) from exc
-    ledger_artifact = _approval_record_artifact(workspace)
-    _verify_artifact(workspace, ledger_artifact, code="APPROVAL_LEDGER_INVALID")
-    return _load_approval_manifests(workspace, job, record, ledger_artifact)
+    manifest = _read_model(
+        workspace.approval_manifest_json,
+        ApprovalManifest,
+        code="APPROVAL_MANIFEST_INVALID",
+    )
+    ledger_artifact = manifest.approval_record_artifact
+    _verify_artifact(workspace, ledger_artifact, code="APPROVAL_LEDGER_INVALID", deep=deep)
+    return _load_approval_manifests(
+        workspace,
+        job,
+        record,
+        ledger_artifact,
+        deep=deep,
+        manifest=manifest,
+    )
 
 
 def approve_or_recover(
@@ -646,13 +705,16 @@ def _build_export_manifests(
     return manifest, stage
 
 
-def _verify_final(workspace: JobWorkspace, package: ExportPackageManifest) -> None:
-    _verify_artifact(workspace, package.final_artifact, code="EXPORT_BUNDLE_INVALID")
+def _verify_final(
+    workspace: JobWorkspace, package: ExportPackageManifest, *, deep: bool = False
+) -> None:
+    _verify_artifact(workspace, package.final_artifact, code="EXPORT_BUNDLE_INVALID", deep=deep)
     _require_marker_free(
         _read_verified_bytes(
             workspace.safe_path(package.final_artifact.relative_storage_path),
             package.final_artifact,
             code="EXPORT_BUNDLE_INVALID",
+            deep=deep,
         )
     )
     if (
@@ -677,15 +739,49 @@ def _publish_exact(source: Path, target: Path, expected: ArtifactRef) -> None:
     verify(target)
 
 
+def _export_values(value: BaseModel, *, deep: bool) -> dict[str, object]:
+    values = value.model_dump(mode="json")
+    if not deep:
+        for key in (
+            "job_fingerprint",
+            "approval_record_sha256",
+            "approval_intent_fingerprint",
+            "human_review_bundle_fingerprint",
+            "current_audit_bundle_fingerprint",
+            "audit_bundle_fingerprint",
+            "fixed_evidence_fingerprint",
+            "package_fingerprint",
+            "export_fingerprint",
+            "manifest_fingerprint",
+        ):
+            values.pop(key, None)
+    return values
+
+
+def _export_model_matches(stored: BaseModel, expected: BaseModel, *, deep: bool) -> bool:
+    return _export_values(stored, deep=deep) == _export_values(expected, deep=deep)
+
+
 def load_export(
     workspace: JobWorkspace,
     job: JobSpec,
     fixed: FixedEvidenceBundle,
     approval: ApprovalResult,
+    *,
+    deep: bool = False,
 ) -> ExportResult:
     ensure_approved_draft_marker_free(workspace, approval.record.approved_draft_artifact)
+    manifest = _read_model(
+        workspace.export_manifest_json,
+        ExportManifest,
+        code="EXPORT_MANIFEST_INVALID",
+    )
+    package_artifact = manifest.package_manifest_artifact
+    if package_artifact.relative_storage_path != _package_relative(approval.record):
+        raise integrity_error("EXPORT_MANIFEST_INVALID", "export package path is inconsistent")
+    _verify_artifact(workspace, package_artifact, code="EXPORT_BUNDLE_INVALID", deep=deep)
     package = _read_model(
-        workspace.safe_path(_package_relative(approval.record)),
+        workspace.safe_path(package_artifact.relative_storage_path),
         ExportPackageManifest,
         code="EXPORT_BUNDLE_INVALID",
     )
@@ -695,22 +791,18 @@ def load_export(
         approval,
         created_at=package.created_at,
     )
-    if package != expected_package:
+    if not _export_model_matches(package, expected_package, deep=deep):
         raise integrity_error("EXPORT_BUNDLE_INVALID", "export package binding is inconsistent")
-    _verify_final(workspace, package)
-    package_artifact = _package_artifact(workspace, approval.record)
+    _verify_final(workspace, package, deep=deep)
     expected_manifest, expected_stage = _build_export_manifests(job, package, package_artifact)
-    manifest = _read_model(
-        workspace.export_manifest_json,
-        ExportManifest,
-        code="EXPORT_MANIFEST_INVALID",
-    )
     stage = _read_model(
         workspace.export_stage_manifest_json,
         StageManifest,
         code="EXPORT_STAGE_INVALID",
     )
-    if manifest != expected_manifest or stage != expected_stage:
+    if not _export_model_matches(
+        manifest, expected_manifest, deep=deep
+    ) or not stage_manifest_matches(stage, expected_stage, deep=deep):
         raise integrity_error("EXPORT_MANIFEST_INVALID", "export manifests are inconsistent")
     return ExportResult(
         manifest=manifest,

@@ -23,7 +23,11 @@ from video_evidence_pipeline.domain.artifacts import (
 )
 from video_evidence_pipeline.domain.hashing import sha256_file
 from video_evidence_pipeline.domain.job import JobSpec
-from video_evidence_pipeline.domain.manifests import StageManifest, StageStatus
+from video_evidence_pipeline.domain.manifests import (
+    StageManifest,
+    StageStatus,
+    stage_manifest_matches,
+)
 from video_evidence_pipeline.domain.media import (
     MediaManifest,
     NormalizedSubtitle,
@@ -752,7 +756,7 @@ def cleanup_attempt(workspace: JobWorkspace, attempt: Path) -> None:
 
 def _verify_artifact(path: Path, artifact: ArtifactRef, *, deep: bool = False) -> None:
     try:
-        if not artifact_file_matches(path, artifact, deep=True, hasher=sha256_file):
+        if not artifact_file_matches(path, artifact, deep=deep, hasher=sha256_file):
             raise integrity_error("TRANSCRIPT_BUNDLE_TAMPERED", "transcript artifact is invalid")
         enforce_private_file(path)
     except OSError:
@@ -778,9 +782,9 @@ def _publish_segments(workspace: JobWorkspace, staged_path: Path, payload: bytes
     ensure_private_directory(target.parent.parent)
     ensure_private_directory(target.parent)
     atomic_copy_exclusive(
-        staged_path, target, verifier=lambda item: _verify_artifact(item, artifact, deep=True)
+        staged_path, target, verifier=lambda item: _verify_artifact(item, artifact)
     )
-    _verify_artifact(target, artifact, deep=True)
+    _verify_artifact(target, artifact)
     return artifact
 
 
@@ -814,16 +818,15 @@ def publish_transcript(
     payload = _segments_payload(prepared.segments)
     staged_path = attempt / "transcript.jsonl"
     atomic_write_bytes(staged_path, payload, private=True)
+    content_sha256 = sha256_file(staged_path)
     staged_artifact = ArtifactRef(
-        artifact_id=f"transcript-{sha256_file(staged_path)[:16]}",
+        artifact_id=f"transcript-{content_sha256[:16]}",
         artifact_type="transcript_segments",
-        content_sha256=sha256_file(staged_path),
+        content_sha256=content_sha256,
         size_bytes=len(payload),
-        relative_storage_path="transcript/segments/"
-        + sha256_file(staged_path)
-        + "/transcript.jsonl",
+        relative_storage_path="transcript/segments/" + content_sha256 + "/transcript.jsonl",
     )
-    _verify_artifact(staged_path, staged_artifact, deep=True)
+    _verify_artifact(staged_path, staged_artifact)
     _read_segments(staged_path, prepared.configuration, prepared.duration_ms)
     segments_artifact = _publish_segments(workspace, staged_path, payload)
     created_at = datetime.now(UTC)
@@ -850,14 +853,6 @@ def publish_transcript(
     stage = _stage_manifest(manifest)
     if workspace.transcript_manifest_json.exists():
         existing = load_transcription_result(workspace, job, media_manifest)
-        if (
-            existing.transcript_manifest.transcription_fingerprint
-            != manifest.transcription_fingerprint
-        ):
-            raise integrity_error(
-                "TRANSCRIPTION_FINGERPRINT_MISMATCH",
-                "another transcript bundle uses a different fingerprint",
-            )
         return existing
     atomic_write_json(workspace.transcript_candidate_manifest_json, manifest, private=True)
     candidate = _read_bounded_json_model(
@@ -961,14 +956,17 @@ def _verify_transcript_manifest(
     if (
         manifest.job_id != job.job_id
         or manifest.implementation_version != TRANSCRIPTION_IMPLEMENTATION_VERSION
-        or manifest.media_bundle_fingerprint != media_fingerprint
+        or (deep and manifest.media_bundle_fingerprint != media_fingerprint)
         or (expected_config is not None and manifest.configuration != expected_config)
-        or manifest.transcription_fingerprint
-        != transcription_fingerprint(
-            media_fingerprint=media_fingerprint,
-            selected_artifacts=tuple(manifest.selected_source_artifacts),
-            configuration=manifest.configuration,
-            backends=tuple(manifest.backends),
+        or (
+            deep
+            and manifest.transcription_fingerprint
+            != transcription_fingerprint(
+                media_fingerprint=media_fingerprint,
+                selected_artifacts=tuple(manifest.selected_source_artifacts),
+                configuration=manifest.configuration,
+                backends=tuple(manifest.backends),
+            )
         )
         or not manifest.segments_artifact.relative_storage_path.startswith("transcript/segments/")
     ):
@@ -986,7 +984,7 @@ def _verify_transcript_manifest(
                 "TRANSCRIPT_MANIFEST_MISMATCH", "supplied transcript manifest is inconsistent"
             )
         segments_path = workspace.safe_path(manifest.segments_artifact.relative_storage_path)
-        _verify_artifact(segments_path, manifest.segments_artifact)
+        _verify_artifact(segments_path, manifest.segments_artifact, deep=deep)
         segments = _read_segments(segments_path, manifest.configuration, manifest.duration_ms)
         if manifest.duration_ms is None:
             if manifest.gaps or manifest.overlaps:
@@ -1206,7 +1204,7 @@ def load_transcription_result(
         StageManifest,
         code="STAGE_MANIFEST_INVALID",
     )
-    if stage != _stage_manifest(manifest):
+    if not stage_manifest_matches(stage, _stage_manifest(manifest), deep=deep):
         raise integrity_error("STAGE_MANIFEST_MISMATCH", "transcription stage manifest is invalid")
     if workspace.transcript_candidate_manifest_json.exists():
         candidate = _read_bounded_json_model(

@@ -285,7 +285,7 @@ def publish_staged_source(
         copy_result = atomic_copy_exclusive(
             staged.path,
             target,
-            verifier=lambda candidate: _verify_raw(candidate, artifact, deep=True),
+            verifier=lambda candidate: _verify_raw(candidate, artifact),
         )
         _verify_raw(target, artifact)
         created_at = datetime.now(UTC)

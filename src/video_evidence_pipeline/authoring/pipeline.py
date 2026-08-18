@@ -20,6 +20,7 @@ from video_evidence_pipeline.domain.artifacts import (
     ArtifactRef,
     ProducerIdentity,
     ProducerKind,
+    artifact_file_matches,
 )
 from video_evidence_pipeline.domain.authoring import (
     AgentExecutionMode,
@@ -162,8 +163,10 @@ AuthoringHistory = tuple[tuple[DraftResult, AuditResult | None], ...]
 def _fixed_evidence_fingerprint_matches(
     fixed: FixedEvidenceBundle,
     stored_fingerprint: str,
+    *,
+    deep: bool = False,
 ) -> bool:
-    return fixed_evidence_identity_matches(
+    return not deep or fixed_evidence_identity_matches(
         job_id=fixed.job_id,
         evidence_request=fixed.evidence_request,
         evidence_manifest=fixed.evidence_manifest,
@@ -176,14 +179,37 @@ def _fixed_evidence_fingerprint_matches(
 def _fixed_evidence_bundle_matches(
     stored: FixedEvidenceBundle,
     fixed: FixedEvidenceBundle,
+    *,
+    deep: bool = False,
 ) -> bool:
+    if not deep:
+        stored_values = stored.model_dump(mode="json")
+        fixed_values = fixed.model_dump(mode="json")
+        for values in (stored_values, fixed_values):
+            values.pop("fixed_evidence_fingerprint", None)
+            for key in (
+                "request_fingerprint",
+                "transcript_bundle_fingerprint",
+                "media_bundle_fingerprint",
+            ):
+                values["evidence_request"].pop(key, None)
+            values["evidence_request"]["analyzer_contract"].pop("atomic_proposition_contract", None)
+            for key in (
+                "evidence_bundle_fingerprint",
+                "transcript_bundle_fingerprint",
+                "media_bundle_fingerprint",
+                "request_fingerprint",
+                "response_fingerprint",
+            ):
+                values["evidence_manifest"].pop(key, None)
+        return stored_values == fixed_values
     return (
         stored.job_id == fixed.job_id
         and stored.evidence_request == fixed.evidence_request
         and stored.evidence_manifest == fixed.evidence_manifest
         and stored.evidence_records == fixed.evidence_records
         and stored.ambiguity_records == fixed.ambiguity_records
-        and _fixed_evidence_fingerprint_matches(fixed, stored.fixed_evidence_fingerprint)
+        and _fixed_evidence_fingerprint_matches(fixed, stored.fixed_evidence_fingerprint, deep=deep)
     )
 
 
@@ -193,6 +219,7 @@ def _validated_history_contexts(
     job: JobSpec,
     fixed: FixedEvidenceBundle,
     latest_draft: DraftResult,
+    deep: bool = False,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     _validate_fixed_job(job, fixed, code="DRAFT_HISTORY_INVALID")
     if not history or history[-1][0] != latest_draft:
@@ -205,7 +232,7 @@ def _validated_history_contexts(
         if (
             draft.manifest.job_id != job.job_id
             or not _fixed_evidence_fingerprint_matches(
-                fixed, draft.manifest.fixed_evidence_fingerprint
+                fixed, draft.manifest.fixed_evidence_fingerprint, deep=deep
             )
             or draft.manifest.draft_version != expected_version
             or draft.manifest.revision_count != index
@@ -224,7 +251,7 @@ def _validated_history_contexts(
             if (
                 audit.manifest.job_id != job.job_id
                 or not _fixed_evidence_fingerprint_matches(
-                    fixed, audit.manifest.fixed_evidence_fingerprint
+                    fixed, audit.manifest.fixed_evidence_fingerprint, deep=deep
                 )
                 or audit.manifest.target_draft_version != expected_version
                 or audit.manifest.target_draft_sha256
@@ -363,16 +390,9 @@ def _read_jsonl[ModelT: BaseModel](
         raise integrity_error(code, "JSONL artifact is malformed") from None
 
 
-def _verify_artifact(path: Path, artifact: ArtifactRef) -> None:
+def _verify_artifact(path: Path, artifact: ArtifactRef, *, deep: bool = False) -> None:
     try:
-        metadata = path.stat(follow_symlinks=False)
-        if (
-            path.is_symlink()
-            or getattr(path, "is_junction", lambda: False)()
-            or not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_size != artifact.size_bytes
-            or sha256_file(path) != artifact.content_sha256
-        ):
+        if not artifact_file_matches(path, artifact, deep=deep, hasher=sha256_file):
             raise integrity_error("AUTHORING_BUNDLE_TAMPERED", "authoring artifact is invalid")
         enforce_private_file(path)
     except OSError:
@@ -609,24 +629,11 @@ _AuthoringRequestManifest = (
 
 
 def _request_fingerprint_matches(value: _AuthoringRequestManifest) -> bool:
-    if value.request_fingerprint == _request_fingerprint(value):
-        return True
-    if (
-        value.fixed_evidence.evidence_request.analyzer_contract.atomic_proposition_contract
-        is not None
-    ):
-        return False
-    legacy_payload = value.model_dump(mode="json", exclude={"request_fingerprint"})
-    legacy_payload["fixed_evidence"]["evidence_request"]["analyzer_contract"] = (
-        value.fixed_evidence.evidence_request.analyzer_contract.model_dump(
-            mode="json", exclude_none=True
-        )
-    )
-    return value.request_fingerprint == fingerprint(legacy_payload)
+    return value.request_fingerprint == _request_fingerprint(value)
 
 
-def _validate_request_fingerprint(value: _AuthoringRequestManifest) -> None:
-    if not _request_fingerprint_matches(value):
+def _validate_request_fingerprint(value: _AuthoringRequestManifest, *, deep: bool = False) -> None:
+    if deep and not _request_fingerprint_matches(value):
         raise integrity_error("AUTHORING_REQUEST_INVALID", "request fingerprint is inconsistent")
 
 
@@ -674,6 +681,8 @@ def load_authoring_request(
     workspace: JobWorkspace,
     job: JobSpec,
     fixed: FixedEvidenceBundle,
+    *,
+    deep: bool = False,
 ) -> AuthoringRequestManifest:
     _validate_fixed_job(job, fixed, code="AUTHORING_REQUEST_STALE")
     if not fixed.evidence_records:
@@ -686,9 +695,9 @@ def load_authoring_request(
         AuthoringRequestManifest,
         code="AUTHORING_REQUEST_INVALID",
     )
-    _validate_request_fingerprint(request)
+    _validate_request_fingerprint(request, deep=deep)
     if request.job_id != job.job_id or not _fixed_evidence_bundle_matches(
-        request.fixed_evidence, fixed
+        request.fixed_evidence, fixed, deep=deep
     ):
         raise integrity_error("AUTHORING_REQUEST_STALE", "authoring request is stale")
     if request.output_constraints != _constraints(job, fixed):
@@ -1189,6 +1198,8 @@ def _load_response_for_draft(
     workspace: JobWorkspace,
     manifest: DraftManifest,
     stage: StageManifest,
+    *,
+    deep: bool = False,
 ) -> AuthoringResponseManifest | RevisionResponseManifest:
     response_artifacts = [
         item
@@ -1199,7 +1210,7 @@ def _load_response_for_draft(
         raise integrity_error("DRAFT_BUNDLE_INVALID", "draft response artifact is missing")
     artifact = response_artifacts[0]
     path = workspace.safe_path(artifact.relative_storage_path)
-    _verify_artifact(path, artifact)
+    _verify_artifact(path, artifact, deep=deep)
     model: type[AuthoringResponseManifest] | type[RevisionResponseManifest] = (
         AuthoringResponseManifest if manifest.revision_count == 0 else RevisionResponseManifest
     )
@@ -1211,6 +1222,8 @@ def load_draft(
     job: JobSpec,
     version: str,
     fixed: FixedEvidenceBundle,
+    *,
+    deep: bool = False,
 ) -> DraftResult:
     _validate_fixed_job(job, fixed, code="DRAFT_BUNDLE_INVALID")
     manifest = _read_model(
@@ -1226,10 +1239,12 @@ def load_draft(
     if (
         manifest.job_id != job.job_id
         or manifest.draft_version != version
-        or not _fixed_evidence_fingerprint_matches(fixed, manifest.fixed_evidence_fingerprint)
-        or manifest.bundle_fingerprint != _draft_fingerprint(manifest)
+        or not _fixed_evidence_fingerprint_matches(
+            fixed, manifest.fixed_evidence_fingerprint, deep=deep
+        )
+        or (deep and manifest.bundle_fingerprint != _draft_fingerprint(manifest))
         or stage.job_id != job.job_id
-        or stage.configuration_sha256 != manifest.bundle_fingerprint
+        or (deep and stage.configuration_sha256 != manifest.bundle_fingerprint)
     ):
         raise integrity_error("DRAFT_BUNDLE_INVALID", "draft manifest binding is invalid")
     for artifact in (
@@ -1239,7 +1254,7 @@ def load_draft(
         manifest.agent_run_artifact,
         *([manifest.resolution_artifact] if manifest.resolution_artifact is not None else []),
     ):
-        _verify_artifact(workspace.safe_path(artifact.relative_storage_path), artifact)
+        _verify_artifact(workspace.safe_path(artifact.relative_storage_path), artifact, deep=deep)
     draft_bytes = _read_bounded_bytes(
         workspace.safe_path(manifest.draft_artifact.relative_storage_path),
         maximum_bytes=_MAXIMUM_DRAFT_BYTES,
@@ -1264,7 +1279,7 @@ def load_draft(
         AgentRunRecord,
         code="DRAFT_BUNDLE_INVALID",
     )
-    response = _load_response_for_draft(workspace, manifest, stage)
+    response = _load_response_for_draft(workspace, manifest, stage, deep=deep)
     response_artifact = next(
         item
         for item in stage.output_artifacts
@@ -1275,7 +1290,9 @@ def load_draft(
     )
     _validate_execution(response_producer, allow_fixture=True)
     initial_request = (
-        load_authoring_request(workspace, job, fixed) if manifest.revision_count == 0 else None
+        load_authoring_request(workspace, job, fixed, deep=deep)
+        if manifest.revision_count == 0
+        else None
     )
     stage_kind = "authoring" if manifest.revision_count == 0 else "revision"
     expected_stage_name = f"{stage_kind}-{version}"
@@ -1285,22 +1302,12 @@ def load_draft(
         version=__version__,
     )
     if (
-        response.request_fingerprint != manifest.request_fingerprint
-        or fingerprint(response) != manifest.response_fingerprint
-        or response.draft_markdown != draft_markdown
+        response.draft_markdown != draft_markdown
         or tuple(response.claims) != claims
         or response.requirement_map != requirement_map
         or response_producer != manifest.producer
-        or run.response_fingerprint != manifest.response_fingerprint
-        or run.request_fingerprint != manifest.request_fingerprint
         or run.identity != manifest.producer
-        or (
-            initial_request is not None
-            and (
-                manifest.request_fingerprint != initial_request.request_fingerprint
-                or run.skill != initial_request.skill
-            )
-        )
+        or (initial_request is not None and (run.skill != initial_request.skill))
         or stage.stage != expected_stage_name
         or stage.status is not StageStatus.SUCCEEDED
         or stage.state_transition is not JobState.DRAFTED
@@ -1311,6 +1318,19 @@ def load_draft(
         or stage.producer != expected_producer
         or stage.started_at != run.started_at
         or stage.finished_at != run.finished_at
+        or (
+            deep
+            and (
+                response.request_fingerprint != manifest.request_fingerprint
+                or fingerprint(response) != manifest.response_fingerprint
+                or run.response_fingerprint != manifest.response_fingerprint
+                or run.request_fingerprint != manifest.request_fingerprint
+                or (
+                    initial_request is not None
+                    and manifest.request_fingerprint != initial_request.request_fingerprint
+                )
+            )
+        )
     ):
         raise integrity_error("DRAFT_BUNDLE_INVALID", "draft contents are inconsistent")
     _validate_claims(claims, requirement_map, fixed)
@@ -1361,11 +1381,14 @@ def _validate_audit_target_lineage(
     draft: DraftResult,
     *,
     code: str,
+    deep: bool = False,
 ) -> None:
     _validate_fixed_job(job, fixed, code=code)
     if (
         draft.manifest.job_id != job.job_id
-        or not _fixed_evidence_fingerprint_matches(fixed, draft.manifest.fixed_evidence_fingerprint)
+        or not _fixed_evidence_fingerprint_matches(
+            fixed, draft.manifest.fixed_evidence_fingerprint, deep=deep
+        )
         or draft.manifest.draft_version != f"v{draft.manifest.revision_count + 1:03d}"
     ):
         raise integrity_error(code, "audit target lineage is invalid")
@@ -1424,22 +1447,25 @@ def load_audit_request(
     job: JobSpec,
     fixed: FixedEvidenceBundle,
     draft: DraftResult,
+    *,
+    deep: bool = False,
 ) -> AuditRequestManifest:
     _validate_audit_target_lineage(
         job,
         fixed,
         draft,
         code="AUDIT_REQUEST_STALE",
+        deep=deep,
     )
     request = _read_model(
         _audit_request_path(workspace, draft.manifest.draft_version),
         AuditRequestManifest,
         code="AUDIT_REQUEST_INVALID",
     )
-    _validate_request_fingerprint(request)
+    _validate_request_fingerprint(request, deep=deep)
     if (
         request.job_id != job.job_id
-        or not _fixed_evidence_bundle_matches(request.fixed_evidence, fixed)
+        or not _fixed_evidence_bundle_matches(request.fixed_evidence, fixed, deep=deep)
         or request.target_draft_artifact != draft.manifest.draft_artifact
         or request.target_draft_markdown != _draft_text(workspace, draft)
         or request.output_constraints != _constraints(job, fixed)
@@ -1479,8 +1505,9 @@ def _validate_audit_response_semantics(
     request: AuditRequestManifest,
     *,
     forbidden_context_ids: tuple[str, ...],
+    check_fingerprints: bool = True,
 ) -> None:
-    if (
+    if check_fingerprints and (
         response.request_fingerprint != request.request_fingerprint
         or response.target_draft_sha256 != request.target_draft_sha256
     ):
@@ -2073,6 +2100,8 @@ def load_audit(
     draft: DraftResult,
     fixed: FixedEvidenceBundle,
     history: AuthoringHistory,
+    *,
+    deep: bool = False,
 ) -> AuditResult:
     if not history or history[-1][1] is not None:
         raise integrity_error("AUDIT_BUNDLE_INVALID", "audit load history is not pending")
@@ -2081,9 +2110,10 @@ def load_audit(
         job=job,
         fixed=fixed,
         latest_draft=draft,
+        deep=deep,
     )
     version = draft.manifest.draft_version
-    request = load_audit_request(workspace, job, fixed, draft)
+    request = load_audit_request(workspace, job, fixed, draft, deep=deep)
     manifest = _read_model(
         _audit_manifest_path(workspace, version),
         AuditManifest,
@@ -2098,13 +2128,18 @@ def load_audit(
         manifest.job_id != job.job_id
         or manifest.target_draft_version != version
         or manifest.target_draft_sha256 != draft.manifest.draft_artifact.content_sha256
-        or not _fixed_evidence_fingerprint_matches(fixed, manifest.fixed_evidence_fingerprint)
-        or manifest.request_fingerprint != request.request_fingerprint
         or manifest.authoring_context_ids != list(authoring_context_ids)
         or manifest.prior_auditor_context_ids != list(prior_auditor_context_ids)
-        or manifest.bundle_fingerprint != _audit_fingerprint(manifest)
+        or (
+            deep
+            and not _fixed_evidence_fingerprint_matches(
+                fixed, manifest.fixed_evidence_fingerprint, deep=True
+            )
+        )
+        or (deep and manifest.request_fingerprint != request.request_fingerprint)
+        or (deep and manifest.bundle_fingerprint != _audit_fingerprint(manifest))
         or stage.job_id != job.job_id
-        or stage.configuration_sha256 != manifest.bundle_fingerprint
+        or (deep and stage.configuration_sha256 != manifest.bundle_fingerprint)
     ):
         raise integrity_error("AUDIT_BUNDLE_INVALID", "audit manifest binding is invalid")
     for artifact in (
@@ -2114,7 +2149,7 @@ def load_audit(
         manifest.response_artifact,
         manifest.agent_run_artifact,
     ):
-        _verify_artifact(workspace.safe_path(artifact.relative_storage_path), artifact)
+        _verify_artifact(workspace.safe_path(artifact.relative_storage_path), artifact, deep=deep)
     claims = _read_jsonl(
         workspace.safe_path(manifest.audit_claims_artifact.relative_storage_path),
         AuditClaimRecord,
@@ -2140,6 +2175,7 @@ def load_audit(
         response,
         request,
         forbidden_context_ids=tuple(sorted({*authoring_context_ids, *prior_auditor_context_ids})),
+        check_fingerprints=deep,
     )
     run = _read_model(
         workspace.safe_path(manifest.agent_run_artifact.relative_storage_path),
@@ -2150,12 +2186,10 @@ def load_audit(
         tuple(response.audit_claims) != claims
         or comparisons != compare_author_and_audit_claims(draft.claims, response.audit_claims)
         or tuple(response.findings) != findings
-        or fingerprint(response) != manifest.response_fingerprint
-        or response.request_fingerprint != manifest.request_fingerprint
         or response.target_draft_sha256 != manifest.target_draft_sha256
         or response.auditor != manifest.auditor
-        or run.response_fingerprint != manifest.response_fingerprint
-        or run.request_fingerprint != manifest.request_fingerprint
+        or (deep and run.response_fingerprint != manifest.response_fingerprint)
+        or (deep and run.request_fingerprint != manifest.request_fingerprint)
         or run.identity != manifest.auditor
         or run.skill != request.skill
         or run.role is not AgentRole.AUDITOR
@@ -2178,6 +2212,15 @@ def load_audit(
         or manifest.p2_count != sum(item.severity is AuditSeverity.P2 for item in findings)
         or manifest.claim_comparison_count != len(comparisons)
         or manifest.disposition != _audit_disposition(draft, list(findings))
+        or (
+            deep
+            and (
+                fingerprint(response) != manifest.response_fingerprint
+                or response.request_fingerprint != manifest.request_fingerprint
+                or run.response_fingerprint != manifest.response_fingerprint
+                or run.request_fingerprint != manifest.request_fingerprint
+            )
+        )
     ):
         raise integrity_error("AUDIT_BUNDLE_INVALID", "audit contents are inconsistent")
     return AuditResult(
@@ -2212,13 +2255,18 @@ def _validate_revision_lineage(
     audit: AuditResult,
     *,
     code: str,
+    deep: bool = False,
 ) -> None:
     if (
         fixed.job_id != job.job_id
         or draft.manifest.job_id != job.job_id
-        or not _fixed_evidence_fingerprint_matches(fixed, draft.manifest.fixed_evidence_fingerprint)
+        or not _fixed_evidence_fingerprint_matches(
+            fixed, draft.manifest.fixed_evidence_fingerprint, deep=deep
+        )
         or audit.manifest.job_id != job.job_id
-        or not _fixed_evidence_fingerprint_matches(fixed, audit.manifest.fixed_evidence_fingerprint)
+        or not _fixed_evidence_fingerprint_matches(
+            fixed, audit.manifest.fixed_evidence_fingerprint, deep=deep
+        )
         or audit.manifest.target_draft_version != draft.manifest.draft_version
         or audit.manifest.target_draft_sha256 != draft.manifest.draft_artifact.content_sha256
         or audit.manifest.disposition is not AuditDisposition.REVISION_REQUIRED
@@ -2233,11 +2281,13 @@ def _revision_request_is_bound(
     fixed: FixedEvidenceBundle,
     draft: DraftResult,
     audit: AuditResult,
+    *,
+    deep: bool = False,
 ) -> bool:
     expected_count = draft.manifest.revision_count + 1
     return (
         request.job_id == job.job_id
-        and _fixed_evidence_bundle_matches(request.fixed_evidence, fixed)
+        and _fixed_evidence_bundle_matches(request.fixed_evidence, fixed, deep=deep)
         and request.target_draft_version == draft.manifest.draft_version
         and request.next_draft_version == f"v{expected_count + 1:03d}"
         and request.revision_count == expected_count
@@ -2246,7 +2296,7 @@ def _revision_request_is_bound(
         and request.target_draft_markdown == _draft_text(workspace, draft)
         and request.author_claims == list(draft.claims)
         and request.requirement_map == draft.requirement_map
-        and request.audit_bundle_fingerprint == audit.manifest.bundle_fingerprint
+        and (not deep or request.audit_bundle_fingerprint == audit.manifest.bundle_fingerprint)
         and request.audit_finding_artifact == audit.manifest.findings_artifact
         and request.audit_findings == list(audit.findings)
         and request.output_constraints == _constraints(job, fixed)
@@ -2315,6 +2365,8 @@ def load_revision_request(
     fixed: FixedEvidenceBundle,
     draft: DraftResult,
     audit: AuditResult,
+    *,
+    deep: bool = False,
 ) -> RevisionRequestManifest:
     _validate_revision_lineage(
         job,
@@ -2322,6 +2374,7 @@ def load_revision_request(
         draft,
         audit,
         code="REVISION_REQUEST_STALE",
+        deep=deep,
     )
     next_version = f"v{draft.manifest.revision_count + 2:03d}"
     request = _read_model(
@@ -2329,8 +2382,8 @@ def load_revision_request(
         RevisionRequestManifest,
         code="REVISION_REQUEST_INVALID",
     )
-    _validate_request_fingerprint(request)
-    if not _revision_request_is_bound(workspace, request, job, fixed, draft, audit):
+    _validate_request_fingerprint(request, deep=deep)
+    if not _revision_request_is_bound(workspace, request, job, fixed, draft, audit, deep=deep):
         raise integrity_error("REVISION_REQUEST_STALE", "revision request is stale")
     return request
 
@@ -2340,8 +2393,9 @@ def _validate_revision_response_semantics(
     request: RevisionRequestManifest,
     *,
     forbidden_context_ids: tuple[str, ...],
+    check_fingerprints: bool = True,
 ) -> None:
-    if response.request_fingerprint != request.request_fingerprint:
+    if check_fingerprints and response.request_fingerprint != request.request_fingerprint:
         raise integrity_error(
             "REVISION_RESPONSE_INVALID", "revision response targets another request"
         )
@@ -2952,6 +3006,8 @@ def load_revision(
     audit: AuditResult,
     request: RevisionRequestManifest,
     history: AuthoringHistory,
+    *,
+    deep: bool = False,
 ) -> RevisionResult:
     _validate_revision_lineage(
         job,
@@ -2959,6 +3015,7 @@ def load_revision(
         predecessor,
         audit,
         code="REVISION_BUNDLE_INVALID",
+        deep=deep,
     )
     if not history or history[-1] != (predecessor, audit):
         raise integrity_error("REVISION_BUNDLE_INVALID", "revision history is not current")
@@ -2967,12 +3024,15 @@ def load_revision(
         job=job,
         fixed=fixed,
         latest_draft=predecessor,
+        deep=deep,
     )
     prior_context_ids = tuple(sorted({*authoring_context_ids, *auditor_context_ids}))
-    _validate_request_fingerprint(request)
-    if not _revision_request_is_bound(workspace, request, job, fixed, predecessor, audit):
+    _validate_request_fingerprint(request, deep=deep)
+    if not _revision_request_is_bound(
+        workspace, request, job, fixed, predecessor, audit, deep=deep
+    ):
         raise integrity_error("REVISION_BUNDLE_INVALID", "revision request binding is invalid")
-    draft = load_draft(workspace, job, version, fixed)
+    draft = load_draft(workspace, job, version, fixed, deep=deep)
     if draft.manifest.revision_count == 0 or draft.manifest.resolution_artifact is None:
         raise integrity_error("REVISION_BUNDLE_INVALID", "draft is not a revision")
     manifest = _read_model(
@@ -2985,19 +3045,24 @@ def load_revision(
         or manifest.target_draft_version != predecessor.manifest.draft_version
         or manifest.revised_draft_version != version
         or manifest.target_draft_sha256 != predecessor.manifest.draft_artifact.content_sha256
-        or manifest.audit_bundle_fingerprint != audit.manifest.bundle_fingerprint
-        or manifest.request_fingerprint != request.request_fingerprint
-        or manifest.response_fingerprint != draft.manifest.response_fingerprint
         or manifest.resolution_artifact != draft.manifest.resolution_artifact
         or manifest.prior_context_ids != list(prior_context_ids)
         or draft.manifest.predecessor_draft_sha256
         != predecessor.manifest.draft_artifact.content_sha256
-        or draft.manifest.request_fingerprint != request.request_fingerprint
-        or manifest.bundle_fingerprint != _revision_fingerprint(manifest)
+        or (
+            deep
+            and (
+                manifest.audit_bundle_fingerprint != audit.manifest.bundle_fingerprint
+                or manifest.request_fingerprint != request.request_fingerprint
+                or manifest.response_fingerprint != draft.manifest.response_fingerprint
+                or draft.manifest.request_fingerprint != request.request_fingerprint
+                or manifest.bundle_fingerprint != _revision_fingerprint(manifest)
+            )
+        )
     ):
         raise integrity_error("REVISION_BUNDLE_INVALID", "revision manifest binding is invalid")
     resolution_path = workspace.safe_path(manifest.resolution_artifact.relative_storage_path)
-    _verify_artifact(resolution_path, manifest.resolution_artifact)
+    _verify_artifact(resolution_path, manifest.resolution_artifact, deep=deep)
     resolutions = _read_jsonl(
         resolution_path,
         ResolutionRecord,
@@ -3014,6 +3079,7 @@ def load_revision(
         response,
         request,
         forbidden_context_ids=prior_context_ids,
+        check_fingerprints=deep,
     )
     return RevisionResult(draft=draft, manifest=manifest, resolutions=resolutions, reused=True)
 
@@ -3024,6 +3090,30 @@ def _human_review_stage_path(workspace: JobWorkspace, version: str) -> Path:
 
 def _human_review_manifest_fingerprint(manifest: HumanReviewManifest) -> str:
     return fingerprint(manifest.model_dump(mode="json", exclude={"bundle_fingerprint"}))
+
+
+def _human_review_bundle_matches(
+    stored: HumanReviewBundle,
+    expected: HumanReviewBundle,
+    *,
+    deep: bool = False,
+) -> bool:
+    if deep:
+        return stored == expected
+    stored_values = stored.model_dump(mode="json")
+    expected_values = expected.model_dump(mode="json")
+    for values in (stored_values, expected_values):
+        for key in (
+            "fixed_evidence_fingerprint",
+            "audit_bundle_fingerprint",
+            "current_draft_sha256",
+            "approval_target_sha256",
+        ):
+            values.pop(key, None)
+        for entry in values["revision_history"]:
+            entry.pop("draft_sha256", None)
+            entry.pop("audit_bundle_fingerprint", None)
+    return stored_values == expected_values
 
 
 def _build_human_review_bundle(
@@ -3262,10 +3352,7 @@ def recover_human_review(
         history,
         created_at=bundle.created_at,
     )
-    if (
-        bundle != expected_bundle
-        or sha256_bytes(pretty_json_bytes(bundle)) != artifact.content_sha256
-    ):
+    if not _human_review_bundle_matches(bundle, expected_bundle):
         raise integrity_error(
             "HUMAN_REVIEW_ORPHAN_INVALID",
             "orphan human-review bundle is inconsistent",
@@ -3319,6 +3406,8 @@ def load_human_review(
     draft: DraftResult,
     audit: AuditResult,
     history: AuthoringHistory,
+    *,
+    deep: bool = False,
 ) -> HumanReviewResult:
     manifest = _read_model(
         workspace.human_review_manifest_json,
@@ -3333,6 +3422,7 @@ def load_human_review(
     _verify_artifact(
         workspace.safe_path(manifest.bundle_artifact.relative_storage_path),
         manifest.bundle_artifact,
+        deep=deep,
     )
     bundle = _read_model(
         workspace.safe_path(manifest.bundle_artifact.relative_storage_path),
@@ -3350,20 +3440,15 @@ def load_human_review(
     )
     if (
         manifest.job_id != job.job_id
-        or not _fixed_evidence_fingerprint_matches(fixed, manifest.fixed_evidence_fingerprint)
-        or manifest.draft_bundle_fingerprint != draft.manifest.bundle_fingerprint
-        or manifest.audit_bundle_fingerprint != audit.manifest.bundle_fingerprint
         or manifest.approval_target_sha256 != draft.manifest.draft_artifact.content_sha256
-        or manifest.bundle_fingerprint != _human_review_manifest_fingerprint(manifest)
-        or bundle != expected_bundle
+        or not _human_review_bundle_matches(bundle, expected_bundle, deep=deep)
         or bundle.current_draft_sha256 != draft.manifest.draft_artifact.content_sha256
         or bundle.approval_target_sha256 != manifest.approval_target_sha256
-        or sha256_bytes(pretty_json_bytes(bundle)) != manifest.bundle_artifact.content_sha256
         or stage.job_id != job.job_id
         or stage.stage != f"human-review-{draft.manifest.draft_version}"
         or stage.status is not StageStatus.SUCCEEDED
         or stage.state_transition is not JobState.HUMAN_REVIEW_READY
-        or stage.configuration_sha256 != manifest.bundle_fingerprint
+        or (deep and stage.configuration_sha256 != manifest.bundle_fingerprint)
         or _artifact_payloads(stage.input_artifacts)
         != _artifact_payloads(
             [
@@ -3383,6 +3468,19 @@ def load_human_review(
         )
         or stage.started_at != bundle.created_at
         or stage.finished_at != manifest.created_at
+        or (
+            deep
+            and (
+                not _fixed_evidence_fingerprint_matches(
+                    fixed, manifest.fixed_evidence_fingerprint, deep=True
+                )
+                or manifest.draft_bundle_fingerprint != draft.manifest.bundle_fingerprint
+                or manifest.audit_bundle_fingerprint != audit.manifest.bundle_fingerprint
+                or manifest.bundle_fingerprint != _human_review_manifest_fingerprint(manifest)
+                or sha256_bytes(pretty_json_bytes(bundle))
+                != manifest.bundle_artifact.content_sha256
+            )
+        )
     ):
         raise integrity_error("HUMAN_REVIEW_BUNDLE_INVALID", "human review binding is invalid")
     return HumanReviewResult(
