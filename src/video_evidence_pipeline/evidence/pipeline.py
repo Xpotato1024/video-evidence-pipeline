@@ -652,6 +652,23 @@ def evidence_bundle_fingerprint(
     request: EvidenceRequestManifest,
     response: EvidenceResponseManifest,
 ) -> str:
+    return _evidence_bundle_fingerprint_with_analyzer_contract(
+        transcript_manifest,
+        media_manifest,
+        request,
+        response,
+        analyzer_contract=request.analyzer_contract.model_dump(mode="json", exclude_none=True),
+    )
+
+
+def _evidence_bundle_fingerprint_with_analyzer_contract(
+    transcript_manifest: TranscriptManifest,
+    media_manifest: MediaManifest,
+    request: EvidenceRequestManifest,
+    response: EvidenceResponseManifest,
+    *,
+    analyzer_contract: dict[str, object],
+) -> str:
     return fingerprint(
         {
             "transcript_bundle_fingerprint": transcript_manifest.transcription_fingerprint,
@@ -662,11 +679,35 @@ def evidence_bundle_fingerprint(
                 else None
             ),
             "request_fingerprint": request.request_fingerprint,
-            "analyzer_contract": request.analyzer_contract.model_dump(mode="json"),
+            "analyzer_contract": analyzer_contract,
             "response": response.model_dump(mode="json"),
             "implementation_version": EVIDENCE_IMPLEMENTATION_VERSION,
         }
     )
+
+
+def _evidence_bundle_fingerprint_matches(
+    transcript_manifest: TranscriptManifest,
+    media_manifest: MediaManifest,
+    request: EvidenceRequestManifest,
+    response: EvidenceResponseManifest,
+    stored_fingerprint: str,
+) -> bool:
+    canonical_fingerprint = evidence_bundle_fingerprint(
+        transcript_manifest, media_manifest, request, response
+    )
+    if stored_fingerprint == canonical_fingerprint:
+        return True
+    if request.analyzer_contract.atomic_proposition_contract is None:
+        transitional_fingerprint = _evidence_bundle_fingerprint_with_analyzer_contract(
+            transcript_manifest,
+            media_manifest,
+            request,
+            response,
+            analyzer_contract=request.analyzer_contract.model_dump(mode="json"),
+        )
+        return stored_fingerprint == transitional_fingerprint
+    return False
 
 
 def _staging_root(workspace: JobWorkspace) -> Path:
@@ -1199,9 +1240,6 @@ def _verify_evidence_manifest(
             "EVIDENCE_MANIFEST_MISMATCH", "validated response and ledgers disagree"
         )
     _validate_response(request, response, allow_fixture=True)
-    expected_fingerprint = evidence_bundle_fingerprint(
-        transcript_manifest, media_manifest, request, response
-    )
     if (
         manifest.job_id != job.job_id
         or manifest.implementation_version != EVIDENCE_IMPLEMENTATION_VERSION
@@ -1209,7 +1247,13 @@ def _verify_evidence_manifest(
         or manifest.media_bundle_fingerprint != media_bundle_fingerprint(media_manifest)
         or manifest.request_fingerprint != request.request_fingerprint
         or manifest.response_fingerprint != fingerprint(response)
-        or manifest.evidence_bundle_fingerprint != expected_fingerprint
+        or not _evidence_bundle_fingerprint_matches(
+            transcript_manifest,
+            media_manifest,
+            request,
+            response,
+            manifest.evidence_bundle_fingerprint,
+        )
         or manifest.evidence_count != len(evidence_records)
         or manifest.ambiguity_count != len(ambiguity_records)
         or not manifest.response_artifact.relative_storage_path.startswith("evidence/responses/")
