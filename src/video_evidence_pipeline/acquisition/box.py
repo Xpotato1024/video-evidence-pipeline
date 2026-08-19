@@ -29,6 +29,12 @@ from video_evidence_pipeline.acquisition.staged import (
     AcquisitionEvidenceDraft,
     publish_staged_source,
 )
+from video_evidence_pipeline.acquisition.ytdlp_runner import (
+    SubprocessRunner,
+    YtdlpToolchainFactory,
+    default_ytdlp_toolchain,
+    run_ytdlp,
+)
 from video_evidence_pipeline.domain.identifiers import sanitize_filename
 from video_evidence_pipeline.domain.job import JobSpec, SourceKind
 from video_evidence_pipeline.domain.locators import (
@@ -87,14 +93,18 @@ class BoxAdapter(AcquisitionAdapter):
         *,
         client: httpx.Client | None = None,
         resolver: Resolver = default_resolver,
+        runner: SubprocessRunner | None = None,
         sleep: Callable[[float], None] = time.sleep,
         monotonic: Callable[[], float] = time.monotonic,
+        toolchain_factory: YtdlpToolchainFactory = default_ytdlp_toolchain,
     ) -> None:
         self.runtime = runtime
         self.client = client
         self.resolver = resolver
+        self.runner = runner
         self.sleep = sleep
         self.monotonic = monotonic
+        self.toolchain_factory = toolchain_factory
 
     def probe(self, job: JobSpec) -> ProbeResult:
         if job.source.kind is not SourceKind.BOX:
@@ -115,8 +125,27 @@ class BoxAdapter(AcquisitionAdapter):
             monotonic=self.monotonic,
         )
         probe = self.probe(job)
-        token = self.runtime.token_from_environment(self.runtime.box_token_env, provider="box")
         locator_kind = box_locator_kind(job.source.locator)
+        if locator_kind is BoxLocatorKind.SHARED_LINK and self.runtime.box_token_env is None:
+            staged = run_ytdlp(
+                job.source.locator,
+                workspace,
+                self.runtime,
+                adapter_kind=SourceKind.BOX,
+                runner=self.runner,
+                resolver=self.resolver,
+                deadline=deadline,
+                monotonic=self.monotonic,
+                toolchain_factory=self.toolchain_factory,
+            )
+            return publish_staged_source(
+                job,
+                workspace,
+                staged,
+                maximum_bytes=self.runtime.maximum_download_bytes,
+                started_at=started_at,
+            )
+        token = self.runtime.token_from_environment(self.runtime.box_token_env, provider="box")
         box_api_header = None
         if locator_kind is BoxLocatorKind.SHARED_LINK:
             box_api_header = BoxApiHeader(box_shared_link(job.source.locator))
