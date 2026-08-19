@@ -80,13 +80,23 @@ def _job(maximum_adjustments: int = 2) -> JobSpec:
     )
 
 
+def _length_gate(workspace: JobWorkspace, job: JobSpec, **kwargs):
+    return _enforce_length_gate(
+        workspace,
+        job,
+        response_created_at=job.created_at,
+        request_fingerprint="a" * 64,
+        **kwargs,
+    )
+
+
 def test_length_adjustment_history_is_bounded_and_does_not_mutate_semantic_state(
     tmp_path: Path,
 ) -> None:
     workspace = JobWorkspace.create(tmp_path, "length-test")
     job = _job()
     with pytest.raises(VepError) as first:
-        _enforce_length_gate(
+        _length_gate(
             workspace,
             job,
             version="v001",
@@ -96,7 +106,7 @@ def test_length_adjustment_history_is_bounded_and_does_not_mutate_semantic_state
         )
     assert first.value.code == "LENGTH_ADJUSTMENT_REQUIRED"
     with pytest.raises(VepError) as duplicate:
-        _enforce_length_gate(
+        _length_gate(
             workspace,
             job,
             version="v001",
@@ -106,7 +116,7 @@ def test_length_adjustment_history_is_bounded_and_does_not_mutate_semantic_state
         )
     assert "adjustment: 1/2" in duplicate.value.safe_message
     with pytest.raises(VepError) as second:
-        _enforce_length_gate(
+        _length_gate(
             workspace,
             job,
             version="v001",
@@ -117,7 +127,7 @@ def test_length_adjustment_history_is_bounded_and_does_not_mutate_semantic_state
     assert second.value.code == "LENGTH_ADJUSTMENT_REQUIRED"
     latest_request = workspace.safe_path("authoring/length/v001-request.json").read_bytes()
     with pytest.raises(VepError) as non_tail_duplicate:
-        _enforce_length_gate(
+        _length_gate(
             workspace,
             job,
             version="v001",
@@ -132,7 +142,7 @@ def test_length_adjustment_history_is_bounded_and_does_not_mutate_semantic_state
         len(workspace.safe_path("authoring/length/v001-attempts.jsonl").read_bytes().splitlines())
         == 2
     )
-    check, adjustment_count = _enforce_length_gate(
+    check, adjustment_count = _length_gate(
         workspace,
         job,
         version="v001",
@@ -153,7 +163,7 @@ def test_last_allowed_successful_correction_is_accepted(
     job = _job(maximum_adjustments)
     for index in range(maximum_adjustments):
         with pytest.raises(VepError) as required:
-            _enforce_length_gate(
+            _length_gate(
                 workspace,
                 job,
                 version="v001",
@@ -162,7 +172,7 @@ def test_last_allowed_successful_correction_is_accepted(
                 response_payload=f'{{"candidate":{index}}}'.encode(),
             )
         assert required.value.code == "LENGTH_ADJUSTMENT_REQUIRED"
-    check, adjustment_count = _enforce_length_gate(
+    check, adjustment_count = _length_gate(
         workspace,
         job,
         version="v001",
@@ -185,7 +195,7 @@ def test_last_allowed_failed_correction_exhausts(tmp_path: Path, maximum_adjustm
             else "LENGTH_ADJUSTMENT_REQUIRED"
         )
         with pytest.raises(VepError) as failure:
-            _enforce_length_gate(
+            _length_gate(
                 workspace,
                 job,
                 version="v001",
@@ -195,7 +205,7 @@ def test_last_allowed_failed_correction_exhausts(tmp_path: Path, maximum_adjustm
             )
         assert failure.value.code == expected
     with pytest.raises(VepError) as too_late:
-        _enforce_length_gate(
+        _length_gate(
             workspace,
             job,
             version="v001",
