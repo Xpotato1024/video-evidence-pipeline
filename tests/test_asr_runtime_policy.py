@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
+from typer.main import get_command
 from typer.testing import CliRunner
 
 import video_evidence_pipeline.cli as cli_module
@@ -760,9 +761,15 @@ def test_internal_worker_commands_reject_normal_host_and_hide_arbitrary_model_su
 
     provision_help = runner.invoke(app, ["asr", "provision-worker", "--help"])
     assert provision_help.exit_code == 0
-    assert "--profile" in provision_help.stdout
-    assert "--repository" not in provision_help.stdout
-    assert "--revision" not in provision_help.stdout
+    root_command = get_command(app)
+    asr_command = root_command.commands["asr"]  # type: ignore[attr-defined]
+    provision_command = asr_command.commands["provision-worker"]  # type: ignore[attr-defined]
+    provision_options = {
+        option for parameter in provision_command.params for option in parameter.opts
+    }
+    assert "--profile" in provision_options
+    assert "--repository" not in provision_options
+    assert "--revision" not in provision_options
 
     provision = runner.invoke(
         app,
