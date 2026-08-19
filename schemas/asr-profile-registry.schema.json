@@ -1,0 +1,119 @@
+{
+  "$defs": {
+    "AsrProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "container_image": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Container Image",
+          "type": "string"
+        },
+        "cpu_compute_type": {
+          "const": "int8",
+          "default": "int8",
+          "title": "Cpu Compute Type",
+          "type": "string"
+        },
+        "default_device_policy": {
+          "const": "auto",
+          "default": "auto",
+          "title": "Default Device Policy",
+          "type": "string"
+        },
+        "engine": {
+          "const": "faster-whisper",
+          "title": "Engine",
+          "type": "string"
+        },
+        "engine_version": {
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+          "title": "Engine Version",
+          "type": "string"
+        },
+        "gpu_compute_type": {
+          "const": "float16",
+          "default": "float16",
+          "title": "Gpu Compute Type",
+          "type": "string"
+        },
+        "min_free_vram_mib": {
+          "maximum": 1048576,
+          "minimum": 1,
+          "title": "Min Free Vram Mib",
+          "type": "integer"
+        },
+        "model": {
+          "const": "large-v3",
+          "title": "Model",
+          "type": "string"
+        },
+        "model_repository": {
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+          "title": "Model Repository",
+          "type": "string"
+        },
+        "model_revision": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Model Revision",
+          "type": "string"
+        },
+        "runtime": {
+          "const": "CTranslate2",
+          "title": "Runtime",
+          "type": "string"
+        },
+        "runtime_version": {
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+          "title": "Runtime Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "engine",
+        "engine_version",
+        "runtime",
+        "runtime_version",
+        "model",
+        "model_repository",
+        "model_revision",
+        "min_free_vram_mib",
+        "container_image"
+      ],
+      "title": "AsrProfile",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/asr-profile-registry.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "default_profile": {
+      "pattern": "^[a-z0-9][a-z0-9-]{0,127}$",
+      "title": "Default Profile",
+      "type": "string"
+    },
+    "profiles": {
+      "additionalProperties": {
+        "$ref": "#/$defs/AsrProfile"
+      },
+      "maxProperties": 32,
+      "minProperties": 1,
+      "title": "Profiles",
+      "type": "object"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "default_profile",
+    "profiles"
+  ],
+  "title": "AsrProfileRegistry",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

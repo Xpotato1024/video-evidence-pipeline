@@ -254,6 +254,15 @@ documents:
   owners:
   - Xpotato1024
   metadata_mode: front-matter
+- document_id: VEP-OPS-ASR
+  path: docs/operations/asr-runtime.md
+  document_type: operations
+  status: active
+  canonical: true
+  canonical_for: asr-runtime-operations
+  owners:
+  - Xpotato1024
+  metadata_mode: front-matter
 - document_id: VEP-OPS-CI
   path: docs/operations/ci-quality-gates.md
   document_type: operations

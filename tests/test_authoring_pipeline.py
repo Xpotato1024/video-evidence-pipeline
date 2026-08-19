@@ -107,8 +107,19 @@ def _identity(
     )
 
 
-def _evidence_ready_job(tmp_path: Path, job_id: str):
-    workspace, _transcription = _application_transcribed_job(tmp_path, job_id)
+def _evidence_ready_job(
+    tmp_path: Path,
+    job_id: str,
+    *,
+    min_chars: int | None = None,
+    max_chars: int | None = None,
+):
+    workspace, _transcription = _application_transcribed_job(
+        tmp_path,
+        job_id,
+        min_chars=min_chars,
+        max_chars=max_chars,
+    )
     repository_root = workspace.jobs_root.parent.parent
     shutil.copytree(Path(__file__).parents[1] / ".agents", repository_root / ".agents")
     request = prepare_evidence_job(workspace.root).request
@@ -865,8 +876,19 @@ def test_author_import_replay_reports_current_state_and_latest_draft_version(
     assert payload["reused"] is True
 
 
-def _publish_initial_draft(tmp_path: Path, job_id: str):
-    workspace = _evidence_ready_job(tmp_path, job_id)
+def _publish_initial_draft(
+    tmp_path: Path,
+    job_id: str,
+    *,
+    min_chars: int | None = None,
+    max_chars: int | None = None,
+):
+    workspace = _evidence_ready_job(
+        tmp_path,
+        job_id,
+        min_chars=min_chars,
+        max_chars=max_chars,
+    )
     request = prepare_authoring_job(workspace.root, "draft-video-report").request
     response_path = tmp_path / f"{job_id}-author.json"
     _write_model(response_path, _author_response(request))
@@ -941,6 +963,13 @@ def test_one_revision_then_clean_audit_reaches_human_review(tmp_path: Path) -> N
     )
     assert clean.manifest.disposition.value == "human_review_ready"
     assert clean.human_review is not None
+    human_review_bundle = json.loads(
+        workspace.safe_path(clean.human_review.bundle_artifact.relative_storage_path).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert human_review_bundle["semantic_revision_count"] == 1
+    assert human_review_bundle["length_adjustment_count"] == 0
     assert clean.manifest.target_draft_version == "v002"
     assert validate_job(workspace.root)["state"] == JobState.HUMAN_REVIEW_READY.value
     transitions = read_jsonl(workspace.transitions_jsonl, TransitionRecord)
@@ -959,6 +988,33 @@ def test_one_revision_then_clean_audit_reaches_human_review(tmp_path: Path) -> N
     with pytest.raises(VepError) as tamper_error:
         validate_job(workspace.root)
     assert tamper_error.value.code == "AUTHORING_BUNDLE_TAMPERED"
+
+
+def test_semantic_revision_reapplies_length_gate_without_spending_revision_budget(
+    tmp_path: Path,
+) -> None:
+    workspace, initial = _publish_initial_draft(
+        tmp_path,
+        "issue45-revision-length",
+        min_chars=38,
+        max_chars=42,
+    )
+    assert initial.manifest.length_check is not None
+    assert initial.manifest.length_check.actual_chars == 40
+    _publish_audit(
+        tmp_path,
+        workspace,
+        context_id="length-audit-context-1",
+        material=True,
+    )
+
+    with pytest.raises(VepError) as error:
+        _publish_revision(tmp_path, workspace, context_id="length-revision-context-1")
+
+    assert error.value.code == "LENGTH_ADJUSTMENT_REQUIRED"
+    assert not workspace.safe_path("manifests/authoring/draft-v002.json").exists()
+    assert initial.manifest.semantic_revision_count == 0
+    assert initial.manifest.length_adjustment_count == 0
 
 
 def test_second_revision_material_audit_blocks_without_v004(tmp_path: Path) -> None:

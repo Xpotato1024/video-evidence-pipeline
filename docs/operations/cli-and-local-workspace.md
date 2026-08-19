@@ -37,12 +37,14 @@ primary指定を持たない既存v1 video jobは`TRANSCRIBED → EVIDENCE_READY
 vep --version
 vep job init
 vep job validate
-vep job recover PARENT NEW-JOB-ID --confirm --basis TEXT
+vep job recover PARENT NEW-JOB-ID --confirm --basis TEXT [--child-spec PATH]
 vep job validate --deep
 vep job authorize
 vep job status
 vep acquire
 vep normalize
+vep asr image-build --profile PROFILE
+vep asr model-provision --profile PROFILE
 vep transcribe
 vep refine prepare
 vep refine import --response PATH
@@ -68,6 +70,9 @@ error codeとsafe messageを返し、Python stack traceを表示しません。
 `job init`ではassignment requirementをrepeatableな`--requirement`で指定します。未指定時は空配列で、
 指定順は意味を持ち、normalized job fingerprintへそのまま含まれます。空白だけの値と512文字を超える
 値は拒否します。
+`--min-chars`／`--max-chars`は未指定を保持するassignment fieldです。maxだけを指定した場合は
+`ceil(max × 0.8)`をeffective minimumにし、明示minを上書きしません。`--maximum-length-adjustments`
+（default 3、1〜10）はsemantic revisionとは独立したlength correction上限です。
 
 新規jobは`--primary-input video|audio|transcript`を指定でき、repeatableな
 `--supporting-input pdf:PATH|image:PATH|notes:PATH`でlocal supporting inputを追加できます。省略時は既存v1
@@ -86,11 +91,15 @@ vep job init demo-report \
 
 ## Bounded BLOCKED recovery
 
-`vep job recover PARENT NEW-JOB-ID --confirm --basis TEXT` is a narrow fork, not an
+`vep job recover PARENT NEW-JOB-ID --confirm --basis TEXT [--child-spec PATH]` is a narrow fork, not an
 in-place repair. It accepts a readable `BLOCKED` parent whose pre-semantic source,
 normalization, raw-transcript, and supporting-input artifacts are present. Finding
 categories, old semantic fingerprints, and draft/audit history are not recovery gates.
 It leaves the parent bytes, state, and transition log unchanged.
+
+`--child-spec`は新job IDを持つ完全なjob YAMLです。source locator identity、primary input、supporting inputは
+parentと一致しなければなりませんが、assignment requirements、output／length constraints、required sections、
+authoring instructionsは変更できます。recovery manifestはparent／child assignment fingerprintを記録します。
 
 The child receives a new job-bound authorization record with the parent's
 `allow_local_processing`, `allow_network_acquisition`, and `allow_external_api` values.
@@ -277,18 +286,26 @@ FFmpegを起動せず、raw artifactへ束縛したno-media normalization manife
 
 ## Transcription
 
-`vep transcribe JOB [--preferred-language LANG] [--minimum-caption-coverage N] [--asr-model-directory DIR]`
-`[--asr-device auto|cpu|cuda] [--asr-compute-type auto|int8|float16]`
+`vep transcribe JOB [--preferred-language LANG] [--minimum-caption-coverage N]`
+`[--asr-profile PROFILE] [--asr-device auto|cpu|cuda|cuda:INDEX]`
 は検証済み`NORMALIZED` bundleだけを入力とします。cueがあるnormalized subtitleを言語、
 `official → embedded → sidecar`、default、non-forced、stream indexで決定的に選び、coverageが十分なら
 subtitleだけで`TRANSCRIBED`へ進みます。不足区間がある場合だけspeech audioをASRへ渡します。
 
-組込みfaster-whisper adapterは既存の完全なabsolute local model directoryだけを受け付け、
-`local_files_only`、offline環境、固定decode optionでlazy loadします。device／computeの既定`auto`はCTranslate2の
-runtime probeを使い、usable CUDAでは`cuda`／`float16`、それ以外は`cpu`／`int8`を選びます。explicit `cuda`が
-利用不能な場合はCPUへfallbackせずstructured errorで停止します。resolved device／compute／device indexはbackend
-identityへ含めます。packageやmodel fileが
-ない場合はdownloadせずstructured errorで停止します。captionだけのjobはpackage／model不要です。
+public commandは[`asr-runtime.md`](asr-runtime.md)のrepository-owned Docker imageだけを起動します。
+imageは`vep asr image-build`、pin済みmodelはnetworkを許可する`vep asr model-provision`で明示準備します。
+inferenceはbuild-contract照合済みimmutable image IDを`--pull never --network none`で起動し、config／model
+read-only mount、`local_files_only`です。未provision modelを
+downloadせずstructured errorで停止します。captionだけのjobはmodelをloadしません。
+
+`--preferred-language`と`--asr-language`はsource transcription configであり、assignmentの成果物languageを
+暗黙fallbackにしません。これによりraw transcript selection／ASRはassignment変更から独立します。
+
+device `auto`はcontainer passthrough、CTranslate2 CUDA、configured compute type、profileのabsolute free-VRAM
+thresholdをすべて満たすGPUだけを候補にし、free VRAM最大（同値はindex最小）を固定します。標準profileは
+6144 MiB以上でGPU／`float16`、それ以外はCPU／`int8`です。GPU resource failureだけはautoでCPUへ1回fallbackし、
+unrelated failureとexplicit CUDAはfallbackしません。engine／runtime／model revision／storage identity、GPUとVRAM、
+compute、container image／digest、fallbackをbackend identityへ記録します。
 segmentは連続ID、integer millisecond、gap／overlap、source／backend lineageを検証します。
 `raw_text`はadapter出力を保持し、`normalized_text`はNFKC＋空白正規化後の値です。subtitle source markupの
 raw preservationとは別契約です。backend metricを校正済み確率として表示しません。
@@ -337,6 +354,11 @@ revision／human-review／approval／export manifest、ledger、lineageを検証
 `vep author prepare JOB --skill SKILL`はjobに属するselected evidenceを1件以上含むfixed bundleを`author-v001` requestへ
 固定します。`vep author import JOB --response PATH`はclaim／evidence／requirementの相互対応とUTF-8 byte上限を
 検証し、immutable draft `v001`を公開して`DRAFTED`へ進めます。
+assignmentにlength constraintがあれば、author response本文はcanonical Python counterで検証してから公開します。
+counterはsurrounding whitespaceを除去後のPython Unicode code point数で、本文内改行／空白、句読点、ASCII、
+Markdown記法をすべて数え、Unicode normalizationやmarkup除去はしません。失敗時は実測値、range、差分だけを
+length adjustment入力へ渡し、LLMに計数させません。attemptは`authoring/length`へ記録し、configured上限で
+`LENGTH_ADJUSTMENT_EXHAUSTED`になります。
 
 `vep audit prepare JOB --skill SKILL`はtarget draft本文とfixed evidenceだけを固定し、author claim／run／context／prompt
 history／private reasoningを物理serializationから除外します。`vep audit import`は過去の全author／reviser／auditor
@@ -348,6 +370,9 @@ human-review bundleを作成して`HUMAN_REVIEW_READY`、あれば`REVISION_REQU
 決定的diff hunkを検証し、`v002`／`v003`
 だけを許可します。2回修正後の監査にもP0／P1が残れば`BLOCKED`とし、`v004`を生成しません。
 ACCEPTのevidenceは対応findingと完全一致し、各hunkはそのfindingのdraft spanへ帰属する必要があります。
+revision responseにも同じlength gateを再適用します。length attemptは`length_adjustment_count`だけを増やし、
+`semantic_revision_count`を消費しません。human-review package作成、approval、exportでも同じcanonical validatorを
+再実行し、範囲外の成果物を後段へ進めません。
 
 provider-neutralな`external_exchange` public author／audit／revision production importは対応Skillの
 `lifecycle = "active"`を必須とします。現行のactive Skillは`draft-video-report`、`draft-video-summary`、

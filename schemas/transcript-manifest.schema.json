@@ -107,6 +107,153 @@
     "TranscriptionBackendIdentity": {
       "additionalProperties": false,
       "properties": {
+        "compute_type": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Compute Type"
+        },
+        "configured_min_free_vram_mib": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Configured Min Free Vram Mib"
+        },
+        "container_image": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Container Image"
+        },
+        "container_image_digest": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Container Image Digest"
+        },
+        "device_policy": {
+          "anyOf": [
+            {
+              "pattern": "^(auto|cpu|cuda|cuda:[0-9]+)$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Device Policy"
+        },
+        "fallback": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fallback"
+        },
+        "fallback_from": {
+          "anyOf": [
+            {
+              "const": "cuda",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fallback From"
+        },
+        "fallback_reason": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fallback Reason"
+        },
+        "free_vram_at_selection_mib": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Free Vram At Selection Mib"
+        },
+        "gpu_index": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gpu Index"
+        },
+        "gpu_name": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gpu Name"
+        },
         "local_files_only": {
           "const": true,
           "default": true,
@@ -142,6 +289,34 @@
           "default": null,
           "title": "Model Fingerprint"
         },
+        "model_revision": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Revision"
+        },
+        "model_storage_identity": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Storage Identity"
+        },
         "name": {
           "maxLength": 128,
           "minLength": 1,
@@ -162,8 +337,37 @@
           "default": null,
           "title": "Runtime"
         },
+        "selected_device": {
+          "anyOf": [
+            {
+              "enum": [
+                "cpu",
+                "cuda"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Selected Device"
+        },
         "source": {
           "$ref": "#/$defs/TranscriptSource"
+        },
+        "total_vram_mib": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Vram Mib"
         },
         "version": {
           "maxLength": 128,
@@ -207,11 +411,7 @@
         },
         "asr_device": {
           "default": "auto",
-          "enum": [
-            "auto",
-            "cpu",
-            "cuda"
-          ],
+          "pattern": "^(auto|cpu|cuda|cuda:[0-9]+)$",
           "title": "Asr Device",
           "type": "string"
         },
@@ -228,6 +428,20 @@
           ],
           "default": null,
           "title": "Asr Language"
+        },
+        "asr_profile": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Repository-owned profile ID; absent only for legacy manifests/tests.",
+          "title": "Asr Profile"
         },
         "asr_temperature": {
           "const": 0.0,

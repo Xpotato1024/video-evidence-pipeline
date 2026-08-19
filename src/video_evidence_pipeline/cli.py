@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 import typer
 from pydantic import ValidationError
@@ -96,6 +97,7 @@ index_app = typer.Typer(no_args_is_help=True)
 author_app = typer.Typer(no_args_is_help=True)
 audit_app = typer.Typer(no_args_is_help=True)
 revision_app = typer.Typer(no_args_is_help=True)
+asr_app = typer.Typer(no_args_is_help=True)
 app.add_typer(job_app, name="job")
 app.add_typer(schema_app, name="schema")
 app.add_typer(evidence_app, name="evidence")
@@ -104,6 +106,7 @@ app.add_typer(index_app, name="index")
 app.add_typer(author_app, name="author")
 app.add_typer(audit_app, name="audit")
 app.add_typer(revision_app, name="revision")
+app.add_typer(asr_app, name="asr")
 
 
 def _emit(value: Any, *, json_output: bool) -> None:
@@ -192,6 +195,11 @@ def job_init(
         list[str] | None,
         typer.Option("--supporting-input", help="Repeat kind:local-path for pdf, image, or notes."),
     ] = None,
+    min_chars: Annotated[int | None, typer.Option("--min-chars", min=0)] = None,
+    max_chars: Annotated[int | None, typer.Option("--max-chars", min=1)] = None,
+    maximum_length_adjustments: Annotated[
+        int, typer.Option("--maximum-length-adjustments", min=1, max=10)
+    ] = 3,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     result = _run(
@@ -206,6 +214,9 @@ def job_init(
             requirements=requirement,
             primary_input=(primary_input if primary_input is not None else PrimaryInputKind.VIDEO),
             supporting_inputs=_supporting_inputs(supporting_input),
+            min_chars=min_chars,
+            max_chars=max_chars,
+            maximum_length_adjustments=maximum_length_adjustments,
         ),
         json_output=json_output,
     )
@@ -232,10 +243,17 @@ def job_recover(
     new_job_id: str,
     basis: Annotated[str, typer.Option("--basis")],
     confirm: Annotated[bool, typer.Option("--confirm")] = False,
+    child_spec: Annotated[Path | None, typer.Option("--child-spec")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     result = _run(
-        lambda: recover_job(parent, new_job_id, confirm=confirm, basis=basis),
+        lambda: recover_job(
+            parent,
+            new_job_id,
+            confirm=confirm,
+            basis=basis,
+            child_spec_path=child_spec,
+        ),
         json_output=json_output,
     )
     _emit(
@@ -463,20 +481,10 @@ def transcribe(
         OverlapPolicy.PRESERVE
     ),
     asr_language: Annotated[str | None, typer.Option("--asr-language")] = None,
-    asr_model_directory: Annotated[
-        Path | None,
-        typer.Option(
-            "--asr-model-directory",
-            help="Existing local faster-whisper model directory; never downloaded.",
-        ),
-    ] = None,
+    asr_profile: Annotated[str, typer.Option("--asr-profile")] = "whisper-large-v3",
     asr_device: Annotated[
-        Literal["auto", "cpu", "cuda"],
+        str,
         typer.Option("--asr-device"),
-    ] = "auto",
-    asr_compute_type: Annotated[
-        Literal["auto", "int8", "float16"],
-        typer.Option("--asr-compute-type"),
     ] = "auto",
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
@@ -486,14 +494,31 @@ def transcribe(
         gap_policy=gap_policy,
         overlap_policy=overlap_policy,
         asr_language=asr_language,
+        asr_profile=asr_profile,
         asr_device=asr_device,
-        asr_compute_type=asr_compute_type,
     )
+    if os.environ.get("VEP_ASR_CONTAINER_INTERNAL") != "1":
+        from video_evidence_pipeline.transcription.container import (
+            run_transcription_container,
+        )
+
+        def run_container() -> Any:
+            raw = run_transcription_container(workspace, config)
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                raise configuration_error(
+                    "ASR_CONTAINER_RESPONSE_INVALID",
+                    "ASR container returned an invalid response",
+                ) from None
+
+        payload = _run(run_container, json_output=json_output)
+        _emit(payload, json_output=json_output)
+        return
     result = _run(
         lambda: transcribe_job(
             workspace,
             config,
-            asr_model_directory=asr_model_directory,
         ),
         json_output=json_output,
     )
@@ -512,6 +537,63 @@ def transcribe(
         },
         json_output=json_output,
     )
+
+
+@asr_app.command("image-build")
+def asr_image_build(
+    repository_root: Annotated[Path, typer.Option("--repository-root")] = Path("."),
+    profile: Annotated[str, typer.Option("--profile")] = "whisper-large-v3",
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from video_evidence_pipeline.transcription.container import build_asr_image
+
+    image = _run(
+        lambda: build_asr_image(repository_root.resolve(), profile),
+        json_output=json_output,
+    )
+    _emit({"ok": True, "image": image}, json_output=json_output)
+
+
+@asr_app.command("model-provision")
+def asr_model_provision(
+    repository_root: Annotated[Path, typer.Option("--repository-root")] = Path("."),
+    profile: Annotated[str, typer.Option("--profile")] = "whisper-large-v3",
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    if os.environ.get("VEP_ASR_CONTAINER_INTERNAL") == "1":
+        from video_evidence_pipeline.transcription.provisioning import provision_model
+
+        path, manifest, reused = _run(
+            lambda: provision_model(repository_root.resolve(), profile),
+            json_output=json_output,
+        )
+        _emit(
+            {
+                "ok": True,
+                "profile": manifest.profile,
+                "model_repository": manifest.model_repository,
+                "model_revision": manifest.model_revision,
+                "model_storage_identity": manifest.model_storage_identity,
+                "path": str(path),
+                "reused": reused,
+            },
+            json_output=json_output,
+        )
+        return
+    from video_evidence_pipeline.transcription.container import run_provision_container
+
+    def provision_in_container() -> Any:
+        raw = run_provision_container(repository_root.resolve(), profile)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            raise configuration_error(
+                "ASR_CONTAINER_RESPONSE_INVALID",
+                "ASR provisioning container returned an invalid response",
+            ) from None
+
+    payload = _run(provision_in_container, json_output=json_output)
+    _emit(payload, json_output=json_output)
 
 
 @refine_app.command("prepare")

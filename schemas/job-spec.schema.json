@@ -9,6 +9,17 @@
           "title": "Language",
           "type": "string"
         },
+        "length": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CharacterLengthConstraint"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "requirements": {
           "items": {
             "maxLength": 512,
@@ -32,6 +43,49 @@
         "language"
       ],
       "title": "AssignmentSpec",
+      "type": "object"
+    },
+    "CharacterLengthConstraint": {
+      "additionalProperties": false,
+      "description": "Raw assignment values; ``None`` means the author did not specify the bound.",
+      "properties": {
+        "max_chars": {
+          "anyOf": [
+            {
+              "maximum": 4000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Chars"
+        },
+        "maximum_adjustments": {
+          "default": 3,
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Maximum Adjustments",
+          "type": "integer"
+        },
+        "min_chars": {
+          "anyOf": [
+            {
+              "maximum": 4000000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Chars"
+        }
+      },
+      "title": "CharacterLengthConstraint",
       "type": "object"
     },
     "OutputSpec": {

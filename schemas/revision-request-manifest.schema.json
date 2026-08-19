@@ -345,6 +345,49 @@
       "title": "AuditSeverity",
       "type": "string"
     },
+    "CharacterLengthConstraint": {
+      "additionalProperties": false,
+      "description": "Raw assignment values; ``None`` means the author did not specify the bound.",
+      "properties": {
+        "max_chars": {
+          "anyOf": [
+            {
+              "maximum": 4000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Chars"
+        },
+        "maximum_adjustments": {
+          "default": 3,
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Maximum Adjustments",
+          "type": "integer"
+        },
+        "min_chars": {
+          "anyOf": [
+            {
+              "maximum": 4000000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Chars"
+        }
+      },
+      "title": "CharacterLengthConstraint",
+      "type": "object"
+    },
     "ClaimConfidence": {
       "enum": [
         "low",
@@ -455,6 +498,61 @@
         "text"
       ],
       "title": "DraftSpan",
+      "type": "object"
+    },
+    "EffectiveCharacterLengthConstraint": {
+      "additionalProperties": false,
+      "description": "Resolved range used by every deterministic length gate.",
+      "properties": {
+        "max_chars": {
+          "anyOf": [
+            {
+              "maximum": 4000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Chars"
+        },
+        "maximum_adjustments": {
+          "default": 3,
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Maximum Adjustments",
+          "type": "integer"
+        },
+        "min_chars": {
+          "anyOf": [
+            {
+              "maximum": 4000000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Chars"
+        },
+        "minimum_source": {
+          "enum": [
+            "unspecified",
+            "explicit",
+            "default_80_percent"
+          ],
+          "title": "Minimum Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "minimum_source"
+      ],
+      "title": "EffectiveCharacterLengthConstraint",
       "type": "object"
     },
     "EvidenceAssignmentContext": {
@@ -981,6 +1079,17 @@
     "OutputConstraints": {
       "additionalProperties": false,
       "properties": {
+        "effective_length": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EffectiveCharacterLengthConstraint"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "format": {
           "maxLength": 128,
           "minLength": 1,
@@ -994,6 +1103,17 @@
           "pattern": ".*\\S.*",
           "title": "Language",
           "type": "string"
+        },
+        "length": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CharacterLengthConstraint"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "requirements": {
           "items": {

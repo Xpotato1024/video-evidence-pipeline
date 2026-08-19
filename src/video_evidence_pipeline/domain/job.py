@@ -12,6 +12,7 @@ from pydantic import Field, StringConstraints, ValidationError, field_validator,
 
 from video_evidence_pipeline.domain import StrictModel, UtcDateTime
 from video_evidence_pipeline.domain.identifiers import JobId
+from video_evidence_pipeline.domain.length import CharacterLengthConstraint
 from video_evidence_pipeline.domain.locators import (
     canonicalize_box_locator,
     canonicalize_https_locator,
@@ -110,6 +111,7 @@ class AssignmentSpec(StrictModel):
     task_type: str = Field(min_length=1, max_length=128)
     language: str = Field(min_length=2, max_length=32)
     requirements: list[RequirementText] = Field(default_factory=list, max_length=100)
+    length: CharacterLengthConstraint | None = None
 
 
 class OutputSpec(StrictModel):
@@ -164,6 +166,8 @@ def job_fingerprint(job: JobSpec) -> str:
         key: serialized[key]
         for key in ("schema_version", "job_id", "created_at", "source", "assignment", "output")
     }
+    if job.assignment.length is None:
+        data["assignment"].pop("length", None)
     if job.primary_input is not None or job.supporting_inputs:
         data["primary_input"] = serialized["primary_input"]
         data["supporting_inputs"] = serialized["supporting_inputs"]
@@ -196,6 +200,8 @@ def load_job_yaml(path: Path) -> JobSpec:
 
 def job_to_yaml(job: JobSpec) -> str:
     data = job.model_dump(mode="json")
+    if job.assignment.length is None:
+        data["assignment"].pop("length", None)
     if job.primary_input is None:
         data.pop("primary_input", None)
     if not job.supporting_inputs:

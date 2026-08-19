@@ -44,6 +44,7 @@ uv run vep job init demo-report \
   --language ja \
   --requirement "cite two concrete observations" \
   --requirement "separate facts from inference" \
+  --max-chars 300 \
   --output-format markdown
 uv run vep job validate .local/jobs/demo-report
 uv run vep job authorize .local/jobs/demo-report \
@@ -53,8 +54,11 @@ uv run vep job authorize .local/jobs/demo-report \
   --deny-external-api
 uv run vep acquire .local/jobs/demo-report
 uv run vep normalize .local/jobs/demo-report
+# 初回だけ: repository pinどおりのASR imageとmodelを明示的に準備する
+uv run vep asr image-build --profile whisper-large-v3
+uv run vep asr model-provision --profile whisper-large-v3
 uv run vep transcribe .local/jobs/demo-report --preferred-language ja \
-  --asr-device auto --asr-compute-type auto
+  --asr-profile whisper-large-v3 --asr-device auto
 uv run vep refine prepare .local/jobs/demo-report
 # refinement/request.jsonを固定入力として、認可済みresponse.jsonを別途用意する
 uv run vep refine import .local/jobs/demo-report --response /path/to/refinement-response.json
@@ -77,9 +81,12 @@ uv run vep job status .local/jobs/demo-report
 
 `job init`だけでは未認可です。`job authorize --confirm`が成功するまでsourceを取得しません。
 `--requirement`は順序を保持するrepeatable optionで、指定順を含めてjob fingerprintへ拘束されます。
+`--min-chars`／`--max-chars`はmachine-readableなassignment constraintです。maxだけなら
+`ceil(max × 0.8)`をeffective minにし、Pythonのcanonical counterが各draft／revision／review／export境界で検証します。
 raw sourceは`.local/`配下へcontent-addressedに保存され、上書きされません。
-captionが十分ならASR package／modelは不要です。不足区間だけASRを使用する場合も、明示された完全な
-local model directoryをofflineで使用し、暗黙downloadやcloud送信を行いません。外部APIを使った
+ASR engine／runtime／model／revision／device policyは[`config/asr-profiles.yaml`](config/asr-profiles.yaml)が正本です。
+推論はrepository-owned containerを`--network none`で起動し、`.local/models`のprovision済みmodelをread-onlyで使います。
+captionが十分ならmodelはloadしません。不足区間でmodelが未provisionなら暗黙downloadせず停止します。外部APIを使った
 evidence responseのimportにはjobの`allow_external_api`認可が必要です。
 新規CLI jobは`--primary-input`を省略してもmodern videoとして作成されます。
 `--primary-input video|audio|transcript`と、必要な場合だけrepeatableな
@@ -103,16 +110,20 @@ draft/audit fingerprint, or any other semantic history to match.
 
 ```bash
 uv run vep job recover .local/jobs/blocked-report repaired-report \
+  --child-spec /path/to/repaired-job.yaml \
   --confirm \
   --basis "restart semantic processing from the blocked parent"
 ```
 
 The parent workspace remains untouched. The child has a new job-bound authorization
-record with the same permission flags, reuses only source/normalization/transcript
-and declared supporting-input artifacts, and starts at `TRANSCRIBED`. Run refinement,
+record with the same permission flags. `--child-spec` may replace assignment and output
+constraints while source／primary／supporting input identity must match. Recovery reuses only
+source/normalization/transcript and declared supporting-input artifacts, starts at `TRANSCRIBED`,
+and records both assignment fingerprints. Run refinement,
 evidence, authoring, and audit again as fresh child work. Existing network acquisition
 evidence (including Box) is rebound and verified locally; recovery never re-acquires it.
-See [CLI and local workspace operations](docs/operations/cli-and-local-workspace.md).
+See [CLI and local workspace operations](docs/operations/cli-and-local-workspace.md) and
+[ASR runtime operations](docs/operations/asr-runtime.md).
 
 ## Supported sources
 
@@ -148,7 +159,7 @@ route; without an access token, shared-link acquisition is blocked.
 5. transcript refinement（新規CLI job。保存済みv1 jobはlegacy routeを維持）
 6. evidence construction／ambiguity preservation
 7. private rebuildable search cache
-8. deliverable authoring
+8. deliverable authoring＋deterministic length gate
 9. independent audit
 10. bounded revision
 11. human approval

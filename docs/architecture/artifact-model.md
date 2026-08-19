@@ -221,7 +221,8 @@ capabilitiesをmerger identityとして保持します。componentのremote URL�
 │  ├─ responses/<sha256>/{author,audit,revision}-response.json
 │  ├─ drafts/vNNN/{draft.md,claims.jsonl,requirement-map.json,agent-run.json}
 │  ├─ audits/vNNN/{audit-claims.jsonl,findings.json,claim-comparison.jsonl,agent-run.json}
-│  └─ revisions/vNNN/resolutions.jsonl
+│  ├─ revisions/vNNN/resolutions.jsonl
+│  └─ length/vNNN-attempts.jsonl
 ├─ human-review/vNNN/bundle.json       # review package; approval recordではない
 ├─ approval/records.jsonl              # private append-only human approval ledger
 ├─ delivery/staging/                    # Markdown export中だけ使用するprivate attempt
@@ -231,6 +232,7 @@ capabilitiesをmerger identityとして保持します。componentのremote URL�
 │  ├─ source-manifest.json
 │  ├─ media-manifest.json
 │  ├─ transcript-manifest.json
+│  ├─ recovery-manifest.json
 │  ├─ evidence-manifest.json
 │  ├─ authoring/{draft-vNNN,audit-vNNN,revision-vNNN,human-review}.json
 │  ├─ approval-manifest.json
@@ -256,6 +258,15 @@ draftは`v001`、revisionは`v002`／`v003`をcontent hashとpredecessor lineage
 identityにしません。audit requestはauthor claim／run／contextを含まない独立入力で、claim comparisonはvalidated
 audit import後に生成する別artifactです。human-review bundleはcurrent draft、audit findings、comparison、requirement
 map、revision history、approval target hashを束縛しますが、approval recordではありません。
+
+job assignmentはraw length constraintと、default解決後のeffective constraintを区別します。draft manifestと
+human-review bundleはcanonical length check、`semantic_revision_count`、`length_adjustment_count`を保持し、
+range外responseは`authoring/length/vNNN-attempts.jsonl`へ実測値と差分を記録します。recovery manifestは
+parent／child assignment fingerprintを保持し、assignment-dependent artifactをcopyしません。
+
+ASR transcript manifestのbackend identityはengine／runtime、pinned model revision／storage identity、device policy、
+selected GPU／VRAM、compute type、container image／digest、resource-only fallbackを保持します。取得不能なhardware値は
+nullableで、provision manifestは`.local/models/asr/<profile>/<revision>/manifest.json`へ分離します。
 
 ## 8. Approval binding
 

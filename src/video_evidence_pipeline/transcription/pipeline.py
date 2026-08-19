@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import stat
@@ -54,7 +55,7 @@ from video_evidence_pipeline.domain.transcription import (
     TranscriptSegment,
     TranscriptSource,
 )
-from video_evidence_pipeline.errors import integrity_error, state_error
+from video_evidence_pipeline.errors import configuration_error, integrity_error, state_error
 from video_evidence_pipeline.media.subtitles import verify_cue_jsonl
 from video_evidence_pipeline.storage.atomic import (
     atomic_copy_exclusive,
@@ -345,8 +346,6 @@ def prepare_transcript(
         )
     started_at = datetime.now(UTC)
     preferred = list(config.preferred_languages)
-    if job.assignment.language.casefold() not in {item.casefold() for item in preferred}:
-        preferred.append(job.assignment.language)
     candidates = sorted(
         (
             item
@@ -444,26 +443,55 @@ def prepare_transcript(
             )
         if backend is None:
             from video_evidence_pipeline.transcription.faster_whisper import FasterWhisperBackend
-
-            backend = FasterWhisperBackend(
-                model_directory,
-                device=config.asr_device,
-                compute_type=config.asr_compute_type,
+            from video_evidence_pipeline.transcription.profiles import (
+                require_provisioned_model,
+                resolve_asr_profile,
             )
+
+            if config.asr_profile is not None:
+                repository_root = workspace.jobs_root.parent.parent
+                profile_id, profile = resolve_asr_profile(repository_root, config.asr_profile)
+                provisioned_directory, provision_manifest = require_provisioned_model(
+                    repository_root, profile_id, profile
+                )
+                container_image_digest = os.environ.get("VEP_ASR_CONTAINER_IMAGE_DIGEST") or None
+                if container_image_digest is None:
+                    raise configuration_error(
+                        "ASR_CONTAINER_IDENTITY_UNAVAILABLE",
+                        "profiled ASR requires a recorded container image identity",
+                    )
+                backend = FasterWhisperBackend(
+                    provisioned_directory,
+                    device=config.asr_device,
+                    compute_type="auto",
+                    profile=profile,
+                    provision_manifest=provision_manifest,
+                    container_image=profile.container_image,
+                    container_image_digest=container_image_digest,
+                )
+            else:
+                backend = FasterWhisperBackend(
+                    model_directory,
+                    device=config.asr_device,
+                    compute_type=config.asr_compute_type,
+                )
         selected_artifacts_list.append(media_manifest.speech_audio.artifact)
+        initial_asr_backend = backend.identity()
+        if initial_asr_backend.source is not TranscriptSource.ASR:
+            raise integrity_error("TRANSCRIPT_BACKEND_INVALID", "ASR backend identity is invalid")
+        asr_segments: list[AsrSegment] = list(
+            backend.transcribe(
+                workspace.safe_path(media_manifest.speech_audio.artifact.relative_storage_path),
+                language=config.asr_language,
+                intervals=asr_intervals,
+                configuration=config,
+            )
+        )
         asr_backend = backend.identity()
         if asr_backend.source is not TranscriptSource.ASR:
             raise integrity_error("TRANSCRIPT_BACKEND_INVALID", "ASR backend identity is invalid")
         backend_identities.append(asr_backend)
         asr_backend_fingerprint = fingerprint(asr_backend)
-        asr_segments: list[AsrSegment] = list(
-            backend.transcribe(
-                workspace.safe_path(media_manifest.speech_audio.artifact.relative_storage_path),
-                language=config.asr_language or job.assignment.language,
-                intervals=asr_intervals,
-                configuration=config,
-            )
-        )
         backend_segment_ids = [item.backend_segment_id for item in asr_segments]
         if len(set(backend_segment_ids)) != len(backend_segment_ids):
             raise integrity_error(
@@ -1048,8 +1076,6 @@ def _verify_transcript_manifest(
     cue_by_id: dict[str, SubtitleCue] = {}
     if manifest.selected_subtitle_stream_index is not None:
         preferred = list(manifest.configuration.preferred_languages)
-        if job.assignment.language.casefold() not in {item.casefold() for item in preferred}:
-            preferred.append(job.assignment.language)
         expected_candidates = sorted(
             (
                 item

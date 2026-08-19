@@ -93,6 +93,7 @@ from video_evidence_pipeline.domain.job import (
     primary_input_kind,
     requires_transcript_refinement,
 )
+from video_evidence_pipeline.domain.length import CharacterLengthConstraint
 from video_evidence_pipeline.domain.manifests import SourceManifest, StageManifest
 from video_evidence_pipeline.domain.media import NormalizationConfig
 from video_evidence_pipeline.domain.recovery import RecoveryManifest
@@ -219,6 +220,9 @@ def initialize_job(
     requirements: list[str] | None = None,
     primary_input: PrimaryInputKind | None = None,
     supporting_inputs: list[SupportingInputSpec] | None = None,
+    min_chars: int | None = None,
+    max_chars: int | None = None,
+    maximum_length_adjustments: int = 3,
 ) -> tuple[JobWorkspace, JobSpec]:
     raw_locator = (
         str(Path(source).expanduser().absolute())
@@ -251,6 +255,15 @@ def initialize_job(
             task_type=task_type,
             language=language,
             requirements=list(requirements or []),
+            length=(
+                CharacterLengthConstraint(
+                    min_chars=min_chars,
+                    max_chars=max_chars,
+                    maximum_adjustments=maximum_length_adjustments,
+                )
+                if min_chars is not None or max_chars is not None
+                else None
+            ),
         ),
         output=OutputSpec(format=output_format),
     )
@@ -312,6 +325,14 @@ def _load_recovery_manifest(workspace: JobWorkspace, job: JobSpec) -> RecoveryMa
     authorization = _authorization(workspace)
     if (
         manifest.parent_job_fingerprint != job_fingerprint(parent.job)
+        or (
+            manifest.parent_assignment_fingerprint is not None
+            and manifest.parent_assignment_fingerprint != fingerprint(parent.job.assignment)
+        )
+        or (
+            manifest.child_assignment_fingerprint is not None
+            and manifest.child_assignment_fingerprint != fingerprint(job.assignment)
+        )
         or manifest.recovery_basis != authorization.authorization_basis
         or manifest.created_at != authorization.confirmed_at
         or authorization.allow_local_processing != parent.authorization.allow_local_processing
@@ -470,6 +491,7 @@ def recover_job(
     *,
     confirm: bool,
     basis: str,
+    child_spec_path: Path | None = None,
 ) -> RecoveryResult:
     """Fork only an eligible blocked job at its raw-transcript reuse boundary."""
 
@@ -484,22 +506,41 @@ def recover_job(
             "RECOVERY_CHILD_ID_INVALID",
             "recovery child job ID must differ from its parent",
         )
-    child_data = qualified.job.model_dump(mode="python")
-    child_data.update({"job_id": new_job_id, "created_at": datetime.now(UTC)})
-    if qualified.job.primary_input is None:
-        child_data["primary_input"] = PrimaryInputSpec(kind=PrimaryInputKind.VIDEO)
-    child_job = JobSpec.model_validate(child_data)
+    if child_spec_path is None:
+        child_data = qualified.job.model_dump(mode="python")
+        child_data.update({"job_id": new_job_id, "created_at": datetime.now(UTC)})
+        if qualified.job.primary_input is None:
+            child_data["primary_input"] = PrimaryInputSpec(kind=PrimaryInputKind.VIDEO)
+        child_job = JobSpec.model_validate(child_data)
+    else:
+        child_job = load_job_yaml(child_spec_path)
+        if child_job.job_id != new_job_id:
+            raise configuration_error(
+                "RECOVERY_CHILD_SPEC_INVALID",
+                "child job specification ID does not match the requested child",
+            )
+        if (
+            child_job.source != qualified.job.source
+            or primary_input_kind(child_job) is not primary_input_kind(qualified.job)
+            or child_job.supporting_inputs != qualified.job.supporting_inputs
+        ):
+            raise configuration_error(
+                "RECOVERY_SOURCE_IDENTITY_MISMATCH",
+                "changed-assignment recovery must keep source and supporting input identity",
+            )
     child_fingerprint = job_fingerprint(child_job)
     recorded_at = datetime.now(UTC)
     recovery = RecoveryManifest(
         parent_job_id=qualified.job.job_id,
         parent_job_fingerprint=job_fingerprint(qualified.job),
+        parent_assignment_fingerprint=fingerprint(qualified.job.assignment),
         parent_final_draft_sha256=qualified.final_draft_sha256,
         parent_audit_bundle_fingerprint=qualified.audit_bundle_fingerprint,
         parent_finding_ids=list(qualified.finding_ids),
         recovery_basis=basis,
         child_job_id=child_job.job_id,
         child_job_fingerprint=child_fingerprint,
+        child_assignment_fingerprint=fingerprint(child_job.assignment),
         created_at=recorded_at,
     )
     child_source = qualified.source.model_copy(

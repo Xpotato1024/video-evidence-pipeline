@@ -164,12 +164,16 @@ fails closed.
 
 transcriptionはnormalized text subtitleのうちcueが存在するstreamだけを候補とし、明示された言語順、
 `official → embedded → sidecar`、default、non-forced、stream indexの順で決定的に1つを選びます。
-caption coverageが設定値以上ならASR package／modelを要求しません。不足時だけcoverage gapをprovider-neutral
-`AsrBackend`へ渡します。組込みadapterは完全なlocal faster-whisper model directoryだけをoffline／
-`local_files_only`でlazy loadし、model名からのdownload、cloud fallback、依存packageの暗黙追加を行いません。
-device `auto`はCTranslate2がusable CUDAとsupported compute typeを返した場合だけCUDAを選び、explicit CUDAは
-利用不能時にfail closedします。resolved device、compute type、device index、decode option、backend／library／model
-identityはfingerprintへ含めます。model directoryのfull fingerprintはprocess内でstable file metadataへ束縛して再利用します。
+caption coverageが設定値以上ならASR modelをloadしません。不足時だけcoverage gapをprovider-neutral
+`AsrBackend`へ渡します。production adapterはrepository profileでpinしたfaster-whisper／CTranslate2、model repository／
+revisionだけをDocker container内でlazy loadします。model provisionだけがnetworkを利用し、inferenceは
+`--pull never --network none`、read-only model mount、`local_files_only`で、image／model download、cloud fallback、
+依存packageの暗黙追加を行いません。caption preferred languageとASR language hintはtranscription configだけが所有し、
+assignment output languageへ暗黙依存しないため、raw transcriptはassignment変更から独立します。
+device `auto`はcontainer passthrough、CTranslate2 CUDA、configured compute type、profileのabsolute free-VRAM thresholdを
+すべて満たすGPUだけを選びます。複数GPUはfree VRAM最大（同値はindex最小）です。GPU resource failureだけはautoで
+CPUへ1回fallbackし、explicit CUDAとunrelated failureはfail closedします。engine／runtime／model revision／storage、
+device／GPU／VRAM、compute、container、fallback identityをfingerprintへ含めます。
 
 各segmentはinteger millisecond、連続ID、source artifact／record／backend lineageを保持します。
 `raw_text`はcaption adapterまたはASR backendから受け取った文字列、`normalized_text`はNFKC＋空白正規化後の
@@ -227,6 +231,12 @@ request内のSkill snapshotはimmutable lineageとして保持し、完成済み
 完全一致を先に検証し、現在のSkill content／eval／lifecycleは再適格性判定へ使用しません。
 pending production importは、現在のSkillが同じcontent／eval／identityのまま`active`へ昇格した場合だけ許可し、
 それ以外のdriftは`SKILL_SNAPSHOT_STALE`で拒否します。
+
+assignmentのraw length constraintは未指定を保持し、max-onlyならeffective minを`ceil(max × 0.8)`で解決します。
+唯一のcounterはsurrounding whitespaceを除いたPython Unicode code point数で、本文内改行／空白、句読点、ASCII、
+Markdown記法を数え、normalization／markup除去をしません。initial／semantic revision responseを公開する前と、
+human-review／approval／export境界で同じvalidatorを再実行します。length adjustmentは実測値と差分だけを入力にし、
+独立した有限`length_adjustment_count`を使用して`semantic_revision_count`を消費しません。
 
 ### 2.6 Independent Audit
 

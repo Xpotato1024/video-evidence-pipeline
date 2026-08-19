@@ -188,7 +188,12 @@ class TranscriptionConfig(StrictModel):
     gap_policy: GapPolicy = GapPolicy.RECORD
     overlap_policy: OverlapPolicy = OverlapPolicy.PRESERVE
     asr_language: str | None = Field(default=None, min_length=1, max_length=64)
-    asr_device: Literal["auto", "cpu", "cuda"] = "auto"
+    asr_profile: str | None = Field(
+        default=None,
+        pattern=r"^[a-z0-9][a-z0-9-]{0,127}$",
+        description="Repository-owned profile ID; absent only for legacy manifests/tests.",
+    )
+    asr_device: str = Field(default="auto", pattern=r"^(auto|cpu|cuda|cuda:[0-9]+)$")
     asr_compute_type: Literal["auto", "int8", "float16"] = "auto"
     asr_beam_size: Literal[5] = 5
     asr_temperature: Literal[0.0] = 0.0
@@ -213,7 +218,22 @@ class TranscriptionBackendIdentity(StrictModel):
     version: str = Field(min_length=1, max_length=128)
     runtime: str | None = Field(default=None, min_length=1, max_length=128)
     model: str | None = Field(default=None, min_length=1, max_length=256)
+    model_revision: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
     model_fingerprint: Sha256 | None = None
+    model_storage_identity: Sha256 | None = None
+    device_policy: str | None = Field(default=None, pattern=r"^(auto|cpu|cuda|cuda:[0-9]+)$")
+    selected_device: Literal["cpu", "cuda"] | None = None
+    gpu_index: int | None = Field(default=None, ge=0)
+    gpu_name: str | None = Field(default=None, min_length=1, max_length=256)
+    total_vram_mib: int | None = Field(default=None, ge=0)
+    free_vram_at_selection_mib: int | None = Field(default=None, ge=0)
+    configured_min_free_vram_mib: int | None = Field(default=None, ge=0)
+    compute_type: str | None = Field(default=None, min_length=1, max_length=64)
+    container_image: str | None = Field(default=None, min_length=1, max_length=512)
+    container_image_digest: str | None = Field(default=None, min_length=1, max_length=256)
+    fallback: bool | None = None
+    fallback_from: Literal["cuda"] | None = None
+    fallback_reason: str | None = Field(default=None, min_length=1, max_length=512)
     local_files_only: Literal[True] = True
 
     @field_validator("name", "version", "runtime", "model")
@@ -222,6 +242,24 @@ class TranscriptionBackendIdentity(StrictModel):
         if value is not None and not value.strip():
             raise ValueError("transcription backend identity metadata must not be blank")
         return value
+
+    @model_validator(mode="after")
+    def provenance_is_consistent(self) -> Self:
+        if (
+            self.selected_device == "cpu"
+            and self.gpu_index is not None
+            and self.fallback is not True
+        ):
+            raise ValueError("CPU ASR identity cannot claim a GPU index")
+        if self.selected_device == "cuda" and self.gpu_index is None:
+            raise ValueError("CUDA ASR identity requires a GPU index")
+        if self.fallback is True and (self.fallback_from != "cuda" or self.fallback_reason is None):
+            raise ValueError("ASR fallback provenance is incomplete")
+        if self.fallback is not True and (
+            self.fallback_from is not None or self.fallback_reason is not None
+        ):
+            raise ValueError("non-fallback ASR identity cannot claim fallback details")
+        return self
 
 
 class AsrSegment(StrictModel):

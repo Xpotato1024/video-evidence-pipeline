@@ -142,6 +142,8 @@ stateDiagram-v2
 - user opinionは生成せず、必要箇所を`[要確認]`として残す
 - immutable `v001` draft、claim ledger、requirement map、response、manifest／stage manifestをfull verify可能
 - repository-local Skillが`active`でないproduction importを拒否する
+- effective length constraintがある場合、canonical character countがrange内である
+- range外attemptはsemantic revisionと別の有限length adjustment ledgerへ記録する
 
 ### `DRAFTED → AUDITED`
 
@@ -159,6 +161,7 @@ stateDiagram-v2
 - accepted resolutionのevidenceをfindingと完全一致させ、各hunkをそのfindingのdraft spanへ位置的に帰属させる
 - `v002`／`v003`をimmutableに公開し、predecessor、audit、request、response、全fresh contextをlineageへ固定
 - revision countは最大2回で、上限後もP0／P1があれば`AUDITED → BLOCKED`とし`v004`を作らない
+- revised draftへ同じlength gateを適用し、失敗したlength attemptはsemantic revision countを増やさない
 
 ### `AUDITED → HUMAN_REVIEW_READY`
 
@@ -166,7 +169,7 @@ stateDiagram-v2
 - `P1 = 0`
 - unresolved `[要確認]`と`confirmation_spans`の扱いが明示され、人間確認packageへ可視化される
   - これらは`HUMAN_REVIEW_READY`まで残り得るが、approval authorizationではない
-- length／format等のdeterministic gate成功
+- effective min／maxを含むcanonical length checkとformat等のdeterministic gate成功
 - current draft、audit findings、claim comparison、requirement map、revision history、approval target SHA-256を
   human-review bundleへ固定
 - bundleは`is_approval: false`であり、人間承認recordを生成しない
@@ -205,6 +208,11 @@ stateDiagram-v2
 依存する後続stateをstaleとして扱い、承認を無効化します。v1はtransition logを逆向きに変更せず、stored stateが
 `HUMAN_APPROVED`でもapproval bindingが壊れていれば`APPROVAL_STALE`としてexportを拒否します。有効な別contentは
 新しいjobで承認します。
+
+`BLOCKED` parentからのrecoveryは別child jobを作り、source／primary／supporting identityが一致する場合だけ
+acquisition、normalization、raw transcript、supporting artifactを再利用します。child assignment／outputは変更可能で、
+parent／child assignment fingerprintをmanifestへ記録します。evidence、draft、audit、revision、human-review、approval、
+exportはコピーせず、childを`TRANSCRIBED`から再開します。
 
 ## 6. 失敗とblockedの区別
 

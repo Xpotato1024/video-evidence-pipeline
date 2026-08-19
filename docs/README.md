@@ -17,6 +17,7 @@ related_documents:
   - VEP-AGENT-INDEX
   - VEP-OPS-CI
   - VEP-OPS-NETWORK
+  - VEP-OPS-ASR
 ---
 # 設計ドキュメント索引
 
@@ -47,6 +48,7 @@ related_documents:
 
 - [`operations/ci-quality-gates.md`](operations/ci-quality-gates.md)
 - [`operations/cli-and-local-workspace.md`](operations/cli-and-local-workspace.md)
+- [`operations/asr-runtime.md`](operations/asr-runtime.md)
 - [`operations/network-acquisition.md`](operations/network-acquisition.md)
 
 ## Agent system

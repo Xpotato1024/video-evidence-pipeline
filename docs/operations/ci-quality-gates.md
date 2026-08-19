@@ -77,7 +77,9 @@ media integrationは`VEP_REQUIRE_FFMPEG_TESTS=1`でtool不在時のskipを禁止
 manifest、transition、idempotent reuseを検証します。localでtoolがPATHにない場合だけ同testは理由付きskipです。
 同じsynthetic fixtureからcaption-only transcription、provider-neutral fixture responseの明示的test hook、
 `TRANSCRIBED → EVIDENCE_READY`、FTS5 trigramの日本語substring／rebuild／tamper／stale検出まで検証します。
-ASR package／model／network downloadはCIへ要求せず、ASR経路はinjected fake backendだけで検証します。
+ASR image／実model／network download／実GPUは通常CIへ要求しません。profile pin、provision manifest、
+network-disabled/read-only container command、device selection、resource-only fallback、provenanceはmock／static testで検証し、
+実container CPU／GPU smokeはcapabilityがある環境のmanual validationとして区別します。
 `tests/test_full_e2e.py`は同じsynthetic dataからstraight pathと1回revision pathを`EXPORTED`まで実行し、
 明示的synthetic human action、approval SHA、byte-exact Markdown、全transition、idempotencyをrequired stepとして
 検証します。approval／exportのfocused testsはtamper、crash recovery、concurrencyを別に検証します。

@@ -45,11 +45,7 @@
     },
     "asr_device": {
       "default": "auto",
-      "enum": [
-        "auto",
-        "cpu",
-        "cuda"
-      ],
+      "pattern": "^(auto|cpu|cuda|cuda:[0-9]+)$",
       "title": "Asr Device",
       "type": "string"
     },
@@ -66,6 +62,20 @@
       ],
       "default": null,
       "title": "Asr Language"
+    },
+    "asr_profile": {
+      "anyOf": [
+        {
+          "pattern": "^[a-z0-9][a-z0-9-]{0,127}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Repository-owned profile ID; absent only for legacy manifests/tests.",
+      "title": "Asr Profile"
     },
     "asr_temperature": {
       "const": 0.0,

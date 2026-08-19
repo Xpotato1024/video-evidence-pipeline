@@ -70,6 +70,12 @@ from video_evidence_pipeline.domain.evidence import (
 )
 from video_evidence_pipeline.domain.hashing import sha256_bytes, sha256_file
 from video_evidence_pipeline.domain.job import JobSpec, utc_now
+from video_evidence_pipeline.domain.length import (
+    CharacterLengthAdjustmentAttempt,
+    CharacterLengthCheck,
+    resolve_length_constraint,
+    validate_character_range,
+)
 from video_evidence_pipeline.domain.manifests import StageManifest, StageStatus
 from video_evidence_pipeline.domain.serialization import (
     canonical_json_bytes,
@@ -82,6 +88,7 @@ from video_evidence_pipeline.storage.atomic import (
     atomic_copy_exclusive,
     atomic_write_bytes,
 )
+from video_evidence_pipeline.storage.jsonl import append_jsonl
 from video_evidence_pipeline.storage.layout import JobWorkspace
 from video_evidence_pipeline.storage.permissions import (
     enforce_private_file,
@@ -605,12 +612,101 @@ def build_fixed_evidence_bundle(
 
 
 def _constraints(job: JobSpec, fixed: FixedEvidenceBundle) -> OutputConstraints:
+    effective_length = resolve_length_constraint(job.assignment.length)
     return OutputConstraints(
         format=job.output.format,
         language=job.assignment.language,
         task_type=job.assignment.task_type,
         requirements=fixed.evidence_request.assignment.requirements,
+        length=job.assignment.length if effective_length is not None else None,
+        effective_length=effective_length,
     )
+
+
+def _length_attempt_path(workspace: JobWorkspace, version: str) -> Path:
+    return workspace.safe_path(f"authoring/length/{version}-attempts.jsonl")
+
+
+def _length_attempts(
+    workspace: JobWorkspace, version: str
+) -> tuple[CharacterLengthAdjustmentAttempt, ...]:
+    path = _length_attempt_path(workspace, version)
+    if not path.exists():
+        return ()
+    return _read_jsonl(
+        path,
+        CharacterLengthAdjustmentAttempt,
+        code="LENGTH_ADJUSTMENT_HISTORY_INVALID",
+    )
+
+
+def _enforce_length_gate(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    *,
+    version: str,
+    draft_markdown: str,
+    response_fingerprint: str,
+) -> tuple[CharacterLengthCheck | None, int]:
+    effective = resolve_length_constraint(job.assignment.length)
+    check = validate_character_range(draft_markdown, effective)
+    attempts = _length_attempts(workspace, version)
+    if check is None:
+        return check, len(attempts)
+    maximum = check.effective.maximum_adjustments
+    if attempts and attempts[-1].response_fingerprint == response_fingerprint:
+        attempt = attempts[-1]
+    elif len(attempts) >= maximum:
+        raise state_error(
+            "LENGTH_ADJUSTMENT_EXHAUSTED",
+            f"length adjustment limit {maximum} reached for {version}",
+        )
+    elif check.passed:
+        return check, len(attempts)
+    else:
+        directory = _length_attempt_path(workspace, version).parent
+        ensure_private_directory(directory)
+        attempt = CharacterLengthAdjustmentAttempt(
+            job_id=job.job_id,
+            target_draft_version=version,
+            attempt_number=len(attempts) + 1,
+            response_fingerprint=response_fingerprint,
+            check=check,
+            created_at=utc_now(),
+        )
+        append_jsonl(_length_attempt_path(workspace, version), attempt)
+    if check.passed:
+        return check, len(attempts)
+    minimum = check.effective.min_chars
+    maximum_chars = check.effective.max_chars
+    required = f"{minimum if minimum is not None else 'none'}-{maximum_chars if maximum_chars is not None else 'none'}"
+    raise state_error(
+        "LENGTH_ADJUSTMENT_REQUIRED",
+        (
+            f"current character count: {check.actual_chars}; required range: {required}; "
+            f"below minimum by: {check.below_minimum_by}; over maximum by: "
+            f"{check.over_maximum_by}; adjustment attempt: {attempt.attempt_number}/{maximum}"
+        ),
+    )
+
+
+def _recovered_length_state(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    *,
+    version: str,
+    draft_markdown: str,
+) -> tuple[CharacterLengthCheck | None, int]:
+    check = validate_character_range(
+        draft_markdown,
+        resolve_length_constraint(job.assignment.length),
+    )
+    if check is not None and not check.passed:
+        raise integrity_error(
+            "DRAFT_BUNDLE_INVALID",
+            "recovered draft does not satisfy the effective character range",
+        )
+    return check, len(_length_attempts(workspace, version))
 
 
 def _validate_fixed_job(job: JobSpec, fixed: FixedEvidenceBundle, *, code: str) -> None:
@@ -620,6 +716,10 @@ def _validate_fixed_job(job: JobSpec, fixed: FixedEvidenceBundle, *, code: str) 
 
 def _request_fingerprint(value: BaseModel) -> str:
     payload = value.model_dump(mode="json", exclude={"request_fingerprint"})
+    constraints = payload.get("output_constraints")
+    if isinstance(constraints, dict) and constraints.get("length") is None:
+        constraints.pop("length", None)
+        constraints.pop("effective_length", None)
     return fingerprint(payload)
 
 
@@ -824,7 +924,12 @@ def _draft_stage_path(workspace: JobWorkspace, version: str) -> Path:
 
 
 def _draft_fingerprint(manifest: DraftManifest) -> str:
-    return fingerprint(manifest.model_dump(mode="json", exclude={"bundle_fingerprint"}))
+    payload = manifest.model_dump(mode="json", exclude={"bundle_fingerprint"})
+    if manifest.semantic_revision_count is None:
+        payload.pop("semantic_revision_count", None)
+        payload.pop("length_adjustment_count", None)
+        payload.pop("length_check", None)
+    return fingerprint(payload)
 
 
 def _response_artifact_path(response_fingerprint: str, role: str) -> str:
@@ -868,6 +973,13 @@ def stage_initial_draft(
         raise integrity_error("AUTHORING_OUTPUT_INVALID", "draft exceeds the UTF-8 byte limit")
     response_fingerprint = fingerprint(response)
     version = "v001"
+    length_check, length_adjustment_count = _enforce_length_gate(
+        workspace,
+        job,
+        version=version,
+        draft_markdown=response.draft_markdown,
+        response_fingerprint=response_fingerprint,
+    )
     base = f"authoring/drafts/{version}"
     draft_path, draft_artifact = _write_attempt_artifact(
         attempt,
@@ -924,6 +1036,9 @@ def stage_initial_draft(
         job_id=job.job_id,
         draft_version=version,
         revision_count=0,
+        semantic_revision_count=0,
+        length_adjustment_count=length_adjustment_count,
+        length_check=length_check,
         fixed_evidence_fingerprint=request.fixed_evidence.fixed_evidence_fingerprint,
         request_fingerprint=request.request_fingerprint,
         response_fingerprint=response_fingerprint,
@@ -1106,10 +1221,19 @@ def recover_initial_draft(
         raise integrity_error(
             "AUTHORING_ORPHAN_INVALID", "orphan authoring content is inconsistent"
         )
+    length_check, length_adjustment_count = _recovered_length_state(
+        workspace,
+        job,
+        version=version,
+        draft_markdown=response.draft_markdown,
+    )
     provisional = DraftManifest(
         job_id=job.job_id,
         draft_version=version,
         revision_count=0,
+        semantic_revision_count=0,
+        length_adjustment_count=length_adjustment_count,
+        length_check=length_check,
         fixed_evidence_fingerprint=request.fixed_evidence.fixed_evidence_fingerprint,
         request_fingerprint=request.request_fingerprint,
         response_fingerprint=response_fingerprint,
@@ -1264,6 +1388,17 @@ def load_draft(
         draft_markdown = draft_bytes.decode("utf-8")
     except UnicodeError:
         raise integrity_error("DRAFT_BUNDLE_INVALID", "draft is not valid UTF-8") from None
+    current_length_check = validate_character_range(
+        draft_markdown,
+        resolve_length_constraint(job.assignment.length),
+    )
+    if manifest.length_check != current_length_check or (
+        current_length_check is not None and not current_length_check.passed
+    ):
+        raise integrity_error(
+            "DRAFT_BUNDLE_INVALID",
+            "draft character-length provenance is missing, stale, or out of range",
+        )
     claims = _read_jsonl(
         workspace.safe_path(manifest.claims_artifact.relative_storage_path),
         ClaimRecord,
@@ -2578,6 +2713,13 @@ def stage_revision(
         raise integrity_error("REVISION_RESPONSE_INVALID", "draft exceeds the UTF-8 byte limit")
     response_fingerprint = fingerprint(response)
     version = request.next_draft_version
+    length_check, length_adjustment_count = _enforce_length_gate(
+        workspace,
+        job,
+        version=version,
+        draft_markdown=response.draft_markdown,
+        response_fingerprint=response_fingerprint,
+    )
     draft_base = f"authoring/drafts/{version}"
     revision_base = f"authoring/revisions/{version}"
     draft_path, draft_artifact = _write_attempt_artifact(
@@ -2648,6 +2790,9 @@ def stage_revision(
         job_id=job.job_id,
         draft_version=version,
         revision_count=request.revision_count,
+        semantic_revision_count=request.revision_count,
+        length_adjustment_count=length_adjustment_count,
+        length_check=length_check,
         predecessor_draft_sha256=draft.manifest.draft_artifact.content_sha256,
         fixed_evidence_fingerprint=request.fixed_evidence.fixed_evidence_fingerprint,
         request_fingerprint=request.request_fingerprint,
@@ -2873,10 +3018,19 @@ def recover_revision(
         or run.output_artifacts != expected_outputs
     ):
         raise integrity_error("REVISION_ORPHAN_INVALID", "orphan revision content is inconsistent")
+    length_check, length_adjustment_count = _recovered_length_state(
+        workspace,
+        job,
+        version=version,
+        draft_markdown=response.draft_markdown,
+    )
     provisional_draft = DraftManifest(
         job_id=job.job_id,
         draft_version=version,
         revision_count=request.revision_count,
+        semantic_revision_count=request.revision_count,
+        length_adjustment_count=length_adjustment_count,
+        length_check=length_check,
         predecessor_draft_sha256=predecessor.manifest.draft_artifact.content_sha256,
         fixed_evidence_fingerprint=request.fixed_evidence.fixed_evidence_fingerprint,
         request_fingerprint=request.request_fingerprint,
@@ -3149,6 +3303,15 @@ def _build_human_review_bundle(
     draft_text = _draft_text(workspace, draft)
     if not draft_text.strip():
         raise state_error("HUMAN_REVIEW_GATE_FAILED", "draft Markdown is empty")
+    length_check = validate_character_range(
+        draft_text,
+        resolve_length_constraint(job.assignment.length),
+    )
+    if length_check is not None and not length_check.passed:
+        raise state_error(
+            "HUMAN_REVIEW_LENGTH_GATE_FAILED",
+            "current draft does not satisfy the effective character range",
+        )
     evidence_by_id = {item.evidence_id: item for item in fixed.evidence_records}
     replay: dict[tuple[str, str, int | None, int | None, str], SourceRef] = {}
     for claim in draft.claims:
@@ -3217,7 +3380,29 @@ def _build_human_review_bundle(
                 passed=True,
                 detail="deterministic author-versus-audit comparison is attached",
             ),
+            *(
+                [
+                    FormatCheck(
+                        check_id="length.character-range",
+                        passed=True,
+                        detail=(
+                            f"deterministic character count {length_check.actual_chars} is within "
+                            f"{length_check.effective.min_chars}-"
+                            f"{length_check.effective.max_chars}"
+                        ),
+                    )
+                ]
+                if length_check is not None
+                else []
+            ),
         ],
+        length_check=length_check,
+        semantic_revision_count=draft.manifest.semantic_revision_count,
+        length_adjustment_count=(
+            draft.manifest.length_adjustment_count
+            if draft.manifest.semantic_revision_count is not None
+            else None
+        ),
         revision_history=history_entries,
         approval_target_sha256=draft.manifest.draft_artifact.content_sha256,
         is_approval=False,

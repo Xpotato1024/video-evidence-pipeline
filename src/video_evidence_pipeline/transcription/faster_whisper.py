@@ -21,6 +21,17 @@ from video_evidence_pipeline.domain.transcription import (
     TranscriptSource,
 )
 from video_evidence_pipeline.errors import configuration_error
+from video_evidence_pipeline.transcription.device import (
+    GpuDevice,
+    RuntimeCapabilities,
+    is_gpu_resource_error,
+    probe_nvidia_gpus,
+    select_device,
+)
+from video_evidence_pipeline.transcription.profiles import (
+    AsrModelProvisionManifest,
+    AsrProfile,
+)
 
 _REQUIRED_MODEL_FILES = ("config.json", "model.bin", "tokenizer.json")
 _MAXIMUM_MODEL_FILES = 10_000
@@ -40,6 +51,7 @@ class _ResolvedRuntime:
     device: str
     compute_type: str
     device_index: int | None
+    gpu: GpuDevice | None = None
 
 
 _MODEL_FINGERPRINT_CACHE: dict[Path, _ModelSnapshot] = {}
@@ -54,10 +66,23 @@ class FasterWhisperBackend:
         *,
         device: str = "auto",
         compute_type: str = "auto",
+        profile: AsrProfile | None = None,
+        provision_manifest: AsrModelProvisionManifest | None = None,
+        container_image: str | None = None,
+        container_image_digest: str | None = None,
+        capability_override: RuntimeCapabilities | None = None,
     ) -> None:
         self._model_directory = model_directory
         self._requested_device = device
         self._requested_compute_type = compute_type
+        self._profile = profile
+        self._provision_manifest = provision_manifest
+        self._container_image = container_image
+        self._container_image_digest = container_image_digest
+        self._capability_override = capability_override
+        self._forced_cpu_fallback_reason: str | None = None
+        self._fallback_gpu: GpuDevice | None = None
+        self._runtime_gpu: GpuDevice | None = None
         self._model: Any | None = None
         self._identity: TranscriptionBackendIdentity | None = None
 
@@ -136,10 +161,49 @@ class FasterWhisperBackend:
     def _resolve_runtime(self, runtime: Any) -> _ResolvedRuntime:
         requested_device = self._requested_device
         requested_compute = self._requested_compute_type
-        if requested_device not in {"auto", "cpu", "cuda"}:
+        if requested_device not in {"auto", "cpu", "cuda"} and not requested_device.startswith(
+            "cuda:"
+        ):
             raise configuration_error("ASR_DEVICE_INVALID", "ASR device is invalid")
         if requested_compute not in {"auto", "int8", "float16"}:
             raise configuration_error("ASR_COMPUTE_TYPE_INVALID", "ASR compute type is invalid")
+
+        if self._forced_cpu_fallback_reason is not None:
+            return _ResolvedRuntime(device="cpu", compute_type="int8", device_index=None)
+        if self._profile is not None:
+            if self._capability_override is None:
+                try:
+                    cuda_count = int(runtime.get_cuda_device_count())
+                    detected_gpus = probe_nvidia_gpus()
+                    compatible_gpus = tuple(
+                        gpu
+                        for gpu in detected_gpus
+                        if gpu.index < cuda_count
+                        and self._profile.gpu_compute_type
+                        in runtime.get_supported_compute_types("cuda", gpu.index)
+                    )
+                except (OSError, RuntimeError, TypeError, ValueError):
+                    cuda_count = 0
+                    compatible_gpus = ()
+                capabilities = RuntimeCapabilities(
+                    gpus=compatible_gpus,
+                    container_gpu_passthrough=cuda_count > 0,
+                    ctranslate2_cuda_available=cuda_count > 0,
+                    cuda_compute_types=(
+                        frozenset({self._profile.gpu_compute_type})
+                        if compatible_gpus
+                        else frozenset()
+                    ),
+                )
+            else:
+                capabilities = self._capability_override
+            selected = select_device(self._profile, requested_device, capabilities)
+            return _ResolvedRuntime(
+                device=selected.selected_device,
+                compute_type=selected.compute_type,
+                device_index=selected.gpu.index if selected.gpu is not None else None,
+                gpu=selected.gpu,
+            )
 
         device = requested_device
         supported: set[str]
@@ -154,7 +218,7 @@ class FasterWhisperBackend:
             except (OSError, RuntimeError, TypeError, ValueError):
                 cuda_count = 0
                 cuda_supported = set()
-            if requested_device == "cuda":
+            if requested_device.startswith("cuda"):
                 if cuda_count <= 0 or not cuda_supported:
                     raise configuration_error(
                         "ASR_DEVICE_UNAVAILABLE", "CUDA is not usable by CTranslate2"
@@ -200,6 +264,14 @@ class FasterWhisperBackend:
         if self._model is not None and self._identity is not None:
             return self._model, self._identity
         hashes = self._validated_model_files()
+        model_storage_identity = fingerprint(hashes)
+        if (
+            self._provision_manifest is not None
+            and self._provision_manifest.model_storage_identity != model_storage_identity
+        ):
+            raise configuration_error(
+                "MODEL_INVALID", "the provisioned ASR model does not match its manifest"
+            )
         os.environ["HF_HUB_OFFLINE"] = "1"
         os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = "1"
         os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
@@ -213,6 +285,14 @@ class FasterWhisperBackend:
             raise configuration_error(
                 "BACKEND_UNAVAILABLE", "the optional local ASR backend is not installed"
             ) from None
+        if self._profile is not None and (
+            version != self._profile.engine_version
+            or runtime_version != self._profile.runtime_version
+        ):
+            raise configuration_error(
+                "ASR_RUNTIME_VERSION_MISMATCH",
+                "installed ASR engine/runtime versions do not match the repository profile",
+            )
         resolved = self._resolve_runtime(ctranslate2)
 
         def construct_model(runtime: _ResolvedRuntime) -> Any:
@@ -230,8 +310,14 @@ class FasterWhisperBackend:
 
         try:
             model = construct_model(resolved)
-        except (OSError, RuntimeError, TypeError, ValueError):
-            if resolved.device == "cuda" and self._requested_device == "auto":
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            if (
+                resolved.device == "cuda"
+                and self._requested_device == "auto"
+                and is_gpu_resource_error(exc)
+            ):
+                self._forced_cpu_fallback_reason = str(exc)[:512]
+                self._fallback_gpu = resolved.gpu
                 resolved = _ResolvedRuntime(device="cpu", compute_type="int8", device_index=None)
                 try:
                     model = construct_model(resolved)
@@ -256,6 +342,8 @@ class FasterWhisperBackend:
             raise configuration_error(
                 "MODEL_INVALID", "the local ASR model changed while loading"
             ) from None
+        self._runtime_gpu = resolved.gpu
+        provenance_gpu = resolved.gpu or self._fallback_gpu
         identity = TranscriptionBackendIdentity(
             source=TranscriptSource.ASR,
             name="faster-whisper",
@@ -265,8 +353,39 @@ class FasterWhisperBackend:
                 f"compute_type={resolved.compute_type};"
                 f"device_index={resolved.device_index if resolved.device_index is not None else 'none'}"
             ),
-            model="local-directory-model",
+            model=(
+                self._profile.model_repository
+                if self._profile is not None
+                else "local-directory-model"
+            ),
+            model_revision=(self._profile.model_revision if self._profile is not None else None),
             model_fingerprint=fingerprint(hashes),
+            model_storage_identity=(
+                self._provision_manifest.model_storage_identity
+                if self._provision_manifest is not None
+                else model_storage_identity
+            ),
+            device_policy=self._requested_device,
+            selected_device=resolved.device,
+            gpu_index=(
+                provenance_gpu.index
+                if provenance_gpu is not None
+                else (resolved.device_index if resolved.device == "cuda" else None)
+            ),
+            gpu_name=provenance_gpu.name if provenance_gpu is not None else None,
+            total_vram_mib=(provenance_gpu.total_vram_mib if provenance_gpu is not None else None),
+            free_vram_at_selection_mib=(
+                provenance_gpu.free_vram_mib if provenance_gpu is not None else None
+            ),
+            configured_min_free_vram_mib=(
+                self._profile.min_free_vram_mib if self._profile is not None else None
+            ),
+            compute_type=resolved.compute_type,
+            container_image=self._container_image,
+            container_image_digest=self._container_image_digest,
+            fallback=self._forced_cpu_fallback_reason is not None,
+            fallback_from=("cuda" if self._forced_cpu_fallback_reason is not None else None),
+            fallback_reason=self._forced_cpu_fallback_reason,
             local_files_only=True,
         )
         self._model = model
@@ -285,7 +404,7 @@ class FasterWhisperBackend:
         intervals: tuple[TranscriptInterval, ...],
         configuration: TranscriptionConfig,
     ) -> list[AsrSegment]:
-        model, _ = self._load()
+        model, identity = self._load()
         expected_model_fingerprint = self._identity.model_fingerprint if self._identity else None
         if fingerprint(self._validated_model_files()) != expected_model_fingerprint:
             raise configuration_error("MODEL_INVALID", "the local ASR model changed")
@@ -369,6 +488,22 @@ class FasterWhisperBackend:
                 raise configuration_error("MODEL_INVALID", "the local ASR model changed")
             return results
         except Exception as exc:
+            if (
+                self._requested_device == "auto"
+                and identity.selected_device == "cuda"
+                and self._forced_cpu_fallback_reason is None
+                and is_gpu_resource_error(exc)
+            ):
+                self._forced_cpu_fallback_reason = str(exc)[:512]
+                self._fallback_gpu = self._runtime_gpu
+                self._model = None
+                self._identity = None
+                return self.transcribe(
+                    audio_path,
+                    language=language,
+                    intervals=intervals,
+                    configuration=configuration,
+                )
             if getattr(exc, "code", None) in {
                 "BACKEND_UNAVAILABLE",
                 "MODEL_UNAVAILABLE",

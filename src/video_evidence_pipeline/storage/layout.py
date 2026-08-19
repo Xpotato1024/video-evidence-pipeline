@@ -127,6 +127,7 @@ class JobWorkspace:
             root / "authoring/drafts",
             root / "authoring/audits",
             root / "authoring/revisions",
+            root / "authoring/length",
             root / "human-review",
             root / "approval",
             root / "delivery",
