@@ -51,6 +51,35 @@ class SyntheticYtdlpToolchain:
         return None
 
 
+def synthetic_ytdlp_runner(
+    captured: dict[str, object], payload: bytes = b"synthetic Box shared media"
+):
+    def runner(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        captured["argv"] = argv
+        captured["kwargs"] = kwargs
+        output_directory = Path(argv[argv.index("--paths") + 1])
+        (output_directory / "source.mp4").write_bytes(payload)
+        lineage_path = Path(argv[argv.index("--print-to-file") + 2])
+        lineage_path.write_text(
+            json.dumps(
+                {
+                    "final": {
+                        "format_id": "22",
+                        "vcodec": "avc1",
+                        "acodec": "mp4a",
+                        "protocol": "https",
+                    },
+                    "components": [],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(argv, 0)
+
+    return runner
+
+
 def initialized_authorized_job(tmp_path: Path, kind: SourceKind, locator: str) -> JobWorkspace:
     workspace, _ = initialize_job(
         tmp_path,
@@ -569,6 +598,9 @@ def test_box_shared_link_resolves_file_and_keeps_credentials_on_api_origin(
         assert request.headers.get("boxapi") is None
         return httpx.Response(200, headers={"content-type": "video/mp4"}, content=payload)
 
+    def unexpected_ytdlp(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        raise AssertionError("configured Box shared links must use the REST route")
+
     monkeypatch.setenv("VEP_BOX_ACCESS_TOKEN", TOKEN_SECRET)
     workspace = initialized_authorized_job(tmp_path, SourceKind.BOX, BOX_SHARED_LINK)
     assert BOX_SHARED_LINK in workspace.job_yaml.read_text(encoding="utf-8")
@@ -579,6 +611,7 @@ def test_box_shared_link_resolves_file_and_keeps_credentials_on_api_origin(
         runtime,
         client=httpx.Client(transport=httpx.MockTransport(handler)),
         resolver=public_resolver,
+        runner=unexpected_ytdlp,
     )
     result = acquire_job(workspace.root, runtime, adapter)
     reused = acquire_job(workspace.root, runtime, adapter)
@@ -604,6 +637,100 @@ def test_box_shared_link_resolves_file_and_keeps_credentials_on_api_origin(
     assert BOX_SHARED_LINK not in persisted
     assert "syntheticsharedtoken" not in persisted
     assert SIGNED_SECRET not in persisted
+
+
+def test_box_public_shared_link_uses_ytdlp_without_rewriting_authorized_job(
+    tmp_path: Path,
+) -> None:
+    box_requests: list[httpx.Request] = []
+    captured: dict[str, object] = {}
+    payload = b"public Box shared media"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        box_requests.append(request)
+        raise AssertionError("public Box shared links must not call the REST API")
+
+    workspace = initialized_authorized_job(tmp_path, SourceKind.BOX, BOX_SHARED_LINK)
+    job_yaml_before = workspace.job_yaml.read_bytes()
+    runtime = AcquisitionRuntimeConfig(maximum_download_bytes=1024)
+    toolchain = SyntheticYtdlpToolchain(tmp_path)
+    adapter = BoxAdapter(
+        runtime,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        resolver=public_resolver,
+        runner=synthetic_ytdlp_runner(captured, payload),
+        toolchain_factory=lambda _deadline: toolchain,
+    )
+
+    result = acquire_job(workspace.root, runtime, adapter)
+
+    assert box_requests == []
+    assert workspace.job_yaml.read_bytes() == job_yaml_before
+    assert load_job_yaml(workspace.job_yaml).source.kind is SourceKind.BOX
+    evidence = result.source_manifest.acquisition_evidence
+    assert evidence is not None
+    assert evidence.adapter_kind is SourceKind.BOX
+    assert evidence.backend == "yt-dlp"
+    assert evidence.credential_mode == "none"
+    assert result.source_manifest.artifact_record.artifact.content_sha256 == sha256_bytes(payload)
+    assert "synthetic Box shared media" not in persisted_machine_text(workspace)
+
+
+def test_box_shared_link_configured_missing_token_does_not_use_public_route(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    called = False
+
+    def unexpected_ytdlp(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        nonlocal called
+        called = True
+        raise AssertionError("missing configured Box token must not use public fallback")
+
+    token_env = "VEP_BOX_ACCESS_TOKEN_DOES_NOT_EXIST"
+    monkeypatch.delenv(token_env, raising=False)
+    workspace = initialized_authorized_job(tmp_path, SourceKind.BOX, BOX_SHARED_LINK)
+    runtime = AcquisitionRuntimeConfig(box_token_env=token_env)
+    adapter = BoxAdapter(runtime, resolver=public_resolver, runner=unexpected_ytdlp)
+
+    with pytest.raises(VepError) as captured:
+        acquire_job(workspace.root, runtime, adapter)
+
+    assert captured.value.code == "BOX_CREDENTIAL_REQUIRED"
+    assert called is False
+
+
+def test_box_file_id_without_token_option_requires_credential(tmp_path: Path) -> None:
+    workspace = initialized_authorized_job(tmp_path, SourceKind.BOX, "12345")
+    runtime = AcquisitionRuntimeConfig()
+
+    with pytest.raises(VepError) as captured:
+        acquire_job(workspace.root, runtime, BoxAdapter(runtime, resolver=public_resolver))
+
+    assert captured.value.code == "BOX_CREDENTIAL_REQUIRED"
+
+
+def test_box_public_shared_link_preserves_ytdlp_failure(
+    tmp_path: Path,
+) -> None:
+    def failing_ytdlp(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(argv, 1)
+
+    workspace = initialized_authorized_job(tmp_path, SourceKind.BOX, BOX_SHARED_LINK)
+    runtime = AcquisitionRuntimeConfig(maximum_download_bytes=1024)
+    toolchain = SyntheticYtdlpToolchain(tmp_path)
+    adapter = BoxAdapter(
+        runtime,
+        resolver=public_resolver,
+        runner=failing_ytdlp,
+        toolchain_factory=lambda _deadline: toolchain,
+    )
+
+    with pytest.raises(VepError) as captured:
+        acquire_job(workspace.root, runtime, adapter)
+
+    assert captured.value.code == "YTDLP_ACQUISITION_FAILED"
+    assert captured.value.code != "BOX_CREDENTIAL_REQUIRED"
+    assert not workspace.source_manifest_json.exists()
 
 
 @pytest.mark.parametrize("item_type", ["folder", "web_link", "app_item"])
