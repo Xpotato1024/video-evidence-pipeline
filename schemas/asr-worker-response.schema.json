@@ -1,0 +1,704 @@
+{
+  "$defs": {
+    "AsrSegment": {
+      "additionalProperties": false,
+      "properties": {
+        "backend_segment_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Backend Segment Id",
+          "type": "string"
+        },
+        "confidence": {
+          "$ref": "#/$defs/TranscriptConfidence"
+        },
+        "end_ms": {
+          "exclusiveMinimum": 0,
+          "title": "End Ms",
+          "type": "integer"
+        },
+        "flags": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Flags",
+          "type": "array"
+        },
+        "raw_text": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Raw Text",
+          "type": "string"
+        },
+        "speaker": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Speaker"
+        },
+        "start_ms": {
+          "minimum": 0,
+          "title": "Start Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start_ms",
+        "end_ms",
+        "raw_text",
+        "backend_segment_id",
+        "confidence"
+      ],
+      "title": "AsrSegment",
+      "type": "object"
+    },
+    "DeviceSelectionReason": {
+      "enum": [
+        "explicit_cpu",
+        "no_gpu_visible",
+        "container_passthrough_unavailable",
+        "backend_cuda_unavailable",
+        "gpu_compute_type_unsupported",
+        "insufficient_free_vram",
+        "auto_gpu_selected",
+        "explicit_cuda_selected",
+        "gpu_resource_fallback"
+      ],
+      "title": "DeviceSelectionReason",
+      "type": "string"
+    },
+    "TranscriptConfidence": {
+      "additionalProperties": false,
+      "description": "Raw confidence metadata, deliberately not a calibrated probability.",
+      "properties": {
+        "avg_logprob": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Avg Logprob"
+        },
+        "kind": {
+          "$ref": "#/$defs/TranscriptConfidenceKind"
+        },
+        "no_speech_probability": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "No Speech Probability"
+        },
+        "word_probability_count": {
+          "default": 0,
+          "maximum": 1000000,
+          "minimum": 0,
+          "title": "Word Probability Count",
+          "type": "integer"
+        },
+        "word_probability_max": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Word Probability Max"
+        },
+        "word_probability_mean": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Word Probability Mean"
+        },
+        "word_probability_min": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Word Probability Min"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "TranscriptConfidence",
+      "type": "object"
+    },
+    "TranscriptConfidenceKind": {
+      "enum": [
+        "not_available",
+        "backend_metric"
+      ],
+      "title": "TranscriptConfidenceKind",
+      "type": "string"
+    },
+    "TranscriptSource": {
+      "enum": [
+        "supplied",
+        "normalized_subtitle",
+        "asr"
+      ],
+      "title": "TranscriptSource",
+      "type": "string"
+    },
+    "TranscriptionBackendIdentity": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "model_repository": {
+                "type": "string"
+              },
+              "source": {
+                "const": "asr"
+              }
+            },
+            "required": [
+              "source",
+              "model_repository"
+            ]
+          },
+          "then": {
+            "properties": {
+              "compute_type": {
+                "not": {
+                  "type": "null"
+                }
+              },
+              "configured_min_free_vram_mib": {
+                "not": {
+                  "type": "null"
+                }
+              },
+              "container_image": {
+                "not": {
+                  "type": "null"
+                }
+              },
+              "container_image_digest": {
+                "not": {
+                  "type": "null"
+                }
+              },
+              "device_policy": {
+                "not": {
+                  "type": "null"
+                }
+              },
+              "fallback": {
+                "not": {
+                  "type": "null"
+                }
+              },
+              "model": {
+                "not": {
+                  "type": "null"
+                }
+              },
+              "model_repository": {
+                "not": {
+                  "type": "null"
+                }
+              },
+              "model_revision": {
+                "not": {
+                  "type": "null"
+                }
+              },
+              "model_storage_identity": {
+                "not": {
+                  "type": "null"
+                }
+              },
+              "runtime": {
+                "not": {
+                  "type": "null"
+                }
+              },
+              "runtime_version": {
+                "not": {
+                  "type": "null"
+                }
+              },
+              "selected_device": {
+                "not": {
+                  "type": "null"
+                }
+              },
+              "selection_reason": {
+                "not": {
+                  "type": "null"
+                }
+              }
+            },
+            "required": [
+              "runtime",
+              "runtime_version",
+              "model",
+              "model_repository",
+              "model_revision",
+              "model_storage_identity",
+              "device_policy",
+              "selection_reason",
+              "selected_device",
+              "compute_type",
+              "container_image",
+              "container_image_digest",
+              "fallback",
+              "configured_min_free_vram_mib"
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "candidate_free_vram_mib": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Candidate Free Vram Mib"
+        },
+        "candidate_gpu_index": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Candidate Gpu Index"
+        },
+        "candidate_gpu_name": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Candidate Gpu Name"
+        },
+        "candidate_total_vram_mib": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Candidate Total Vram Mib"
+        },
+        "compute_type": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Compute Type"
+        },
+        "configured_min_free_vram_mib": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Configured Min Free Vram Mib"
+        },
+        "container_image": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Container Image"
+        },
+        "container_image_digest": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Container Image Digest"
+        },
+        "device_policy": {
+          "anyOf": [
+            {
+              "pattern": "^(auto|cpu|cuda|cuda:[0-9]+)$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Device Policy"
+        },
+        "fallback": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fallback"
+        },
+        "fallback_from": {
+          "anyOf": [
+            {
+              "const": "cuda",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fallback From"
+        },
+        "fallback_reason": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fallback Reason"
+        },
+        "free_vram_at_selection_mib": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Free Vram At Selection Mib"
+        },
+        "gpu_index": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gpu Index"
+        },
+        "gpu_name": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gpu Name"
+        },
+        "local_files_only": {
+          "const": true,
+          "default": true,
+          "title": "Local Files Only",
+          "type": "boolean"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "model_fingerprint": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Fingerprint"
+        },
+        "model_repository": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Repository"
+        },
+        "model_revision": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Revision"
+        },
+        "model_storage_identity": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Storage Identity"
+        },
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "runtime": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Runtime"
+        },
+        "runtime_version": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Runtime Version"
+        },
+        "selected_device": {
+          "anyOf": [
+            {
+              "enum": [
+                "cpu",
+                "cuda"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Selected Device"
+        },
+        "selection_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeviceSelectionReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source": {
+          "$ref": "#/$defs/TranscriptSource"
+        },
+        "total_vram_mib": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Vram Mib"
+        },
+        "version": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "name",
+        "version"
+      ],
+      "title": "TranscriptionBackendIdentity",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/asr-worker-response.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Untrusted worker output validated by the host before canonical publication.",
+  "properties": {
+    "backend": {
+      "$ref": "#/$defs/TranscriptionBackendIdentity"
+    },
+    "diagnostics": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 64,
+      "title": "Diagnostics",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "segments": {
+      "items": {
+        "$ref": "#/$defs/AsrSegment"
+      },
+      "maxItems": 100000,
+      "title": "Segments",
+      "type": "array"
+    }
+  },
+  "required": [
+    "backend",
+    "segments"
+  ],
+  "title": "AsrWorkerResponse",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

@@ -9,10 +9,10 @@ from itertools import islice
 from pathlib import Path
 from typing import Any
 
-from video_evidence_pipeline.domain.hashing import sha256_file
 from video_evidence_pipeline.domain.serialization import fingerprint
 from video_evidence_pipeline.domain.transcription import (
     AsrSegment,
+    DeviceSelectionReason,
     TranscriptConfidence,
     TranscriptConfidenceKind,
     TranscriptInterval,
@@ -52,6 +52,8 @@ class _ResolvedRuntime:
     compute_type: str
     device_index: int | None
     gpu: GpuDevice | None = None
+    selection_reason: DeviceSelectionReason | None = None
+    candidate_gpu: GpuDevice | None = None
 
 
 _MODEL_FINGERPRINT_CACHE: dict[Path, _ModelSnapshot] = {}
@@ -143,11 +145,13 @@ class FasterWhisperBackend:
 
     def _validated_model_files(self) -> dict[str, str]:
         try:
-            directory, files, metadata = self._model_metadata()
+            directory, _files, metadata = self._model_metadata()
             cached = _MODEL_FINGERPRINT_CACHE.get(directory)
             if cached is not None and cached.metadata == metadata:
                 return dict(cached.hashes)
-            hashes = {path.relative_to(directory).as_posix(): sha256_file(path) for path in files}
+            from video_evidence_pipeline.transcription.provisioning import model_payload_hashes
+
+            hashes = model_payload_hashes(directory)
             _directory_after, _files_after, metadata_after = self._model_metadata()
             if metadata_after != metadata:
                 raise configuration_error("MODEL_INVALID", "the local ASR model changed")
@@ -169,31 +173,42 @@ class FasterWhisperBackend:
             raise configuration_error("ASR_COMPUTE_TYPE_INVALID", "ASR compute type is invalid")
 
         if self._forced_cpu_fallback_reason is not None:
-            return _ResolvedRuntime(device="cpu", compute_type="int8", device_index=None)
+            return _ResolvedRuntime(
+                device="cpu",
+                compute_type="int8",
+                device_index=None,
+                selection_reason=DeviceSelectionReason.GPU_RESOURCE_FALLBACK,
+                candidate_gpu=self._fallback_gpu,
+            )
         if self._profile is not None:
-            if self._capability_override is None:
+            if requested_device == "cpu":
+                capabilities = RuntimeCapabilities((), True, False, frozenset())
+            elif self._capability_override is None:
                 try:
                     cuda_count = int(runtime.get_cuda_device_count())
                     detected_gpus = probe_nvidia_gpus()
-                    compatible_gpus = tuple(
-                        gpu
+                    compute_types_by_gpu = tuple(
+                        (
+                            gpu.index,
+                            frozenset(runtime.get_supported_compute_types("cuda", gpu.index)),
+                        )
                         for gpu in detected_gpus
                         if gpu.index < cuda_count
-                        and self._profile.gpu_compute_type
-                        in runtime.get_supported_compute_types("cuda", gpu.index)
+                    )
+                    compute_types = frozenset(
+                        value for _index, values in compute_types_by_gpu for value in values
                     )
                 except (OSError, RuntimeError, TypeError, ValueError):
                     cuda_count = 0
-                    compatible_gpus = ()
+                    detected_gpus = ()
+                    compute_types = frozenset()
+                    compute_types_by_gpu = ()
                 capabilities = RuntimeCapabilities(
-                    gpus=compatible_gpus,
+                    gpus=tuple(gpu for gpu in detected_gpus if gpu.index < cuda_count),
                     container_gpu_passthrough=cuda_count > 0,
                     ctranslate2_cuda_available=cuda_count > 0,
-                    cuda_compute_types=(
-                        frozenset({self._profile.gpu_compute_type})
-                        if compatible_gpus
-                        else frozenset()
-                    ),
+                    cuda_compute_types=compute_types,
+                    cuda_compute_types_by_gpu=compute_types_by_gpu,
                 )
             else:
                 capabilities = self._capability_override
@@ -203,6 +218,8 @@ class FasterWhisperBackend:
                 compute_type=selected.compute_type,
                 device_index=selected.gpu.index if selected.gpu is not None else None,
                 gpu=selected.gpu,
+                selection_reason=selected.reason,
+                candidate_gpu=selected.candidate_gpu,
             )
 
         device = requested_device
@@ -318,7 +335,13 @@ class FasterWhisperBackend:
             ):
                 self._forced_cpu_fallback_reason = str(exc)[:512]
                 self._fallback_gpu = resolved.gpu
-                resolved = _ResolvedRuntime(device="cpu", compute_type="int8", device_index=None)
+                resolved = _ResolvedRuntime(
+                    device="cpu",
+                    compute_type="int8",
+                    device_index=None,
+                    selection_reason=DeviceSelectionReason.GPU_RESOURCE_FALLBACK,
+                    candidate_gpu=self._fallback_gpu,
+                )
                 try:
                     model = construct_model(resolved)
                 except (OSError, RuntimeError, TypeError, ValueError):
@@ -343,20 +366,30 @@ class FasterWhisperBackend:
                 "MODEL_INVALID", "the local ASR model changed while loading"
             ) from None
         self._runtime_gpu = resolved.gpu
-        provenance_gpu = resolved.gpu or self._fallback_gpu
+        selected_gpu = resolved.gpu
+        candidate_gpu = resolved.candidate_gpu or self._fallback_gpu
         identity = TranscriptionBackendIdentity(
             source=TranscriptSource.ASR,
             name="faster-whisper",
             version=version,
             runtime=(
-                f"ctranslate2-{runtime_version};device={resolved.device};"
-                f"compute_type={resolved.compute_type};"
-                f"device_index={resolved.device_index if resolved.device_index is not None else 'none'}"
+                self._profile.runtime
+                if self._profile is not None
+                else (
+                    f"ctranslate2-{runtime_version};device={resolved.device};"
+                    f"compute_type={resolved.compute_type};"
+                    "device_index="
+                    f"{resolved.device_index if resolved.device_index is not None else 'none'}"
+                )
             ),
+            runtime_version=runtime_version,
             model=(
                 self._profile.model_repository
                 if self._profile is not None
                 else "local-directory-model"
+            ),
+            model_repository=(
+                self._profile.model_repository if self._profile is not None else None
             ),
             model_revision=(self._profile.model_revision if self._profile is not None else None),
             model_fingerprint=fingerprint(hashes),
@@ -366,19 +399,28 @@ class FasterWhisperBackend:
                 else model_storage_identity
             ),
             device_policy=self._requested_device,
+            selection_reason=resolved.selection_reason,
             selected_device=resolved.device,
             gpu_index=(
-                provenance_gpu.index
-                if provenance_gpu is not None
+                selected_gpu.index
+                if selected_gpu is not None
                 else (resolved.device_index if resolved.device == "cuda" else None)
             ),
-            gpu_name=provenance_gpu.name if provenance_gpu is not None else None,
-            total_vram_mib=(provenance_gpu.total_vram_mib if provenance_gpu is not None else None),
+            gpu_name=selected_gpu.name if selected_gpu is not None else None,
+            total_vram_mib=(selected_gpu.total_vram_mib if selected_gpu is not None else None),
             free_vram_at_selection_mib=(
-                provenance_gpu.free_vram_mib if provenance_gpu is not None else None
+                selected_gpu.free_vram_mib if selected_gpu is not None else None
             ),
             configured_min_free_vram_mib=(
                 self._profile.min_free_vram_mib if self._profile is not None else None
+            ),
+            candidate_gpu_index=(candidate_gpu.index if candidate_gpu is not None else None),
+            candidate_gpu_name=(candidate_gpu.name if candidate_gpu is not None else None),
+            candidate_total_vram_mib=(
+                candidate_gpu.total_vram_mib if candidate_gpu is not None else None
+            ),
+            candidate_free_vram_mib=(
+                candidate_gpu.free_vram_mib if candidate_gpu is not None else None
             ),
             compute_type=resolved.compute_type,
             container_image=self._container_image,

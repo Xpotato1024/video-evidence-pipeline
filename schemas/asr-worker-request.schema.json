@@ -1,0 +1,365 @@
+{
+  "$defs": {
+    "DeviceSelectionReason": {
+      "enum": [
+        "explicit_cpu",
+        "no_gpu_visible",
+        "container_passthrough_unavailable",
+        "backend_cuda_unavailable",
+        "gpu_compute_type_unsupported",
+        "insufficient_free_vram",
+        "auto_gpu_selected",
+        "explicit_cuda_selected",
+        "gpu_resource_fallback"
+      ],
+      "title": "DeviceSelectionReason",
+      "type": "string"
+    },
+    "GapPolicy": {
+      "enum": [
+        "record",
+        "reject"
+      ],
+      "title": "GapPolicy",
+      "type": "string"
+    },
+    "OverlapPolicy": {
+      "enum": [
+        "preserve",
+        "reject"
+      ],
+      "title": "OverlapPolicy",
+      "type": "string"
+    },
+    "TranscriptInterval": {
+      "additionalProperties": false,
+      "properties": {
+        "end_ms": {
+          "exclusiveMinimum": 0,
+          "title": "End Ms",
+          "type": "integer"
+        },
+        "segment_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Segment Ids",
+          "type": "array"
+        },
+        "start_ms": {
+          "minimum": 0,
+          "title": "Start Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start_ms",
+        "end_ms"
+      ],
+      "title": "TranscriptInterval",
+      "type": "object"
+    },
+    "TranscriptionConfig": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "asr_profile": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "asr_profile"
+            ]
+          },
+          "then": {
+            "properties": {
+              "asr_compute_type": {
+                "const": "auto"
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "asr_beam_size": {
+          "const": 5,
+          "default": 5,
+          "title": "Asr Beam Size",
+          "type": "integer"
+        },
+        "asr_compute_type": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "int8",
+            "float16"
+          ],
+          "title": "Asr Compute Type",
+          "type": "string"
+        },
+        "asr_condition_on_previous_text": {
+          "const": false,
+          "default": false,
+          "title": "Asr Condition On Previous Text",
+          "type": "boolean"
+        },
+        "asr_device": {
+          "default": "auto",
+          "pattern": "^(auto|cpu|cuda|cuda:[0-9]+)$",
+          "title": "Asr Device",
+          "type": "string"
+        },
+        "asr_language": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Asr Language"
+        },
+        "asr_profile": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Repository-owned profile ID; absent only for legacy manifests/tests.",
+          "title": "Asr Profile"
+        },
+        "asr_temperature": {
+          "const": 0.0,
+          "default": 0.0,
+          "title": "Asr Temperature",
+          "type": "number"
+        },
+        "gap_policy": {
+          "$ref": "#/$defs/GapPolicy",
+          "default": "record"
+        },
+        "maximum_segments": {
+          "default": 100000,
+          "maximum": 1000000,
+          "minimum": 1,
+          "title": "Maximum Segments",
+          "type": "integer"
+        },
+        "maximum_total_text_chars": {
+          "default": 64000000,
+          "maximum": 256000000,
+          "minimum": 1,
+          "title": "Maximum Total Text Chars",
+          "type": "integer"
+        },
+        "minimum_caption_coverage": {
+          "default": 0.8,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Minimum Caption Coverage",
+          "type": "number"
+        },
+        "overlap_policy": {
+          "$ref": "#/$defs/OverlapPolicy",
+          "default": "preserve"
+        },
+        "preferred_languages": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Preferred Languages",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "title": "TranscriptionConfig",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/asr-worker-request.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Bounded, provider-neutral request consumed only by the ASR inference worker.",
+  "properties": {
+    "audio_path": {
+      "const": "/input/audio",
+      "default": "/input/audio",
+      "title": "Audio Path",
+      "type": "string"
+    },
+    "configuration": {
+      "$ref": "#/$defs/TranscriptionConfig"
+    },
+    "configured_min_free_vram_mib": {
+      "maximum": 1048576,
+      "minimum": 1,
+      "title": "Configured Min Free Vram Mib",
+      "type": "integer"
+    },
+    "container_gpu_passthrough": {
+      "title": "Container Gpu Passthrough",
+      "type": "boolean"
+    },
+    "container_image": {
+      "maxLength": 512,
+      "minLength": 1,
+      "title": "Container Image",
+      "type": "string"
+    },
+    "container_image_digest": {
+      "pattern": "^(?:[^@\\s]+@)?sha256:[0-9a-f]{64}$",
+      "title": "Container Image Digest",
+      "type": "string"
+    },
+    "cpu_compute_type": {
+      "const": "int8",
+      "title": "Cpu Compute Type",
+      "type": "string"
+    },
+    "engine": {
+      "const": "faster-whisper",
+      "title": "Engine",
+      "type": "string"
+    },
+    "engine_version": {
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "title": "Engine Version",
+      "type": "string"
+    },
+    "gpu_compute_type": {
+      "const": "float16",
+      "title": "Gpu Compute Type",
+      "type": "string"
+    },
+    "gpu_unavailable_reason": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeviceSelectionReason"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "intervals": {
+      "items": {
+        "$ref": "#/$defs/TranscriptInterval"
+      },
+      "maxItems": 100000,
+      "minItems": 1,
+      "title": "Intervals",
+      "type": "array"
+    },
+    "language_hint": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Language Hint"
+    },
+    "model": {
+      "const": "large-v3",
+      "title": "Model",
+      "type": "string"
+    },
+    "model_path": {
+      "const": "/model",
+      "default": "/model",
+      "title": "Model Path",
+      "type": "string"
+    },
+    "model_repository": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Model Repository",
+      "type": "string"
+    },
+    "model_revision": {
+      "pattern": "^[0-9a-f]{40}$",
+      "title": "Model Revision",
+      "type": "string"
+    },
+    "model_storage_identity": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Model Storage Identity",
+      "type": "string"
+    },
+    "profile_id": {
+      "pattern": "^[a-z0-9][a-z0-9-]{0,127}$",
+      "title": "Profile Id",
+      "type": "string"
+    },
+    "requested_device_policy": {
+      "pattern": "^(auto|cpu|cuda|cuda:[0-9]+)$",
+      "title": "Requested Device Policy",
+      "type": "string"
+    },
+    "runtime": {
+      "const": "CTranslate2",
+      "title": "Runtime",
+      "type": "string"
+    },
+    "runtime_version": {
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "title": "Runtime Version",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "intervals",
+    "profile_id",
+    "engine",
+    "engine_version",
+    "runtime",
+    "runtime_version",
+    "model",
+    "model_repository",
+    "model_revision",
+    "model_storage_identity",
+    "requested_device_policy",
+    "container_gpu_passthrough",
+    "gpu_compute_type",
+    "cpu_compute_type",
+    "configured_min_free_vram_mib",
+    "container_image",
+    "container_image_digest",
+    "configuration"
+  ],
+  "title": "AsrWorkerRequest",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

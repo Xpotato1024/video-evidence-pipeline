@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -49,6 +49,10 @@ from video_evidence_pipeline.domain.job import (
     SupportingInputSpec,
 )
 from video_evidence_pipeline.domain.transcription import (
+    MAXIMUM_ASR_WORKER_REQUEST_BYTES,
+    AsrWorkerRequest,
+    AsrWorkerResponse,
+    DeviceSelectionReason,
     GapPolicy,
     OverlapPolicy,
     TranscriptionConfig,
@@ -497,28 +501,16 @@ def transcribe(
         asr_profile=asr_profile,
         asr_device=asr_device,
     )
-    if os.environ.get("VEP_ASR_CONTAINER_INTERNAL") != "1":
-        from video_evidence_pipeline.transcription.container import (
-            run_transcription_container,
-        )
+    from video_evidence_pipeline.storage.layout import JobWorkspace
+    from video_evidence_pipeline.transcription.container import ContainerAsrBackend
 
-        def run_container() -> Any:
-            raw = run_transcription_container(workspace, config)
-            try:
-                return json.loads(raw)
-            except json.JSONDecodeError:
-                raise configuration_error(
-                    "ASR_CONTAINER_RESPONSE_INVALID",
-                    "ASR container returned an invalid response",
-                ) from None
-
-        payload = _run(run_container, json_output=json_output)
-        _emit(payload, json_output=json_output)
-        return
+    opened = JobWorkspace.open(workspace)
+    repository_root = opened.jobs_root.parent.parent
     result = _run(
         lambda: transcribe_job(
             workspace,
             config,
+            backend_override=ContainerAsrBackend(repository_root, config),
         ),
         json_output=json_output,
     )
@@ -554,32 +546,27 @@ def asr_image_build(
     _emit({"ok": True, "image": image}, json_output=json_output)
 
 
+@asr_app.command("image-smoke")
+def asr_image_smoke(
+    repository_root: Annotated[Path, typer.Option("--repository-root")] = Path("."),
+    profile: Annotated[str, typer.Option("--profile")] = "whisper-large-v3",
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from video_evidence_pipeline.transcription.container import smoke_asr_image
+
+    result = _run(
+        lambda: smoke_asr_image(repository_root.resolve(), profile),
+        json_output=json_output,
+    )
+    _emit({"ok": True, **result}, json_output=json_output)
+
+
 @asr_app.command("model-provision")
 def asr_model_provision(
     repository_root: Annotated[Path, typer.Option("--repository-root")] = Path("."),
     profile: Annotated[str, typer.Option("--profile")] = "whisper-large-v3",
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    if os.environ.get("VEP_ASR_CONTAINER_INTERNAL") == "1":
-        from video_evidence_pipeline.transcription.provisioning import provision_model
-
-        path, manifest, reused = _run(
-            lambda: provision_model(repository_root.resolve(), profile),
-            json_output=json_output,
-        )
-        _emit(
-            {
-                "ok": True,
-                "profile": manifest.profile,
-                "model_repository": manifest.model_repository,
-                "model_revision": manifest.model_revision,
-                "model_storage_identity": manifest.model_storage_identity,
-                "path": str(path),
-                "reused": reused,
-            },
-            json_output=json_output,
-        )
-        return
     from video_evidence_pipeline.transcription.container import run_provision_container
 
     def provision_in_container() -> Any:
@@ -594,6 +581,103 @@ def asr_model_provision(
 
     payload = _run(provision_in_container, json_output=json_output)
     _emit(payload, json_output=json_output)
+
+
+@asr_app.command("worker", hidden=True)
+def asr_worker(
+    request: Annotated[Path, typer.Option("--request")],
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from video_evidence_pipeline.transcription.device import RuntimeCapabilities
+    from video_evidence_pipeline.transcription.faster_whisper import FasterWhisperBackend
+    from video_evidence_pipeline.transcription.profiles import AsrModelProvisionManifest, AsrProfile
+
+    if (
+        not request.is_file()
+        or request.is_symlink()
+        or request.stat().st_size > MAXIMUM_ASR_WORKER_REQUEST_BYTES
+    ):
+        raise configuration_error("ASR_WORKER_REQUEST_INVALID", "ASR worker request is invalid")
+    try:
+        worker_request = AsrWorkerRequest.model_validate_json(request.read_bytes())
+    except (OSError, ValidationError):
+        raise configuration_error(
+            "ASR_WORKER_REQUEST_INVALID", "ASR worker request is invalid"
+        ) from None
+    profile = AsrProfile(
+        engine=worker_request.engine,
+        engine_version=worker_request.engine_version,
+        runtime=worker_request.runtime,
+        runtime_version=worker_request.runtime_version,
+        model=worker_request.model,
+        model_repository=worker_request.model_repository,
+        model_revision=worker_request.model_revision,
+        gpu_compute_type=worker_request.gpu_compute_type,
+        cpu_compute_type=worker_request.cpu_compute_type,
+        min_free_vram_mib=worker_request.configured_min_free_vram_mib,
+        default_device_policy="auto",
+        container_image=worker_request.container_image,
+    )
+    provision = AsrModelProvisionManifest(
+        profile=worker_request.profile_id,
+        model_repository=worker_request.model_repository,
+        model_revision=worker_request.model_revision,
+        model_storage_identity=worker_request.model_storage_identity,
+        file_count=1,
+        total_size_bytes=1,
+        provisioned_at=datetime.now(UTC),
+    )
+    capability_override = None
+    if not worker_request.container_gpu_passthrough:
+        reason = (
+            DeviceSelectionReason(worker_request.gpu_unavailable_reason)
+            if worker_request.gpu_unavailable_reason is not None
+            else None
+        )
+        capability_override = RuntimeCapabilities(
+            (),
+            False,
+            False,
+            frozenset(),
+            unavailable_reason=reason,
+        )
+    backend = FasterWhisperBackend(
+        Path(worker_request.model_path),
+        device=worker_request.requested_device_policy,
+        compute_type="auto",
+        profile=profile,
+        provision_manifest=provision,
+        container_image=worker_request.container_image,
+        container_image_digest=worker_request.container_image_digest,
+        capability_override=capability_override,
+    )
+    segments = _run(
+        lambda: backend.transcribe(
+            Path(worker_request.audio_path),
+            language=worker_request.language_hint,
+            intervals=tuple(worker_request.intervals),
+            configuration=worker_request.configuration,
+        ),
+        json_output=json_output,
+    )
+    response = AsrWorkerResponse(backend=backend.identity(), segments=segments)
+    _emit(response.model_dump(mode="json"), json_output=True)
+
+
+@asr_app.command("provision-worker", hidden=True)
+def asr_provision_worker(
+    repository: Annotated[str, typer.Option("--repository")],
+    revision: Annotated[str, typer.Option("--revision")],
+    output: Annotated[Path, typer.Option("--output")],
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from video_evidence_pipeline.transcription.provisioning import download_model_payload
+
+    _run(
+        lambda: download_model_payload(output, repository, revision),
+        json_output=json_output,
+    )
+    _emit({"ok": True, "downloaded": True}, json_output=json_output)
 
 
 @refine_app.command("prepare")

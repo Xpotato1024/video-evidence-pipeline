@@ -54,7 +54,7 @@ uv run vep job authorize .local/jobs/demo-report \
   --deny-external-api
 uv run vep acquire .local/jobs/demo-report
 uv run vep normalize .local/jobs/demo-report
-# 初回だけ: repository pinどおりのASR imageとmodelを明示的に準備する
+# ASRが必要な場合: build contract変更時はimageを再buildし、同じmodel revisionは再利用する
 uv run vep asr image-build --profile whisper-large-v3
 uv run vep asr model-provision --profile whisper-large-v3
 uv run vep transcribe .local/jobs/demo-report --preferred-language ja \
@@ -85,8 +85,10 @@ uv run vep job status .local/jobs/demo-report
 `ceil(max × 0.8)`をeffective minにし、Pythonのcanonical counterが各draft／revision／review／export境界で検証します。
 raw sourceは`.local/`配下へcontent-addressedに保存され、上書きされません。
 ASR engine／runtime／model／revision／device policyは[`config/asr-profiles.yaml`](config/asr-profiles.yaml)が正本です。
-推論はrepository-owned containerを`--network none`で起動し、`.local/models`のprovision済みmodelをread-onlyで使います。
-captionが十分ならmodelはloadしません。不足区間でmodelが未provisionなら暗黙downloadせず停止します。外部APIを使った
+host pipelineがcaption selectionとgap計算を所有し、不足区間だけをtyped ASR worker containerへ渡します。
+containerへcanonical job workspaceはmountせず、exact audioと`.local/models`のprovision済みmodelだけをread-onlyで
+渡し、`--network none`で実行します。captionが十分ならDockerもmodelも不要です。不足区間でmodelが未provisionなら
+暗黙downloadせず停止します。外部APIを使った
 evidence responseのimportにはjobの`allow_external_api`認可が必要です。
 新規CLI jobは`--primary-input`を省略してもmodern videoとして作成されます。
 `--primary-input video|audio|transcript`と、必要な場合だけrepeatableな

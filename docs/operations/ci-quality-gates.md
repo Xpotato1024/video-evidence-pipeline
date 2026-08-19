@@ -61,7 +61,9 @@ capability確認とsynthetic mediaだけを使う実変換integrationを必須�
 - 実メディア、ローカルjob、ユーザー成果物の誤コミット
 - installable packageと`vep` entry point
 - Pydantic modelから生成したcommit済みJSON Schemaのdrift
+- `pyproject.toml`／`uv.lock`から生成したASR requirements lockのdrift
 - `src/`を含むRuff対象とCI command
+- pinned ASR imageの実build、build-contract label、worker起動、faster-whisper／CTranslate2 version、cuBLAS／cuDNN 9 load
 
 ## 4. 実行環境
 
@@ -77,9 +79,10 @@ media integrationは`VEP_REQUIRE_FFMPEG_TESTS=1`でtool不在時のskipを禁止
 manifest、transition、idempotent reuseを検証します。localでtoolがPATHにない場合だけ同testは理由付きskipです。
 同じsynthetic fixtureからcaption-only transcription、provider-neutral fixture responseの明示的test hook、
 `TRANSCRIBED → EVIDENCE_READY`、FTS5 trigramの日本語substring／rebuild／tamper／stale検出まで検証します。
-ASR image／実model／network download／実GPUは通常CIへ要求しません。profile pin、provision manifest、
-network-disabled/read-only container command、device selection、resource-only fallback、provenanceはmock／static testで検証し、
-実container CPU／GPU smokeはcapabilityがある環境のmanual validationとして区別します。
+ASR image buildとmodel不要のruntime-link smokeは通常CIで必須です。large-v3 model／network download／実GPUは
+通常CIへ要求しません。provision manifest、network-disabled/read-only worker command、device selection、
+resource-only fallback、provenanceはmock／static testで検証し、実model CPU／GPU inference smokeはcapabilityがある
+環境のmanual validationとして区別します。
 `tests/test_full_e2e.py`は同じsynthetic dataからstraight pathと1回revision pathを`EXPORTED`まで実行し、
 明示的synthetic human action、approval SHA、byte-exact Markdown、全transition、idempotencyをrequired stepとして
 検証します。approval／exportのfocused testsはtamper、crash recovery、concurrencyを別に検証します。

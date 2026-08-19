@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling==1.31.0"]
 build-backend = "hatchling.build"
 
 [project.scripts]
@@ -23,6 +23,11 @@ vep = "video_evidence_pipeline.cli:app"
 dev = [
   "pytest>=9.1.1,<10",
   "ruff>=0.16.3,<1",
+]
+asr-container = [
+  "faster-whisper==1.2.1",
+  "hatchling==1.31.0",
+  "huggingface-hub==1.28.0",
 ]
 
 [tool.pytest.ini_options]

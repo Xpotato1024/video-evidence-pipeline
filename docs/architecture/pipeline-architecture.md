@@ -164,11 +164,14 @@ fails closed.
 
 transcriptionはnormalized text subtitleのうちcueが存在するstreamだけを候補とし、明示された言語順、
 `official → embedded → sidecar`、default、non-forced、stream indexの順で決定的に1つを選びます。
-caption coverageが設定値以上ならASR modelをloadしません。不足時だけcoverage gapをprovider-neutral
-`AsrBackend`へ渡します。production adapterはrepository profileでpinしたfaster-whisper／CTranslate2、model repository／
-revisionだけをDocker container内でlazy loadします。model provisionだけがnetworkを利用し、inferenceは
-`--pull never --network none`、read-only model mount、`local_files_only`で、image／model download、cloud fallback、
-依存packageの暗黙追加を行いません。caption preferred languageとASR language hintはtranscription configだけが所有し、
+caption coverageが設定値以上ならDockerもASR modelも使用しません。不足時だけhostが計算したcoverage gapをtyped
+`AsrWorkerRequest`としてprovider-neutral `AsrBackend`へ渡します。production adapterはrepository profileでpinした
+faster-whisper／CTranslate2、model repository／revisionだけをASR inference worker container内でlazy loadします。
+JobWorkspace、caption選択、worker response検証、segment統合、canonical write／transition／permissionはhostが所有し、
+canonical job rootをcontainerへmountしません。model provision workerもnoncanonical stagingへdownloadするだけで、hostが
+検証後にpublishします。provisionだけがnetworkを利用し、inferenceは`--pull never --network none`、exact audio／model／
+requestのread-only mount、`local_files_only`で、image／model download、cloud fallback、依存packageの暗黙追加を行いません。
+caption preferred languageとASR language hintはtranscription configだけが所有し、
 assignment output languageへ暗黙依存しないため、raw transcriptはassignment変更から独立します。
 device `auto`はcontainer passthrough、CTranslate2 CUDA、configured compute type、profileのabsolute free-VRAM thresholdを
 すべて満たすGPUだけを選びます。複数GPUはfree VRAM最大（同値はindex最小）です。GPU resource failureだけはautoで
@@ -235,8 +238,10 @@ pending production importは、現在のSkillが同じcontent／eval／identity�
 assignmentのraw length constraintは未指定を保持し、max-onlyならeffective minを`ceil(max × 0.8)`で解決します。
 唯一のcounterはsurrounding whitespaceを除いたPython Unicode code point数で、本文内改行／空白、句読点、ASCII、
 Markdown記法を数え、normalization／markup除去をしません。initial／semantic revision responseを公開する前と、
-human-review／approval／export境界で同じvalidatorを再実行します。length adjustmentは実測値と差分だけを入力にし、
-独立した有限`length_adjustment_count`を使用して`semantic_revision_count`を消費しません。
+human-review／approval／export境界で同じvalidatorを再実行します。initial failure後のcorrection responseだけを
+`maximum_adjustments`へ数え、失敗candidate bytes、count、delta、fingerprintをprivate immutable artifact／ledgerへ
+束縛します。最後の許可responseが成功すれば受理し、exhaustionはtyped reason manifestを伴ってinitial authoringまたは
+semantic revisionから`BLOCKED`へ遷移します。length adjustmentは`semantic_revision_count`を消費しません。
 
 ### 2.6 Independent Audit
 

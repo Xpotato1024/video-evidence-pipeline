@@ -12,10 +12,13 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
+from test_media_normalization import _synthetic_source
 from typer.testing import CliRunner
 
 import video_evidence_pipeline.application as application_module
+import video_evidence_pipeline.transcription.container as container_module
 import video_evidence_pipeline.transcription.faster_whisper as faster_whisper_module
+import video_evidence_pipeline.transcription.provisioning as provisioning_module
 from video_evidence_pipeline.application import (
     _import_evidence_fixture,
     acquire_job,
@@ -119,6 +122,7 @@ from video_evidence_pipeline.transcription.faster_whisper import FasterWhisperBa
 from video_evidence_pipeline.transcription.pipeline import (
     TranscriptionResult,
     _intervals,
+    backend_identity_fingerprint,
     load_transcription_result,
     prepare_transcript,
     publish_transcript,
@@ -238,6 +242,7 @@ def _application_transcribed_job(
     *,
     min_chars: int | None = None,
     max_chars: int | None = None,
+    maximum_length_adjustments: int = 3,
 ) -> tuple[JobWorkspace, TranscriptionResult]:
     repository = tmp_path / "r"
     repository.mkdir()
@@ -253,6 +258,7 @@ def _application_transcribed_job(
         requirements=["Identify the key event", "Preserve unresolved uncertainty"],
         min_chars=min_chars,
         max_chars=max_chars,
+        maximum_length_adjustments=maximum_length_adjustments,
     )
     authorize_job(
         workspace.root,
@@ -574,6 +580,84 @@ def test_subtitle_only_preserves_raw_and_needs_no_asr_or_model(tmp_path: Path) -
     assert [item.source for item in prepared.backends] == [TranscriptSource.NORMALIZED_SUBTITLE]
 
 
+def test_public_transcribe_full_caption_does_not_probe_docker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = tmp_path / "caption-cli"
+    repository.mkdir()
+    source = _synthetic_captioned_source(repository)
+    workspace, _job_value = initialize_job(
+        repository,
+        job_id="caption-without-docker",
+        source_kind=SourceKind.LOCAL_FILE,
+        source=str(source),
+        task_type="report",
+        language="en",
+        output_format="markdown",
+    )
+    authorize_job(
+        workspace.root,
+        confirm=True,
+        basis="authorized synthetic caption-only fixture",
+        allow_local_processing=True,
+        allow_external_api=False,
+        confirmer_identity="pytest",
+    )
+    acquire_job(workspace.root)
+    normalize_job(workspace.root)
+    monkeypatch.setattr(
+        container_module,
+        "_docker",
+        lambda: pytest.fail("caption-only transcription must not probe Docker"),
+    )
+
+    result = CliRunner().invoke(app, ["transcribe", str(workspace.root), "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["state"] == JobState.TRANSCRIBED.value
+    assert not repository.joinpath(".local/models").exists()
+
+
+def test_public_transcribe_asr_required_reports_missing_docker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = tmp_path / "asr-cli"
+    repository.mkdir()
+    shutil.copytree(Path(__file__).parents[1] / "config", repository / "config")
+    source = _synthetic_source(repository, audio=True, subtitle=False)
+    workspace, _job_value = initialize_job(
+        repository,
+        job_id="asr-without-docker",
+        source_kind=SourceKind.LOCAL_FILE,
+        source=str(source),
+        task_type="report",
+        language="en",
+        output_format="markdown",
+    )
+    authorize_job(
+        workspace.root,
+        confirm=True,
+        basis="authorized synthetic ASR fixture",
+        allow_local_processing=True,
+        allow_external_api=False,
+        confirmer_identity="pytest",
+    )
+    acquire_job(workspace.root)
+    normalize_job(workspace.root)
+    original_which = container_module.shutil.which
+    monkeypatch.setattr(
+        container_module.shutil,
+        "which",
+        lambda executable: None if executable == "docker" else original_which(executable),
+    )
+
+    result = CliRunner().invoke(app, ["transcribe", str(workspace.root), "--json"])
+
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "ASR_CONTAINER_RUNTIME_UNAVAILABLE"
+
+
 def test_subtitle_selection_is_language_then_provenance_default_forced_and_index(
     tmp_path: Path,
 ) -> None:
@@ -739,6 +823,31 @@ def test_asr_language_is_explicit_source_config_not_assignment_output_language(
     assert backend.languages == ["en"]
 
 
+def test_profiled_asr_manifest_rejects_legacy_incomplete_backend(tmp_path: Path) -> None:
+    job = _job()
+    workspace = _workspace(tmp_path, job)
+    media = _media_manifest(workspace, job, audio=True)
+    prepared = prepare_transcript(workspace, job, media, TranscriptionConfig(), _FakeAsr())
+    payload = _published_manifest_stub(job, prepared).model_dump(mode="json")
+    payload["configuration"]["asr_profile"] = DEFAULT_ASR_PROFILE
+
+    with pytest.raises(ValidationError):
+        TranscriptManifest.model_validate(payload)
+
+    pre_46 = json.loads(
+        (
+            Path(__file__).parent
+            / "fixtures"
+            / "legacy-transcription"
+            / "asr"
+            / "transcript-manifest.json"
+        ).read_bytes()
+    )
+    pre_46["configuration"]["asr_profile"] = DEFAULT_ASR_PROFILE
+    with pytest.raises(ValidationError):
+        TranscriptManifest.model_validate(pre_46)
+
+
 def test_pipeline_refreshes_backend_identity_after_inference_fallback(tmp_path: Path) -> None:
     job = _job()
     workspace = _workspace(tmp_path, job)
@@ -750,8 +859,8 @@ def test_pipeline_refreshes_backend_identity_after_inference_fallback(tmp_path: 
     assert prepared.backends[0].selected_device == "cpu"
     assert prepared.backends[0].fallback is True
     assert prepared.backends[0].fallback_reason == "CUDA out of memory"
-    assert prepared.segments[0].lineage.backend_identity_fingerprint == fingerprint(
-        prepared.backends[0]
+    assert prepared.segments[0].lineage.backend_identity_fingerprint == (
+        backend_identity_fingerprint(prepared.backends[0])
     )
 
 
@@ -1068,12 +1177,16 @@ def test_profiled_inference_gpu_oom_falls_back_once_and_records_provenance(
     assert identity.model_revision == profile.model_revision
     assert identity.device_policy == "auto"
     assert identity.selected_device == "cpu"
-    assert identity.gpu_index == 0
-    assert identity.gpu_name == "synthetic-gpu"
-    assert identity.free_vram_at_selection_mib == 6144
+    assert identity.gpu_index is None
+    assert identity.gpu_name is None
+    assert identity.candidate_gpu_index == 0
+    assert identity.candidate_gpu_name == "synthetic-gpu"
+    assert identity.free_vram_at_selection_mib is None
+    assert identity.candidate_free_vram_mib == 6144
     assert identity.compute_type == "int8"
     assert identity.container_image == profile.container_image
     assert identity.fallback is True
+    assert identity.selection_reason == "gpu_resource_fallback"
     assert identity.fallback_from == "cuda"
     assert identity.fallback_reason == "CUDA out of memory"
 
@@ -1105,7 +1218,38 @@ def test_profiled_runtime_filters_compute_support_per_gpu_before_selection(
     assert calls[0]["device"] == "cuda"
     assert calls[0]["device_index"] == 1
     assert identity.gpu_index == 1
-    assert identity.gpu_name == "supported-gpu"
+
+
+def test_profiled_explicit_cpu_skips_gpu_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    faster_whisper_module._MODEL_FINGERPRINT_CACHE.clear()
+    _install_fake_faster_whisper(
+        monkeypatch,
+        cuda_count=1,
+        supported={"cuda": {"float16"}, "cpu": {"int8"}},
+        engine_version="1.2.1",
+        runtime_version="4.8.1",
+    )
+    probes = 0
+
+    def probe() -> tuple[GpuDevice, ...]:
+        nonlocal probes
+        probes += 1
+        return (GpuDevice(0, "gpu", 8192, 7000),)
+
+    monkeypatch.setattr(faster_whisper_module, "probe_nvidia_gpus", probe)
+    _profile_id, profile = resolve_asr_profile(Path.cwd(), DEFAULT_ASR_PROFILE)
+    identity = FasterWhisperBackend(
+        _complete_model(tmp_path),
+        device="cpu",
+        profile=profile,
+    ).identity()
+    assert probes == 0
+    assert identity.selected_device == "cpu"
+    assert identity.selection_reason == "explicit_cpu"
+    assert identity.gpu_name is None
+    assert identity.candidate_gpu_name is None
 
 
 def test_profiled_runtime_rejects_installed_version_drift(
@@ -1269,14 +1413,14 @@ def test_faster_whisper_model_hash_is_reused_within_process(
         supported={"cuda": set(), "cpu": {"int8"}},
     )
     model = _complete_model(tmp_path)
-    original = faster_whisper_module.sha256_file
+    original = provisioning_module.sha256_file
     hashed: list[Path] = []
 
     def counted(path: Path) -> str:
         hashed.append(path)
         return original(path)
 
-    monkeypatch.setattr(faster_whisper_module, "sha256_file", counted)
+    monkeypatch.setattr(provisioning_module, "sha256_file", counted)
 
     FasterWhisperBackend(model).identity()
     FasterWhisperBackend(model).identity()

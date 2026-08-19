@@ -5,6 +5,7 @@ import hashlib
 import re
 import subprocess
 import sys
+import tempfile
 import tomllib
 from dataclasses import dataclass
 from datetime import datetime
@@ -134,6 +135,8 @@ RUNTIME_REQUIRED_PATHS = {
     "src/video_evidence_pipeline/schemas/generation.py",
 }
 CI_REQUIRED_COMMANDS = {
+    "uv run vep asr image-build --repository-root . --json",
+    "uv run vep asr image-smoke --repository-root . --json",
     "uv run ruff check src scripts tests",
     "uv run ruff format --check src scripts tests",
     "uv run pytest -q tests/test_full_e2e.py",
@@ -184,9 +187,58 @@ class RepositoryValidator:
         self._validate_links()
         self._validate_workflows()
         self._validate_runtime_contracts()
+        self._validate_asr_lock()
         self._validate_forbidden_artifacts()
         self._validate_secrets()
         return sorted(set(self.findings))
+
+    def _validate_asr_lock(self) -> None:
+        if "config/asr-profiles.yaml" not in self.tracked_files:
+            return
+        lock_path = self.root / "containers" / "asr" / "requirements.lock"
+        if not lock_path.is_file():
+            self.add(
+                "ASR_LOCK_MISSING", lock_path.relative_to(self.root), "generated lock is missing"
+            )
+            return
+        command = [
+            "uv",
+            "export",
+            "--locked",
+            "--group",
+            "asr-container",
+            "--no-dev",
+            "--no-emit-project",
+            "--no-annotate",
+            "--no-hashes",
+            "--no-header",
+            "--format",
+            "requirements-txt",
+        ]
+        try:
+            with tempfile.TemporaryDirectory(prefix="vep-asr-lock-") as temporary:
+                generated = Path(temporary) / "requirements.lock"
+                subprocess.run(
+                    [*command, "--output-file", str(generated)],
+                    cwd=self.root,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    timeout=120,
+                )
+                if generated.read_bytes() != lock_path.read_bytes():
+                    self.add(
+                        "ASR_LOCK_DRIFT",
+                        lock_path.relative_to(self.root),
+                        "run the documented uv export command",
+                    )
+        except (OSError, subprocess.SubprocessError):
+            self.add(
+                "ASR_LOCK_CHECK_FAILED",
+                lock_path.relative_to(self.root),
+                "uv export could not validate the generated lock",
+            )
 
     def _load_yaml(self, relative: str) -> Any:
         path = self.root / relative

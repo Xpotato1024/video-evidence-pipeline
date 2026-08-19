@@ -20,6 +20,27 @@
   "$id": "https://schemas.video-evidence-pipeline.local/v1/transcription-config.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "asr_profile": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "asr_profile"
+        ]
+      },
+      "then": {
+        "properties": {
+          "asr_compute_type": {
+            "const": "auto"
+          }
+        }
+      }
+    }
+  ],
   "properties": {
     "asr_beam_size": {
       "const": 5,

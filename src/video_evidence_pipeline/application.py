@@ -34,11 +34,13 @@ from video_evidence_pipeline.authoring.pipeline import (
     load_authoring_request,
     load_draft,
     load_human_review,
+    load_length_block,
     load_revision,
     load_revision_request,
     prepare_audit_request,
     prepare_authoring_request,
     prepare_revision_request,
+    publish_length_block,
     read_audit_response,
     read_authoring_response,
     read_revision_response,
@@ -459,6 +461,8 @@ def _recovery_parent(
     raw_artifact = verify_acquired_bundle(workspace, job)
     media = load_normalization_result(workspace, job, raw_artifact)
     transcript = load_transcription_result(workspace, job, media.media_manifest)
+    if workspace.safe_path("manifests/authoring/length-block.json").exists():
+        load_length_block(workspace, job, deep=False)
     source_manifest = read_json_model(
         workspace.source_manifest_json,
         SourceManifest,
@@ -711,25 +715,29 @@ def _validate_job_unmapped(path: Path, *, deep: bool = False) -> dict[str, Any]:
         JobState.AUDITED,
         JobState.REVISION_REQUIRED,
         JobState.HUMAN_REVIEW_READY,
-        JobState.BLOCKED,
         JobState.HUMAN_APPROVED,
         JobState.EXPORTED,
     }
-    refinement_states = {JobState.TRANSCRIPT_REFINED, JobState.EVIDENCE_READY, *authoring_states}
+    post_evidence_states = {*authoring_states, JobState.BLOCKED}
+    refinement_states = {
+        JobState.TRANSCRIPT_REFINED,
+        JobState.EVIDENCE_READY,
+        *post_evidence_states,
+    }
     acquired_states = {
         JobState.ACQUIRED,
         JobState.NORMALIZED,
         JobState.TRANSCRIBED,
         JobState.TRANSCRIPT_REFINED,
         JobState.EVIDENCE_READY,
-        *authoring_states,
+        *post_evidence_states,
     }
     normalized_states = {
         JobState.NORMALIZED,
         JobState.TRANSCRIBED,
         JobState.TRANSCRIPT_REFINED,
         JobState.EVIDENCE_READY,
-        *authoring_states,
+        *post_evidence_states,
     }
     if state in acquired_states:
         raw_artifact = verify_acquired_bundle(workspace, job, deep=deep)
@@ -745,7 +753,7 @@ def _validate_job_unmapped(path: Path, *, deep: bool = False) -> dict[str, Any]:
                     evidence_manifest, evidence_segments = _evidence_transcript_inputs(
                         workspace, job, media_manifest, transcription, deep=deep
                     )
-                if state in {JobState.EVIDENCE_READY, *authoring_states}:
+                if state in {JobState.EVIDENCE_READY, *post_evidence_states}:
                     load_evidence_result(
                         workspace,
                         job,
@@ -754,7 +762,19 @@ def _validate_job_unmapped(path: Path, *, deep: bool = False) -> dict[str, Any]:
                         evidence_segments,
                         deep=deep,
                     )
-                    if state in authoring_states:
+                    if (
+                        state is JobState.BLOCKED
+                        and workspace.safe_path("manifests/authoring/length-block.json").exists()
+                    ):
+                        length_block = load_length_block(workspace, job, deep=deep)
+                        if length_block.blocked_stage == "semantic_revision":
+                            _load_authoring_state_integrity(
+                                workspace,
+                                job,
+                                JobState.REVISION_REQUIRED,
+                                deep=deep,
+                            )
+                    elif state in authoring_states or state is JobState.BLOCKED:
                         try:
                             fixed, history, human_review = _load_authoring_state_integrity(
                                 workspace, job, state, deep=deep
@@ -2206,6 +2226,35 @@ def _import_authoring_job_locked(
                 trigger="author.import",
             )
             return staged
+    except VepError as exc:
+        operation_failed = True
+        if exc.code == "LENGTH_ADJUSTMENT_EXHAUSTED":
+            with exclusive_append_lock(workspace.transitions_jsonl):
+                workspace, current_job, transitions, current_state = _load_context(path)
+                current_authorization = _authorization(workspace)
+                if (
+                    current_state is not JobState.EVIDENCE_READY
+                    or transitions[-1].sequence != snapshot_sequence
+                    or current_job != snapshot_job
+                    or current_authorization != snapshot_authorization
+                ):
+                    raise state_error(
+                        "AUTHORING_SNAPSHOT_STALE", "job changed during authoring"
+                    ) from None
+                publish_length_block(
+                    workspace,
+                    current_job,
+                    version="v001",
+                    blocked_stage="initial_authoring",
+                )
+                _append_transition_locked(
+                    workspace,
+                    current_job,
+                    from_state=JobState.EVIDENCE_READY,
+                    to_state=JobState.BLOCKED,
+                    trigger="author.length-exhausted",
+                )
+        raise
     except Exception:
         operation_failed = True
         raise
@@ -2760,6 +2809,35 @@ def _import_revision_job_locked(
                 trigger="revision.import",
             )
             return staged
+    except VepError as exc:
+        operation_failed = True
+        if exc.code == "LENGTH_ADJUSTMENT_EXHAUSTED":
+            with exclusive_append_lock(workspace.transitions_jsonl):
+                workspace, current_job, transitions, current_state = _load_context(path)
+                current_authorization = _authorization(workspace)
+                if (
+                    current_state is not JobState.REVISION_REQUIRED
+                    or transitions[-1].sequence != snapshot_sequence
+                    or current_job != snapshot_job
+                    or current_authorization != snapshot_authorization
+                ):
+                    raise state_error(
+                        "REVISION_SNAPSHOT_STALE", "job changed during revision"
+                    ) from None
+                publish_length_block(
+                    workspace,
+                    current_job,
+                    version=next_version,
+                    blocked_stage="semantic_revision",
+                )
+                _append_transition_locked(
+                    workspace,
+                    current_job,
+                    from_state=JobState.REVISION_REQUIRED,
+                    to_state=JobState.BLOCKED,
+                    trigger="revision.length-exhausted",
+                )
+        raise
     except Exception:
         operation_failed = True
         raise

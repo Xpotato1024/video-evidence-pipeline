@@ -35,6 +35,7 @@ from video_evidence_pipeline.application import (
     prepare_authoring_job,
     prepare_evidence_job,
     prepare_revision_job,
+    recover_job,
     validate_job,
 )
 from video_evidence_pipeline.authoring.pipeline import (
@@ -42,6 +43,7 @@ from video_evidence_pipeline.authoring.pipeline import (
     cleanup_attempt,
     create_attempt_directory,
     load_authoring_request,
+    load_length_block,
     prepare_authoring_request,
     stage_audit,
 )
@@ -113,12 +115,14 @@ def _evidence_ready_job(
     *,
     min_chars: int | None = None,
     max_chars: int | None = None,
+    maximum_length_adjustments: int = 3,
 ):
     workspace, _transcription = _application_transcribed_job(
         tmp_path,
         job_id,
         min_chars=min_chars,
         max_chars=max_chars,
+        maximum_length_adjustments=maximum_length_adjustments,
     )
     repository_root = workspace.jobs_root.parent.parent
     shutil.copytree(Path(__file__).parents[1] / ".agents", repository_root / ".agents")
@@ -882,12 +886,14 @@ def _publish_initial_draft(
     *,
     min_chars: int | None = None,
     max_chars: int | None = None,
+    maximum_length_adjustments: int = 3,
 ):
     workspace = _evidence_ready_job(
         tmp_path,
         job_id,
         min_chars=min_chars,
         max_chars=max_chars,
+        maximum_length_adjustments=maximum_length_adjustments,
     )
     request = prepare_authoring_job(workspace.root, "draft-video-report").request
     response_path = tmp_path / f"{job_id}-author.json"
@@ -1015,6 +1021,146 @@ def test_semantic_revision_reapplies_length_gate_without_spending_revision_budge
     assert not workspace.safe_path("manifests/authoring/draft-v002.json").exists()
     assert initial.manifest.semantic_revision_count == 0
     assert initial.manifest.length_adjustment_count == 0
+
+
+def test_initial_length_exhaustion_is_durable_blocked_and_recoverable(tmp_path: Path) -> None:
+    workspace = _evidence_ready_job(
+        tmp_path,
+        "length-initial-block",
+        min_chars=50,
+        max_chars=55,
+        maximum_length_adjustments=1,
+    )
+    request = prepare_authoring_job(workspace.root, "draft-video-report").request
+    first = _author_response(request)
+    first_path = tmp_path / "length-initial-first.json"
+    _write_model(first_path, first)
+    with pytest.raises(VepError) as required:
+        _import_authoring_fixture(workspace.root, first_path)
+    assert required.value.code == "LENGTH_ADJUSTMENT_REQUIRED"
+    adjustment_request = json.loads(
+        workspace.safe_path("authoring/length/v001-request.json").read_text(encoding="utf-8")
+    )
+    assert adjustment_request["adjustment_number"] == 1
+    assert adjustment_request["adjustments_remaining_after_this"] == 0
+    assert adjustment_request["candidate_artifact"]["artifact_type"] == (
+        "failed_length_candidate_response"
+    )
+
+    second = _author_response(request, context_id="author-context-2")
+    second_path = tmp_path / "length-initial-second.json"
+    _write_model(second_path, second)
+    with pytest.raises(VepError) as exhausted:
+        _import_authoring_fixture(workspace.root, second_path)
+    assert exhausted.value.code == "LENGTH_ADJUSTMENT_EXHAUSTED"
+    request_path = workspace.safe_path("authoring/length/v001-request.json")
+    request_bytes = request_path.read_bytes()
+    request_path.unlink()
+    with pytest.raises(VepError) as missing_request:
+        validate_job(workspace.root)
+    assert missing_request.value.code == "LENGTH_ADJUSTMENT_REQUEST_INVALID"
+    request_path.write_bytes(request_bytes)
+    attempts_path = workspace.safe_path("authoring/length/v001-attempts.jsonl")
+    attempts_bytes = attempts_path.read_bytes()
+    attempts_path.write_bytes(attempts_bytes.splitlines(keepends=True)[0])
+    with pytest.raises(VepError) as truncated_ledger:
+        validate_job(workspace.root, deep=True)
+    assert truncated_ledger.value.code == "LENGTH_BLOCK_INVALID"
+    attempts_path.write_bytes(attempts_bytes)
+    assert validate_job(workspace.root)["state"] == JobState.BLOCKED.value
+    assert validate_job(workspace.root, deep=True)["state"] == JobState.BLOCKED.value
+    block = load_length_block(workspace, load_job_yaml(workspace.job_yaml), deep=True)
+    assert block.blocked_stage == "initial_authoring"
+    assert block.maximum_adjustments == 1
+    assert block.final_actual_chars == len(second.draft_markdown.strip())
+    assert block.final_candidate_artifact.artifact_type == "failed_length_candidate_response"
+    assert not workspace.safe_path("manifests/authoring/draft-v001.json").exists()
+
+    child = recover_job(
+        workspace.root,
+        "length-initial-child",
+        confirm=True,
+        basis="recover from durable initial length exhaustion",
+    ).workspace
+    assert validate_job(child.root)["state"] == JobState.TRANSCRIBED.value
+    assert validate_job(child.root, deep=True)["state"] == JobState.TRANSCRIBED.value
+
+
+def test_successful_length_adjustment_ledger_is_required_by_deep_validation(
+    tmp_path: Path,
+) -> None:
+    workspace = _evidence_ready_job(
+        tmp_path,
+        "length-success-ledger",
+        min_chars=50,
+        max_chars=55,
+        maximum_length_adjustments=2,
+    )
+    request = prepare_authoring_job(workspace.root, "draft-video-report").request
+    first = _author_response(request)
+    first_path = tmp_path / "length-success-first.json"
+    _write_model(first_path, first)
+    with pytest.raises(VepError) as required:
+        _import_authoring_fixture(workspace.root, first_path)
+    assert required.value.code == "LENGTH_ADJUSTMENT_REQUIRED"
+    second = _author_response(request, context_id="length-success-context-2").model_copy(
+        update={"draft_markdown": first.draft_markdown + "123456789012"}
+    )
+    second_path = tmp_path / "length-success-second.json"
+    _write_model(second_path, second)
+    published = _import_authoring_fixture(workspace.root, second_path)
+    assert published.manifest.length_adjustment_count == 1
+    assert validate_job(workspace.root, deep=True)["state"] == JobState.DRAFTED.value
+
+    attempts_path = workspace.safe_path("authoring/length/v001-attempts.jsonl")
+    request_path = workspace.safe_path("authoring/length/v001-request.json")
+    candidate = next(workspace.safe_path("authoring/length/v001").rglob("candidate-response.json"))
+    attempts_path.unlink()
+    request_path.unlink()
+    candidate.unlink()
+    with pytest.raises(VepError) as missing_ledger:
+        validate_job(workspace.root, deep=True)
+    assert missing_ledger.value.code == "DRAFT_BUNDLE_INVALID"
+
+
+def test_revision_length_exhaustion_blocks_without_spending_semantic_budget(
+    tmp_path: Path,
+) -> None:
+    workspace, initial = _publish_initial_draft(
+        tmp_path,
+        "length-revision-block",
+        min_chars=38,
+        max_chars=42,
+        maximum_length_adjustments=1,
+    )
+    _publish_audit(
+        tmp_path,
+        workspace,
+        context_id="length-block-audit",
+        material=True,
+    )
+    request = prepare_revision_job(workspace.root, "revise-from-audit").request
+    first = _revision_response(request, context_id="length-block-revision-1")
+    first_path = tmp_path / "length-revision-first.json"
+    _write_model(first_path, first)
+    with pytest.raises(VepError) as required:
+        _import_revision_fixture(workspace.root, first_path)
+    assert required.value.code == "LENGTH_ADJUSTMENT_REQUIRED"
+    assert validate_job(workspace.root)["state"] == JobState.REVISION_REQUIRED.value
+
+    second = _revision_response(request, context_id="length-block-revision-2")
+    second_path = tmp_path / "length-revision-second.json"
+    _write_model(second_path, second)
+    with pytest.raises(VepError) as exhausted:
+        _import_revision_fixture(workspace.root, second_path)
+    assert exhausted.value.code == "LENGTH_ADJUSTMENT_EXHAUSTED"
+    assert validate_job(workspace.root)["state"] == JobState.BLOCKED.value
+    assert validate_job(workspace.root, deep=True)["state"] == JobState.BLOCKED.value
+    block = load_length_block(workspace, load_job_yaml(workspace.job_yaml), deep=True)
+    assert block.blocked_stage == "semantic_revision"
+    assert block.target_draft_version == "v002"
+    assert initial.manifest.semantic_revision_count == 0
+    assert not workspace.safe_path("manifests/authoring/draft-v002.json").exists()
 
 
 def test_second_revision_material_audit_blocks_without_v004(tmp_path: Path) -> None:

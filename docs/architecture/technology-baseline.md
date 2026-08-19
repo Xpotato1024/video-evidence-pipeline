@@ -65,10 +65,13 @@ related_documents: ["VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-TRUST",
 | DOCX／Typst／Pandoc／HTML | export adapters | optional |
 
 network acquisition、media normalization、transcription、semantic evidence exchange、private search cacheは実装済みです。
-ASR Python dependencyはhost環境へ追加せず、digest固定CUDA base、`containers/asr/requirements.lock`とDockerfileで
-exact pinします。build-contract labelへDockerfile／lock／VEP source／profileを束縛し、engine／runtime versionを
+ASR Python dependencyはhost環境へ追加せず、digest固定CUDA 12.6.3／cuDNN 9 runtime base、
+`containers/asr/requirements.lock`とDockerfileでruntime／build dependencyをexact pinします。lockは
+`pyproject.toml`／`uv.lock`の`asr-container` groupから生成し、package installはbuild isolationを無効化します。
+build-contract labelへDockerfile／lock／VEP source／profileを束縛し、engine／runtime versionを
 実行時にprofileと照合します。model profileはrepository config、取得済みmodelは`.local/models`、inferenceは
-immutable image IDを`--pull never --network none`で起動するcontainerを正本とします。
+immutable image IDを`--pull never --network none`で起動するnarrow ASR workerを正本とします。pipelineとcanonical
+workspaceはhost processが所有します。
 通常CLIは任意model名／directory／compute typeを受け付けず、package／model不在をstructured errorとして返します。
 cloud ASR／vision routeは実装していません。具体dependency versionは
 `pyproject.toml`と`uv.lock`を正本とし、yt-dlpのruntime self-updateは許可しません。SSRF防御の接続先IP pinningは

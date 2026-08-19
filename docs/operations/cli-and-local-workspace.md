@@ -292,11 +292,12 @@ FFmpegを起動せず、raw artifactへ束縛したno-media normalization manife
 `official → embedded → sidecar`、default、non-forced、stream indexで決定的に選び、coverageが十分なら
 subtitleだけで`TRANSCRIBED`へ進みます。不足区間がある場合だけspeech audioをASRへ渡します。
 
-public commandは[`asr-runtime.md`](asr-runtime.md)のrepository-owned Docker imageだけを起動します。
+public commandのhost processがcaption selectionとcanonical workspace publicationを行い、不足区間がある場合だけ
+[`asr-runtime.md`](asr-runtime.md)のrepository-owned ASR worker imageを起動します。
 imageは`vep asr image-build`、pin済みmodelはnetworkを許可する`vep asr model-provision`で明示準備します。
-inferenceはbuild-contract照合済みimmutable image IDを`--pull never --network none`で起動し、config／model
-read-only mount、`local_files_only`です。未provision modelを
-downloadせずstructured errorで停止します。captionだけのjobはmodelをloadしません。
+inferenceはbuild-contract照合済みimmutable image IDを`--pull never --network none`で起動し、exact audio／model／
+typed requestだけをread-only mount、`local_files_only`です。canonical job workspaceをcontainerへmountしません。
+未provision modelをdownloadせずstructured errorで停止します。captionだけのjobはDockerもmodelも使用しません。
 
 `--preferred-language`と`--asr-language`はsource transcription configであり、assignmentの成果物languageを
 暗黙fallbackにしません。これによりraw transcript selection／ASRはassignment変更から独立します。
@@ -305,7 +306,7 @@ device `auto`はcontainer passthrough、CTranslate2 CUDA、configured compute ty
 thresholdをすべて満たすGPUだけを候補にし、free VRAM最大（同値はindex最小）を固定します。標準profileは
 6144 MiB以上でGPU／`float16`、それ以外はCPU／`int8`です。GPU resource failureだけはautoでCPUへ1回fallbackし、
 unrelated failureとexplicit CUDAはfallbackしません。engine／runtime／model revision／storage identity、GPUとVRAM、
-compute、container image／digest、fallbackをbackend identityへ記録します。
+compute、container image／digest、selection reason、candidate／selected metrics、fallbackをbackend identityへ記録します。
 segmentは連続ID、integer millisecond、gap／overlap、source／backend lineageを検証します。
 `raw_text`はadapter出力を保持し、`normalized_text`はNFKC＋空白正規化後の値です。subtitle source markupの
 raw preservationとは別契約です。backend metricを校正済み確率として表示しません。
@@ -357,8 +358,10 @@ revision／human-review／approval／export manifest、ledger、lineageを検証
 assignmentにlength constraintがあれば、author response本文はcanonical Python counterで検証してから公開します。
 counterはsurrounding whitespaceを除去後のPython Unicode code point数で、本文内改行／空白、句読点、ASCII、
 Markdown記法をすべて数え、Unicode normalizationやmarkup除去はしません。失敗時は実測値、range、差分だけを
-length adjustment入力へ渡し、LLMに計数させません。attemptは`authoring/length`へ記録し、configured上限で
-`LENGTH_ADJUSTMENT_EXHAUSTED`になります。
+machine-readable length adjustment requestへ渡し、LLMに計数させません。initial failureはadjustment数へ含めず、
+`maximum_adjustments = N`はその後のcorrection responseをN回許可します。各失敗candidateはprivate content-addressed
+artifactとしてledgerへ束縛し、同一response fingerprintのretryはbudgetを消費しません。最後に許可されたcorrectionが
+成功すれば受理し、最後も失敗した場合はtyped length-block manifestを保存して`EVIDENCE_READY → BLOCKED`になります。
 
 `vep audit prepare JOB --skill SKILL`はtarget draft本文とfixed evidenceだけを固定し、author claim／run／context／prompt
 history／private reasoningを物理serializationから除外します。`vep audit import`は過去の全author／reviser／auditor
@@ -371,7 +374,8 @@ human-review bundleを作成して`HUMAN_REVIEW_READY`、あれば`REVISION_REQU
 だけを許可します。2回修正後の監査にもP0／P1が残れば`BLOCKED`とし、`v004`を生成しません。
 ACCEPTのevidenceは対応findingと完全一致し、各hunkはそのfindingのdraft spanへ帰属する必要があります。
 revision responseにも同じlength gateを再適用します。length attemptは`length_adjustment_count`だけを増やし、
-`semantic_revision_count`を消費しません。human-review package作成、approval、exportでも同じcanonical validatorを
+`semantic_revision_count`を消費しません。exhaustionは`REVISION_REQUIRED → BLOCKED`となり、どちらのlength-blockも
+normal／deep validationとpre-semantic recoveryの対象です。human-review package作成、approval、exportでも同じcanonical validatorを
 再実行し、範囲外の成果物を後段へ進めません。
 
 provider-neutralな`external_exchange` public author／audit／revision production importは対応Skillの

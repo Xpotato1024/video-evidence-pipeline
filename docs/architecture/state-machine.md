@@ -73,6 +73,7 @@ stateDiagram-v2
     EVIDENCE_READY --> BLOCKED
     DRAFTED --> BLOCKED
     AUDITED --> BLOCKED
+    REVISION_REQUIRED --> BLOCKED
 
     CREATED --> CANCELLED
     AUTHORIZED --> CANCELLED
@@ -144,6 +145,7 @@ stateDiagram-v2
 - repository-local Skillが`active`でないproduction importを拒否する
 - effective length constraintがある場合、canonical character countがrange内である
 - range外attemptはsemantic revisionと別の有限length adjustment ledgerへ記録する
+- initial failure後のconfigured correction回数を使い切った場合、typed length-blockを保存して`EVIDENCE_READY → BLOCKED`
 
 ### `DRAFTED → AUDITED`
 
@@ -162,6 +164,7 @@ stateDiagram-v2
 - `v002`／`v003`をimmutableに公開し、predecessor、audit、request、response、全fresh contextをlineageへ固定
 - revision countは最大2回で、上限後もP0／P1があれば`AUDITED → BLOCKED`とし`v004`を作らない
 - revised draftへ同じlength gateを適用し、失敗したlength attemptはsemantic revision countを増やさない
+- correction回数を使い切った場合、typed length-blockを保存して`REVISION_REQUIRED → BLOCKED`
 
 ### `AUDITED → HUMAN_REVIEW_READY`
 

@@ -8,6 +8,7 @@ from typing import Literal, Self
 from pydantic import Field, model_validator
 
 from video_evidence_pipeline.domain import StrictModel, UtcDateTime
+from video_evidence_pipeline.domain.artifacts import ArtifactRef
 from video_evidence_pipeline.domain.identifiers import JobId, Sha256
 
 
@@ -81,8 +82,9 @@ class CharacterLengthAdjustmentAttempt(StrictModel):
     schema_version: Literal["1.0"] = "1.0"
     job_id: JobId
     target_draft_version: str = Field(pattern=r"^v[0-9]{3}$")
-    attempt_number: int = Field(ge=1, le=10)
+    correction_number: int = Field(ge=0, le=10)
     response_fingerprint: Sha256
+    candidate_artifact: ArtifactRef
     check: CharacterLengthCheck
     instruction: Literal[
         "Revise only to fit the supplied character range; do not estimate or count characters."
@@ -93,9 +95,45 @@ class CharacterLengthAdjustmentAttempt(StrictModel):
     def failed_check_is_required(self) -> Self:
         if self.check.passed:
             raise ValueError("length adjustment attempt requires a failed check")
-        if self.attempt_number > self.check.effective.maximum_adjustments:
+        if self.correction_number > self.check.effective.maximum_adjustments:
             raise ValueError("length adjustment attempt exceeds its configured limit")
         return self
+
+
+class CharacterLengthAdjustmentRequest(StrictModel):
+    schema_version: Literal["1.0"] = "1.0"
+    job_id: JobId
+    target_draft_version: str = Field(pattern=r"^v[0-9]{3}$")
+    actual_chars: int = Field(ge=0, le=4_000_000)
+    effective_min_chars: int | None = Field(default=None, ge=0, le=4_000_000)
+    effective_max_chars: int | None = Field(default=None, ge=1, le=4_000_000)
+    below_minimum_by: int = Field(ge=0, le=4_000_000)
+    over_maximum_by: int = Field(ge=0, le=4_000_000)
+    adjustment_number: int = Field(ge=1, le=10)
+    adjustments_remaining_after_this: int = Field(ge=0, le=9)
+    candidate_fingerprint: Sha256
+    candidate_artifact: ArtifactRef
+    instruction: Literal[
+        "Revise only to fit the supplied character range; do not estimate or count characters."
+    ] = "Revise only to fit the supplied character range; do not estimate or count characters."
+    created_at: UtcDateTime
+
+
+class LengthBlockManifest(StrictModel):
+    schema_version: Literal["1.0"] = "1.0"
+    job_id: JobId
+    blocked_stage: Literal["initial_authoring", "semantic_revision"]
+    target_draft_version: str = Field(pattern=r"^v[0-9]{3}$")
+    effective_min_chars: int | None = Field(default=None, ge=0, le=4_000_000)
+    effective_max_chars: int | None = Field(default=None, ge=1, le=4_000_000)
+    maximum_adjustments: int = Field(ge=1, le=10)
+    final_actual_chars: int = Field(ge=0, le=4_000_000)
+    final_below_minimum_by: int = Field(ge=0, le=4_000_000)
+    final_over_maximum_by: int = Field(ge=0, le=4_000_000)
+    final_candidate_fingerprint: Sha256
+    final_candidate_artifact: ArtifactRef
+    reason_code: Literal["length_adjustment_exhausted"] = "length_adjustment_exhausted"
+    created_at: UtcDateTime
 
 
 def count_characters(text: str) -> int:

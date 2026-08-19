@@ -92,6 +92,7 @@ def test_length_adjustment_history_is_bounded_and_does_not_mutate_semantic_state
             version="v001",
             draft_markdown="短い",
             response_fingerprint="1" * 64,
+            response_payload=b'{"candidate":1}',
         )
     assert first.value.code == "LENGTH_ADJUSTMENT_REQUIRED"
     with pytest.raises(VepError) as duplicate:
@@ -101,8 +102,9 @@ def test_length_adjustment_history_is_bounded_and_does_not_mutate_semantic_state
             version="v001",
             draft_markdown="短い",
             response_fingerprint="1" * 64,
+            response_payload=b'{"candidate":1}',
         )
-    assert "adjustment attempt: 1/2" in duplicate.value.safe_message
+    assert "adjustment: 1/2" in duplicate.value.safe_message
     with pytest.raises(VepError) as second:
         _enforce_length_gate(
             workspace,
@@ -110,25 +112,95 @@ def test_length_adjustment_history_is_bounded_and_does_not_mutate_semantic_state
             version="v001",
             draft_markdown="長すぎる本文です",
             response_fingerprint="2" * 64,
+            response_payload=b'{"candidate":2}',
         )
     assert second.value.code == "LENGTH_ADJUSTMENT_REQUIRED"
-    with pytest.raises(VepError) as exhausted:
+    latest_request = workspace.safe_path("authoring/length/v001-request.json").read_bytes()
+    with pytest.raises(VepError) as non_tail_duplicate:
         _enforce_length_gate(
             workspace,
             job,
             version="v001",
-            draft_markdown="まだ長すぎます",
-            response_fingerprint="3" * 64,
+            draft_markdown="短い",
+            response_fingerprint="1" * 64,
+            response_payload=b'{"candidate":1}',
         )
-    assert exhausted.value.code == "LENGTH_ADJUSTMENT_EXHAUSTED"
+    assert non_tail_duplicate.value.code == "LENGTH_ADJUSTMENT_REQUIRED"
+    assert "adjustment: 2/2" in non_tail_duplicate.value.safe_message
+    assert workspace.safe_path("authoring/length/v001-request.json").read_bytes() == latest_request
+    assert (
+        len(workspace.safe_path("authoring/length/v001-attempts.jsonl").read_bytes().splitlines())
+        == 2
+    )
+    check, adjustment_count = _enforce_length_gate(
+        workspace,
+        job,
+        version="v001",
+        draft_markdown="日本語です",
+        response_fingerprint="3" * 64,
+        response_payload=b'{"candidate":3}',
+    )
+    assert check is not None and check.passed
+    assert adjustment_count == 2
+    assert not workspace.transitions_jsonl.exists()
 
-    with pytest.raises(VepError) as terminal:
+
+@pytest.mark.parametrize("maximum_adjustments", [1, 2, 3])
+def test_last_allowed_successful_correction_is_accepted(
+    tmp_path: Path, maximum_adjustments: int
+) -> None:
+    workspace = JobWorkspace.create(tmp_path, "length-test")
+    job = _job(maximum_adjustments)
+    for index in range(maximum_adjustments):
+        with pytest.raises(VepError) as required:
+            _enforce_length_gate(
+                workspace,
+                job,
+                version="v001",
+                draft_markdown=f"長すぎる候補です{index}",
+                response_fingerprint=f"{index + 1:064x}",
+                response_payload=f'{{"candidate":{index}}}'.encode(),
+            )
+        assert required.value.code == "LENGTH_ADJUSTMENT_REQUIRED"
+    check, adjustment_count = _enforce_length_gate(
+        workspace,
+        job,
+        version="v001",
+        draft_markdown="日本語です",
+        response_fingerprint="e" * 64,
+        response_payload=b'{"candidate":"accepted"}',
+    )
+    assert check is not None and check.passed
+    assert adjustment_count == maximum_adjustments
+
+
+@pytest.mark.parametrize("maximum_adjustments", [1, 2, 3])
+def test_last_allowed_failed_correction_exhausts(tmp_path: Path, maximum_adjustments: int) -> None:
+    workspace = JobWorkspace.create(tmp_path, "length-test")
+    job = _job(maximum_adjustments)
+    for index in range(maximum_adjustments + 1):
+        expected = (
+            "LENGTH_ADJUSTMENT_EXHAUSTED"
+            if index == maximum_adjustments
+            else "LENGTH_ADJUSTMENT_REQUIRED"
+        )
+        with pytest.raises(VepError) as failure:
+            _enforce_length_gate(
+                workspace,
+                job,
+                version="v001",
+                draft_markdown=f"長すぎる候補です{index}",
+                response_fingerprint=f"{index + 1:064x}",
+                response_payload=f'{{"candidate":{index}}}'.encode(),
+            )
+        assert failure.value.code == expected
+    with pytest.raises(VepError) as too_late:
         _enforce_length_gate(
             workspace,
             job,
             version="v001",
             draft_markdown="日本語です",
-            response_fingerprint="4" * 64,
+            response_fingerprint="f" * 64,
+            response_payload=b'{"candidate":"too-late"}',
         )
-    assert terminal.value.code == "LENGTH_ADJUSTMENT_EXHAUSTED"
-    assert not workspace.transitions_jsonl.exists()
+    assert too_late.value.code == "LENGTH_ADJUSTMENT_EXHAUSTED"

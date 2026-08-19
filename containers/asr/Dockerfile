@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.8.1-runtime-ubuntu24.04@sha256:ebef3c171eeef0298e4eb2e4be843105edf3b8b0ac45e0b43acee358e8046867
+FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04@sha256:8aef630a54bc5c5146ae5ce68e6af5caa3df0fb690bb91544175c91f307e4356
 
 ENV DEBIAN_FRONTEND=noninteractive \
     HF_HUB_DISABLE_IMPLICIT_TOKEN=1 \
@@ -17,7 +17,7 @@ RUN python3 -m pip install --break-system-packages --no-cache-dir -r /tmp/asr-re
 COPY pyproject.toml README.md ./
 COPY src ./src
 COPY config ./config
-RUN python3 -m pip install --break-system-packages --no-cache-dir --no-deps .
+RUN python3 -m pip install --break-system-packages --no-cache-dir --no-build-isolation --no-deps .
 
 WORKDIR /workspace
 ENTRYPOINT ["vep"]

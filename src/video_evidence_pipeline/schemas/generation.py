@@ -57,9 +57,11 @@ from video_evidence_pipeline.domain.evidence import (
 from video_evidence_pipeline.domain.job import JobSpec
 from video_evidence_pipeline.domain.length import (
     CharacterLengthAdjustmentAttempt,
+    CharacterLengthAdjustmentRequest,
     CharacterLengthCheck,
     CharacterLengthConstraint,
     EffectiveCharacterLengthConstraint,
+    LengthBlockManifest,
 )
 from video_evidence_pipeline.domain.manifests import SourceManifest, StageManifest
 from video_evidence_pipeline.domain.media import (
@@ -88,6 +90,8 @@ from video_evidence_pipeline.domain.search import (
 from video_evidence_pipeline.domain.supporting import SupportingInputManifest
 from video_evidence_pipeline.domain.transcription import (
     AsrSegment,
+    AsrWorkerRequest,
+    AsrWorkerResponse,
     SegmentLineage,
     TranscriptConfidence,
     TranscriptInterval,
@@ -113,6 +117,8 @@ SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "effective-character-length-constraint.schema.json": EffectiveCharacterLengthConstraint,
     "character-length-check.schema.json": CharacterLengthCheck,
     "character-length-adjustment-attempt.schema.json": CharacterLengthAdjustmentAttempt,
+    "character-length-adjustment-request.schema.json": CharacterLengthAdjustmentRequest,
+    "length-block-manifest.schema.json": LengthBlockManifest,
     "authorization-record.schema.json": AuthorizationRecord,
     "artifact-record.schema.json": ArtifactRecord,
     "evidence-ledger-artifact-ref.schema.json": EvidenceLedgerArtifactRef,
@@ -161,6 +167,8 @@ SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "transcript-confidence.schema.json": TranscriptConfidence,
     "segment-lineage.schema.json": SegmentLineage,
     "asr-segment.schema.json": AsrSegment,
+    "asr-worker-request.schema.json": AsrWorkerRequest,
+    "asr-worker-response.schema.json": AsrWorkerResponse,
     "transcript-segment.schema.json": TranscriptSegment,
     "transcript-interval.schema.json": TranscriptInterval,
     "transcript-manifest.schema.json": TranscriptManifest,
