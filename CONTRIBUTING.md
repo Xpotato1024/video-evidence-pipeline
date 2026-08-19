@@ -13,7 +13,7 @@
 ## Local validation
 
 ```bash
-uv sync --locked --all-groups
+uv sync --locked
 uv run ruff check src scripts tests
 uv run ruff format --check src scripts tests
 uv run pytest -q

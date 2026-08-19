@@ -135,8 +135,8 @@ RUNTIME_REQUIRED_PATHS = {
     "src/video_evidence_pipeline/schemas/generation.py",
 }
 CI_REQUIRED_COMMANDS = {
-    "uv run vep asr image-build --repository-root . --json",
-    "uv run vep asr image-smoke --repository-root . --json",
+    "uv run --no-sync vep asr image-build --repository-root . --json",
+    "uv run --no-sync vep asr image-smoke --repository-root . --json",
     "uv run ruff check src scripts tests",
     "uv run ruff format --check src scripts tests",
     "uv run pytest -q tests/test_full_e2e.py",
@@ -188,6 +188,7 @@ class RepositoryValidator:
         self._validate_workflows()
         self._validate_runtime_contracts()
         self._validate_asr_lock()
+        self._validate_asr_boundaries()
         self._validate_forbidden_artifacts()
         self._validate_secrets()
         return sorted(set(self.findings))
@@ -238,6 +239,54 @@ class RepositoryValidator:
                 "ASR_LOCK_CHECK_FAILED",
                 lock_path.relative_to(self.root),
                 "uv export could not validate the generated lock",
+            )
+
+    def _validate_asr_boundaries(self) -> None:
+        if "config/asr-profiles.yaml" not in self.tracked_files:
+            return
+        normal_sync_paths = (
+            ".github/workflows/ci.yml",
+            "AGENTS.md",
+            ".agents/policy.md",
+            ".agents/skills/repository-sot-audit/SKILL.md",
+            "README.md",
+            "CONTRIBUTING.md",
+            "docs/operations/asr-runtime.md",
+            "docs/operations/ci-quality-gates.md",
+            "docs/operations/network-acquisition.md",
+        )
+        for relative in normal_sync_paths:
+            text = self._read_text(relative)
+            if text is not None and "uv sync --locked --all-groups" in text:
+                self.add(
+                    "ASR_HOST_DEPENDENCY_BOUNDARY",
+                    relative,
+                    "normal host synchronization must not install all dependency groups",
+                )
+        cli = self._read_text("src/video_evidence_pipeline/cli.py")
+        if cli is not None:
+            marker = '@asr_app.command("provision-worker", hidden=True)'
+            section = cli.split(marker, 1)[1].split("\n\n@", 1)[0] if marker in cli else ""
+            if (
+                not section
+                or "--profile" not in section
+                or any(option in section for option in ("--repository", "--revision"))
+            ):
+                self.add(
+                    "ASR_PROVISION_WORKER_SURFACE",
+                    "src/video_evidence_pipeline/cli.py",
+                    "provision worker must resolve a baked profile without repository/revision options",
+                )
+        dockerfile = self._read_text("containers/asr/Dockerfile")
+        if dockerfile is not None and (
+            "VEP_ASR_INTERNAL_RUNTIME=1" not in dockerfile
+            or "VEP_ASR_CONTRACT_SHA256" not in dockerfile
+            or "COPY config ./config" not in dockerfile
+        ):
+            self.add(
+                "ASR_CONTAINER_INTERNAL_CONTRACT",
+                "containers/asr/Dockerfile",
+                "ASR image must bake the profile registry and internal build-contract markers",
             )
 
     def _load_yaml(self, relative: str) -> Any:

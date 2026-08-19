@@ -265,11 +265,12 @@ def _revision_response(
     request,
     *,
     context_id: str,
+    replacement_suffix: str = "",
     execution_mode: AgentExecutionMode = AgentExecutionMode.TEST_FIXTURE,
 ) -> RevisionResponseManifest:
     anchor = request.audit_findings[0].draft_span
     assert anchor is not None
-    text = f"[REVISION-{request.next_draft_version}]"
+    text = f"[REVISION-{request.next_draft_version}]{replacement_suffix}"
     draft = (
         request.target_draft_markdown[: anchor.start]
         + text
@@ -1059,6 +1060,7 @@ def test_initial_length_exhaustion_is_durable_blocked_and_recoverable(tmp_path: 
     with pytest.raises(VepError) as missing_request:
         validate_job(workspace.root)
     assert missing_request.value.code == "LENGTH_ADJUSTMENT_REQUEST_INVALID"
+    assert not request_path.exists()
     request_path.write_bytes(request_bytes)
     attempts_path = workspace.safe_path("authoring/length/v001-attempts.jsonl")
     attempts_bytes = attempts_path.read_bytes()
@@ -1075,6 +1077,21 @@ def test_initial_length_exhaustion_is_durable_blocked_and_recoverable(tmp_path: 
     assert block.final_actual_chars == len(second.draft_markdown.strip())
     assert block.final_candidate_artifact.artifact_type == "failed_length_candidate_response"
     assert not workspace.safe_path("manifests/authoring/draft-v001.json").exists()
+    with pytest.raises(VepError) as terminal_retry:
+        _import_authoring_fixture(workspace.root, second_path)
+    assert terminal_retry.value.code == "LENGTH_EXHAUSTION_BLOCKED"
+
+    transition_bytes = workspace.transitions_jsonl.read_bytes()
+    transitions = read_jsonl(workspace.transitions_jsonl, TransitionRecord)
+    transitions[-1] = transitions[-1].model_copy(update={"trigger": "revision.length-exhausted"})
+    workspace.transitions_jsonl.write_text(
+        "".join(item.model_dump_json() + "\n" for item in transitions),
+        encoding="utf-8",
+    )
+    with pytest.raises(VepError) as wrong_reason:
+        validate_job(workspace.root)
+    assert wrong_reason.value.code == "LENGTH_BLOCK_INVALID"
+    workspace.transitions_jsonl.write_bytes(transition_bytes)
 
     child = recover_job(
         workspace.root,
@@ -1163,6 +1180,177 @@ def test_revision_length_exhaustion_blocks_without_spending_semantic_budget(
     assert not workspace.safe_path("manifests/authoring/draft-v002.json").exists()
 
 
+@pytest.mark.parametrize("mode", ["initial", "revision"])
+@pytest.mark.parametrize(
+    ("crash_boundary", "retry_same"),
+    [
+        ("candidate", False),
+        ("candidate", True),
+        ("ledger", False),
+        ("ledger", True),
+        ("request", False),
+        ("request", True),
+        ("block", True),
+    ],
+)
+def test_length_publication_crash_matrix_recovers_by_normal_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    crash_boundary: str,
+    retry_same: bool,
+) -> None:
+    maximum = 1 if crash_boundary == "block" else 2
+    if mode == "initial":
+        workspace = _evidence_ready_job(
+            tmp_path,
+            f"length-crash-{mode}-{crash_boundary}",
+            min_chars=50,
+            max_chars=55,
+            maximum_length_adjustments=maximum,
+        )
+        request = prepare_authoring_job(workspace.root, "draft-video-report").request
+        first = _author_response(request, context_id=f"{mode}-{crash_boundary}-first")
+        corrected = first.model_copy(
+            update={
+                "author": _identity(AgentRole.AUTHOR, f"{mode}-{crash_boundary}-corrected"),
+                "draft_markdown": first.draft_markdown + "123456789012",
+                "created_at": datetime.now(UTC),
+            }
+        )
+        importer = _import_authoring_fixture
+        version = "v001"
+    else:
+        workspace, _initial = _publish_initial_draft(
+            tmp_path,
+            f"length-crash-{mode}-{crash_boundary}",
+            min_chars=38,
+            max_chars=42,
+            maximum_length_adjustments=maximum,
+        )
+        _publish_audit(
+            tmp_path,
+            workspace,
+            context_id=f"{mode}-{crash_boundary}-audit",
+            material=True,
+        )
+        request = prepare_revision_job(workspace.root, "revise-from-audit").request
+        first = _revision_response(request, context_id=f"{mode}-{crash_boundary}-first")
+        corrected = _revision_response(
+            request,
+            context_id=f"{mode}-{crash_boundary}-corrected",
+            replacement_suffix="xxx",
+        )
+        importer = _import_revision_fixture
+        version = "v002"
+
+    first_path = tmp_path / f"{mode}-{crash_boundary}-first.json"
+    corrected_path = tmp_path / f"{mode}-{crash_boundary}-corrected.json"
+    _write_model(first_path, first)
+    _write_model(corrected_path, corrected)
+
+    if crash_boundary == "block":
+        with pytest.raises(VepError) as required:
+            importer(workspace.root, first_path)
+        assert required.value.code == "LENGTH_ADJUSTMENT_REQUIRED"
+        exhausted = first.model_copy(
+            update={
+                ("author" if mode == "initial" else "reviser"): _identity(
+                    AgentRole.AUTHOR if mode == "initial" else AgentRole.REVISER,
+                    f"{mode}-{crash_boundary}-exhausted",
+                ),
+                "created_at": datetime.now(UTC),
+            }
+        )
+        exhausted_path = tmp_path / f"{mode}-{crash_boundary}-exhausted.json"
+        _write_model(exhausted_path, exhausted)
+        original_transition = application_module._append_transition_locked
+        crashed = False
+
+        def crash_before_block_transition(*args, **kwargs):
+            nonlocal crashed
+            if kwargs.get("trigger", "").endswith("length-exhausted") and not crashed:
+                crashed = True
+                raise RuntimeError("simulated crash after length-block publication")
+            return original_transition(*args, **kwargs)
+
+        monkeypatch.setattr(
+            application_module, "_append_transition_locked", crash_before_block_transition
+        )
+        with pytest.raises(RuntimeError, match="after length-block publication"):
+            importer(workspace.root, exhausted_path)
+        block_path = workspace.safe_path("manifests/authoring/length-block.json")
+        block_bytes = block_path.read_bytes()
+        monkeypatch.setattr(application_module, "_append_transition_locked", original_transition)
+        with pytest.raises(VepError) as retried:
+            importer(workspace.root, exhausted_path)
+        assert retried.value.code == "LENGTH_ADJUSTMENT_EXHAUSTED"
+        assert block_path.read_bytes() == block_bytes
+        assert validate_job(workspace.root)["state"] == JobState.BLOCKED.value
+        assert validate_job(workspace.root, deep=True)["state"] == JobState.BLOCKED.value
+        assert read_jsonl(workspace.transitions_jsonl, TransitionRecord)[-1].trigger == (
+            "author.length-exhausted" if mode == "initial" else "revision.length-exhausted"
+        )
+        return
+
+    if crash_boundary == "candidate":
+        original = authoring_pipeline_module.append_jsonl
+
+        def crash_before_ledger(path, value):
+            if path.name.endswith("-attempts.jsonl"):
+                raise RuntimeError("simulated crash after candidate publication")
+            return original(path, value)
+
+        monkeypatch.setattr(authoring_pipeline_module, "append_jsonl", crash_before_ledger)
+    else:
+        original = authoring_pipeline_module._write_machine_json
+
+        def crash_at_request(path, value, *, code):
+            if path.name.endswith("-request.json"):
+                if crash_boundary == "request":
+                    original(path, value, code=code)
+                raise RuntimeError(f"simulated crash after {crash_boundary} publication")
+            return original(path, value, code=code)
+
+        monkeypatch.setattr(authoring_pipeline_module, "_write_machine_json", crash_at_request)
+
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        importer(workspace.root, first_path)
+    if crash_boundary == "candidate":
+        monkeypatch.setattr(authoring_pipeline_module, "append_jsonl", original)
+    else:
+        monkeypatch.setattr(authoring_pipeline_module, "_write_machine_json", original)
+
+    if retry_same:
+        with pytest.raises(VepError) as same_retry:
+            importer(workspace.root, first_path)
+        assert same_retry.value.code == "LENGTH_ADJUSTMENT_REQUIRED"
+    published = importer(workspace.root, corrected_path)
+    draft = published if mode == "initial" else published.draft
+    assert draft.manifest.length_adjustment_count == 1
+    assert draft.manifest.semantic_revision_count == (0 if mode == "initial" else 1)
+    assert workspace.safe_path(f"authoring/length/{version}-attempts.jsonl").is_file()
+    request_path = workspace.safe_path(f"authoring/length/{version}-request.json")
+    assert request_path.is_file()
+    request_bytes = request_path.read_bytes()
+    assert (
+        len(
+            list(
+                workspace.safe_path(f"authoring/length/{version}").rglob("candidate-response.json")
+            )
+        )
+        == 1
+    )
+    monkeypatch.setattr(
+        authoring_pipeline_module,
+        "_write_machine_json",
+        lambda *_args, **_kwargs: pytest.fail("job validation must be read-only"),
+    )
+    assert validate_job(workspace.root)["state"] == JobState.DRAFTED.value
+    assert validate_job(workspace.root, deep=True)["state"] == JobState.DRAFTED.value
+    assert request_path.read_bytes() == request_bytes
+
+
 def test_second_revision_material_audit_blocks_without_v004(tmp_path: Path) -> None:
     workspace, _initial = _publish_initial_draft(tmp_path, "issue15-revision-block")
     _publish_audit(
@@ -1212,6 +1400,16 @@ def test_second_revision_material_audit_blocks_without_v004(tmp_path: Path) -> N
         JobState.AUDITED,
         JobState.BLOCKED,
     ]
+    workspace.safe_path("manifests/authoring/length-block.json").write_text("{}", encoding="utf-8")
+    assert validate_job(workspace.root)["state"] == JobState.BLOCKED.value
+    assert validate_job(workspace.root, deep=True)["state"] == JobState.BLOCKED.value
+    child = recover_job(
+        workspace.root,
+        "audit-block-with-stray-length-child",
+        confirm=True,
+        basis="audit blocked recovery ignores a stray length artifact",
+    ).workspace
+    assert validate_job(child.root)["state"] == JobState.TRANSCRIBED.value
 
 
 def test_revision_resolution_hunks_and_evidence_bind_to_the_matching_finding(

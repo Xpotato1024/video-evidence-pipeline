@@ -22,7 +22,7 @@ SKILL_REGISTRY: `.agents/skill-system.toml`
 - 変更前後に次を実行する。
 
 ```bash
-uv sync --locked --all-groups
+uv sync --locked
 uv run ruff check src scripts tests
 uv run ruff format --check src scripts tests
 uv run pytest -q

@@ -26,9 +26,13 @@ GitHub Actionsで次のcheckを実装し、PRと`main`へのpushで実行しま�
 - `lint`
 - `tests`
 - `repository-validation`
+- `asr-container-build`
 
 全jobは`ubuntu-24.04`、Python 3.12、固定したuv version、commit済み`uv.lock`を使用し、
 `GITHUB_TOKEN`は`contents: read`だけを持ちます。
+通常のhost jobは`uv sync --locked`でruntime + devだけを同期し、ASR container groupを
+hostへ導入しないことをimport discoveryで検査します。container build jobのhost側は
+`uv sync --locked --no-dev`とし、ASR依存はDockerfile内のrequirements lockからだけ導入します。
 
 ## 2. Branch enforcement status
 
@@ -98,7 +102,7 @@ capability discovery is still a required gate and must not be treated as
 evidence that a local Windows installation exists.
 
 ```bash
-uv sync --locked --all-groups
+uv sync --locked
 uv run ruff check src scripts tests
 uv run ruff format --check src scripts tests
 uv run pytest -q

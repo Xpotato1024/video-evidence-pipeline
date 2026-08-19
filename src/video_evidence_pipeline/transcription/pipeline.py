@@ -616,9 +616,6 @@ def prepare_transcript(
                     compute_type=config.asr_compute_type,
                 )
         selected_artifacts_list.append(media_manifest.speech_audio.artifact)
-        initial_asr_backend = backend.identity()
-        if initial_asr_backend.source is not TranscriptSource.ASR:
-            raise integrity_error("TRANSCRIPT_BACKEND_INVALID", "ASR backend identity is invalid")
         asr_segments: list[AsrSegment] = list(
             backend.transcribe(
                 workspace.safe_path(media_manifest.speech_audio.artifact.relative_storage_path),

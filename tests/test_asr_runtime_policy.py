@@ -1,16 +1,23 @@
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import sys
+import threading
+import time
 import types
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
+from typer.testing import CliRunner
 
+import video_evidence_pipeline.cli as cli_module
 import video_evidence_pipeline.transcription.provisioning as provisioning_module
+from video_evidence_pipeline.cli import app
 from video_evidence_pipeline.domain.serialization import pretty_json_bytes
 from video_evidence_pipeline.domain.transcription import (
     AsrWorkerRequest,
@@ -24,6 +31,7 @@ from video_evidence_pipeline.domain.transcription import (
 )
 from video_evidence_pipeline.errors import VepError
 from video_evidence_pipeline.transcription import container as container_module
+from video_evidence_pipeline.transcription import device as device_module
 from video_evidence_pipeline.transcription.device import (
     GpuDevice,
     RuntimeCapabilities,
@@ -39,7 +47,9 @@ from video_evidence_pipeline.transcription.profiles import (
     resolve_asr_profile,
 )
 from video_evidence_pipeline.transcription.provisioning import (
+    cleanup_stale_provision_staging,
     model_payload_identity,
+    provision_lock,
     provision_model,
 )
 
@@ -48,6 +58,14 @@ def _profile():
     selected, profile = resolve_asr_profile(Path.cwd(), DEFAULT_ASR_PROFILE)
     assert selected == DEFAULT_ASR_PROFILE
     return profile
+
+
+def _write_profile_model(directory: Path) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "config.json").write_text("{}", encoding="utf-8")
+    (directory / "model.bin").write_bytes(b"model")
+    (directory / "preprocessor_config.json").write_text('{"feature_size": 128}', encoding="utf-8")
+    (directory / "tokenizer.json").write_text("{}", encoding="utf-8")
 
 
 def _caps(
@@ -72,6 +90,9 @@ def _worker_request(device: str = "cpu") -> AsrWorkerRequest:
         model_repository=profile.model_repository,
         model_revision=profile.model_revision,
         model_storage_identity="1" * 64,
+        model_file_count=4,
+        model_total_size_bytes=64,
+        model_provisioned_at=datetime.now(UTC),
         requested_device_policy=device,
         container_gpu_passthrough=device != "cpu",
         gpu_compute_type=profile.gpu_compute_type,
@@ -292,12 +313,12 @@ def test_host_rejects_impossible_gpu_capacity_and_threshold_provenance(
 @pytest.mark.parametrize(
     ("stdout", "expected"),
     [
-        ('{"count": 0, "float16": false}', DeviceSelectionReason.BACKEND_CUDA_UNAVAILABLE),
+        ('{"count": 0, "float16_indices": []}', DeviceSelectionReason.NO_GPU_VISIBLE),
         (
-            '{"count": 1, "float16": false}',
+            '{"count": 1, "float16_indices": []}',
             DeviceSelectionReason.GPU_COMPUTE_TYPE_UNSUPPORTED,
         ),
-        ('{"count": 1, "float16": true}', None),
+        ('{"count": 1, "float16_indices": [0]}', None),
     ],
 )
 def test_container_gpu_preflight_preserves_backend_and_compute_failure_reasons(
@@ -310,7 +331,7 @@ def test_container_gpu_preflight_preserves_backend_and_compute_failure_reasons(
         "run",
         lambda *_args, **_kwargs: types.SimpleNamespace(stdout=stdout),
     )
-    assert container_module._gpu_preflight_failure_reason("docker", "image") is expected
+    assert container_module._gpu_preflight_failure_reason("docker", "image", "auto") is expected
 
 
 @pytest.mark.parametrize(
@@ -329,7 +350,23 @@ def test_container_gpu_preflight_classifies_process_and_docker_failures(
         raise container_module.subprocess.CalledProcessError(returncode, ["docker", "run"])
 
     monkeypatch.setattr(container_module.subprocess, "run", fail)
-    assert container_module._gpu_preflight_failure_reason("docker", "image") is expected
+    assert container_module._gpu_preflight_failure_reason("docker", "image", "auto") is expected
+
+
+def test_explicit_cuda_index_is_rejected_during_container_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        container_module.subprocess,
+        "run",
+        lambda *_args, **_kwargs: types.SimpleNamespace(
+            stdout='{"count": 1, "float16_indices": [0]}'
+        ),
+    )
+    assert (
+        container_module._gpu_preflight_failure_reason("docker", "image", "cuda:1")
+        is DeviceSelectionReason.NO_GPU_VISIBLE
+    )
 
 
 def test_profiled_config_rejects_legacy_compute_type_override() -> None:
@@ -479,9 +516,7 @@ def test_pinned_provision_manifest_selects_persistent_repository_model(tmp_path:
     profile = _profile()
     model = model_storage_directory(tmp_path, DEFAULT_ASR_PROFILE, profile)
     model.mkdir(parents=True)
-    (model / "config.json").write_text("{}", encoding="utf-8")
-    (model / "model.bin").write_bytes(b"model")
-    (model / "tokenizer.json").write_text("{}", encoding="utf-8")
+    _write_profile_model(model)
     manifest = AsrModelProvisionManifest(
         profile=DEFAULT_ASR_PROFILE,
         model_repository=profile.model_repository,
@@ -513,9 +548,7 @@ def test_explicit_provisioning_publishes_model_and_manifest_atomically(
     def snapshot_download(*, repo_id: str, revision: str, local_dir: Path, token: bool) -> None:
         assert token is False
         calls.append((repo_id, revision))
-        (local_dir / "config.json").write_text("{}", encoding="utf-8")
-        (local_dir / "model.bin").write_bytes(b"model")
-        (local_dir / "tokenizer.json").write_text("{}", encoding="utf-8")
+        _write_profile_model(local_dir)
 
     hub = types.ModuleType("huggingface_hub")
     hub.snapshot_download = snapshot_download  # type: ignore[attr-defined]
@@ -531,11 +564,289 @@ def test_explicit_provisioning_publishes_model_and_manifest_atomically(
     assert second_manifest == manifest
     assert model.is_dir()
     assert model_manifest_path(tmp_path, DEFAULT_ASR_PROFILE, _profile()).is_file()
-    assert not list(model.parent.parent.glob(".provision-*"))
+    assert not [path for path in model.parent.parent.glob(".provision-*") if path.is_dir()]
     (model / "model.bin").write_bytes(b"tampered")
     with pytest.raises(VepError) as mismatch:
         provision_model(tmp_path, DEFAULT_ASR_PROFILE)
     assert mismatch.value.code == "ASR_MODEL_INVALID"
+
+
+def test_public_provision_serializes_download_and_reuses_before_docker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shutil.copytree(Path.cwd() / "config", tmp_path / "config")
+    worker_calls = 0
+    docker_calls = 0
+    simultaneous_start = threading.Barrier(2)
+
+    def docker() -> str:
+        nonlocal docker_calls
+        docker_calls += 1
+        return "docker"
+
+    def run(command: list[str], *, code: str):
+        nonlocal worker_calls
+        assert code == "ASR_MODEL_PROVISION_FAILED"
+        worker_calls += 1
+        time.sleep(0.1)
+        mount = next(item for item in command if "dst=/output" in item)
+        source = Path(mount.split("src=", 1)[1].split(",dst=", 1)[0])
+        _write_profile_model(source / "model")
+        return types.SimpleNamespace(stdout='{"ok": true}', stderr="")
+
+    monkeypatch.setattr(container_module, "_docker", docker)
+    monkeypatch.setattr(
+        container_module, "_require_image_identity", lambda *_: "sha256:" + "a" * 64
+    )
+    monkeypatch.setattr(container_module, "_run", run)
+
+    def provision_after_barrier(_index: int) -> str:
+        simultaneous_start.wait()
+        return container_module.run_provision_container(tmp_path, DEFAULT_ASR_PROFILE)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        payloads = list(executor.map(provision_after_barrier, range(2)))
+
+    assert worker_calls == 1
+    assert docker_calls == 1
+    assert sorted(json.loads(payload)["reused"] for payload in payloads) == [False, True]
+
+    worker_calls = 0
+    docker_calls = 0
+    download_calls = 0
+
+    def forbidden_download(*_args, **_kwargs) -> None:
+        nonlocal download_calls
+        download_calls += 1
+        pytest.fail("valid public reuse must not download")
+
+    def forbidden_docker() -> str:
+        nonlocal docker_calls
+        docker_calls += 1
+        pytest.fail("valid reuse must not consult Docker")
+
+    monkeypatch.setattr(container_module, "_docker", forbidden_docker)
+    monkeypatch.setattr(provisioning_module, "download_model_payload", forbidden_download)
+    reused = json.loads(container_module.run_provision_container(tmp_path, DEFAULT_ASR_PROFILE))
+    assert reused["reused"] is True
+    assert docker_calls == 0
+    assert worker_calls == 0
+    assert download_calls == 0
+
+    profile = _profile()
+    model = model_storage_directory(tmp_path, DEFAULT_ASR_PROFILE, profile)
+    (model / "model.bin").write_bytes(b"tampered")
+    with pytest.raises(VepError) as inconsistent:
+        container_module.run_provision_container(tmp_path, DEFAULT_ASR_PROFILE)
+    assert inconsistent.value.code == "ASR_MODEL_INVALID"
+    assert worker_calls == 0
+
+
+def test_public_provision_cleans_only_safe_stale_staging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shutil.copytree(Path.cwd() / "config", tmp_path / "config")
+    profile_root = tmp_path / ".local" / "models" / "asr" / DEFAULT_ASR_PROFILE
+    stale = profile_root / (".provision-" + "a" * 32)
+    unknown = profile_root / ".provision-unknown"
+    stale.mkdir(parents=True)
+    unknown.mkdir()
+    (stale / "partial.bin").write_bytes(b"partial")
+    (unknown / "owned.bin").write_bytes(b"owned")
+
+    def run(command: list[str], *, code: str):
+        mount = next(item for item in command if "dst=/output" in item)
+        source = Path(mount.split("src=", 1)[1].split(",dst=", 1)[0])
+        _write_profile_model(source / "model")
+        return types.SimpleNamespace(stdout='{"ok": true}', stderr="")
+
+    monkeypatch.setattr(container_module, "_docker", lambda: "docker")
+    monkeypatch.setattr(
+        container_module, "_require_image_identity", lambda *_: "sha256:" + "a" * 64
+    )
+    monkeypatch.setattr(container_module, "_run", run)
+    container_module.run_provision_container(tmp_path, DEFAULT_ASR_PROFILE)
+
+    assert not stale.exists()
+    assert unknown.is_dir()
+
+
+def test_public_provision_rejects_profile_revision_drift_during_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shutil.copytree(Path.cwd() / "config", tmp_path / "config")
+    original_profile = _profile()
+
+    def run(command: list[str], *, code: str):
+        assert code == "ASR_MODEL_PROVISION_FAILED"
+        mount = next(item for item in command if "dst=/output" in item)
+        source = Path(mount.split("src=", 1)[1].split(",dst=", 1)[0])
+        _write_profile_model(source / "model")
+        registry = tmp_path / "config" / "asr-profiles.yaml"
+        registry.write_text(
+            registry.read_text(encoding="utf-8").replace(
+                original_profile.model_revision,
+                "f" * 40,
+            ),
+            encoding="utf-8",
+        )
+        return types.SimpleNamespace(stdout='{"ok": true}', stderr="")
+
+    monkeypatch.setattr(container_module, "_docker", lambda: "docker")
+    monkeypatch.setattr(
+        container_module, "_require_image_identity", lambda *_: "sha256:" + "a" * 64
+    )
+    monkeypatch.setattr(container_module, "_run", run)
+
+    with pytest.raises(VepError) as changed:
+        container_module.run_provision_container(tmp_path, DEFAULT_ASR_PROFILE)
+
+    assert changed.value.code == "ASR_PROFILE_CHANGED"
+    assert not model_storage_directory(tmp_path, DEFAULT_ASR_PROFILE, original_profile).exists()
+
+
+def test_profile_storage_lock_prevents_cross_revision_staging_cleanup(tmp_path: Path) -> None:
+    profile_root = tmp_path / ".local" / "models" / "asr" / DEFAULT_ASR_PROFILE
+    staging = profile_root / (".provision-" + "b" * 32)
+    first_entered = threading.Event()
+    second_attempting = threading.Event()
+    second_entered = threading.Event()
+    release_first = threading.Event()
+    failures: list[BaseException] = []
+
+    def first_revision() -> None:
+        try:
+            with provision_lock(tmp_path, DEFAULT_ASR_PROFILE, "1" * 40):
+                staging.mkdir()
+                first_entered.set()
+                assert release_first.wait(timeout=5)
+        except BaseException as exc:
+            failures.append(exc)
+
+    def second_revision() -> None:
+        try:
+            assert first_entered.wait(timeout=5)
+            second_attempting.set()
+            with provision_lock(tmp_path, DEFAULT_ASR_PROFILE, "2" * 40):
+                second_entered.set()
+                cleanup_stale_provision_staging(tmp_path, DEFAULT_ASR_PROFILE)
+        except BaseException as exc:
+            failures.append(exc)
+
+    first_thread = threading.Thread(target=first_revision)
+    second_thread = threading.Thread(target=second_revision)
+    first_thread.start()
+    second_thread.start()
+    assert second_attempting.wait(timeout=5)
+    assert not second_entered.wait(timeout=0.2)
+    assert staging.is_dir()
+    release_first.set()
+    first_thread.join(timeout=5)
+    second_thread.join(timeout=5)
+
+    assert not first_thread.is_alive()
+    assert not second_thread.is_alive()
+    assert not failures
+    assert second_entered.is_set()
+    assert not staging.exists()
+
+
+def test_internal_worker_commands_reject_normal_host_and_hide_arbitrary_model_surface(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("VEP_ASR_INTERNAL_RUNTIME", raising=False)
+    monkeypatch.delenv("VEP_ASR_CONTRACT_SHA256", raising=False)
+    runner = CliRunner()
+
+    provision_help = runner.invoke(app, ["asr", "provision-worker", "--help"])
+    assert provision_help.exit_code == 0
+    assert "--profile" in provision_help.stdout
+    assert "--repository" not in provision_help.stdout
+    assert "--revision" not in provision_help.stdout
+
+    provision = runner.invoke(
+        app,
+        [
+            "asr",
+            "provision-worker",
+            "--profile",
+            DEFAULT_ASR_PROFILE,
+            "--output",
+            str(tmp_path / "model"),
+            "--json",
+        ],
+    )
+    assert provision.exit_code != 0
+    assert json.loads(provision.stdout)["error"]["code"] == "ASR_INTERNAL_COMMAND_REQUIRED"
+
+    worker = runner.invoke(
+        app,
+        ["asr", "worker", "--request", str(tmp_path / "request.json"), "--json"],
+    )
+    assert worker.exit_code != 0
+    assert json.loads(worker.stdout)["error"]["code"] == "ASR_INTERNAL_COMMAND_REQUIRED"
+
+
+def test_inference_worker_rejects_request_profile_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shutil.copytree(Path.cwd() / "config", tmp_path / "config")
+    request = _worker_request().model_copy(
+        update={
+            "model_repository": "unreviewed/arbitrary-model",
+        }
+    )
+    request_path = tmp_path / "request.json"
+    request_path.write_bytes(pretty_json_bytes(request))
+    monkeypatch.setattr(cli_module, "_require_asr_internal_runtime", lambda: tmp_path)
+
+    result = CliRunner().invoke(
+        app,
+        ["asr", "worker", "--request", str(request_path), "--json"],
+    )
+
+    assert result.exit_code != 0
+    assert json.loads(result.stdout)["error"]["code"] == "ASR_WORKER_PROFILE_MISMATCH"
+
+
+def test_inference_worker_builds_truthful_provision_from_mounted_model(tmp_path: Path) -> None:
+    model = tmp_path / "model"
+    _write_profile_model(model)
+    profile = _profile()
+    identity, count, size = model_payload_identity(model, profile)
+    request = _worker_request().model_copy(
+        update={
+            "model_path": str(model),
+            "model_storage_identity": identity,
+            "model_file_count": count,
+            "model_total_size_bytes": size,
+        }
+    )
+
+    manifest = cli_module._verified_worker_provision(request, profile)
+
+    assert manifest.model_storage_identity == identity
+    assert manifest.file_count == count == 4
+    assert manifest.total_size_bytes == size
+    assert manifest.provisioned_at == request.model_provisioned_at
+
+
+@pytest.mark.parametrize(
+    ("stream", "limit_name"),
+    [
+        ("stdout", "_MAXIMUM_WORKER_OUTPUT_BYTES"),
+        ("stderr", "_MAXIMUM_WORKER_ERROR_BYTES"),
+    ],
+)
+def test_container_output_limits_are_enforced_while_process_is_running(
+    monkeypatch: pytest.MonkeyPatch, stream: str, limit_name: str
+) -> None:
+    monkeypatch.setattr(container_module, limit_name, 1024)
+    script = f"import sys; stream=sys.{stream}.buffer; stream.write(b'x' * 65536); stream.flush()"
+    with pytest.raises(VepError) as overflow:
+        container_module._run([sys.executable, "-c", script], code="ASR_TEST_FAILED")
+    assert overflow.value.code == "ASR_TEST_FAILED"
+    assert "byte limit" in str(overflow.value)
 
 
 def test_model_payload_rejects_missing_required_file_and_unexpected_link(
@@ -566,6 +877,33 @@ def test_model_payload_rejects_missing_required_file_and_unexpected_link(
     assert linked.value.code == "ASR_MODEL_INVALID"
 
 
+@pytest.mark.parametrize(
+    "missing_name",
+    ["config.json", "model.bin", "tokenizer.json", "preprocessor_config.json"],
+)
+def test_large_v3_profile_rejects_each_missing_runtime_file(
+    tmp_path: Path, missing_name: str
+) -> None:
+    model = tmp_path / "model"
+    _write_profile_model(model)
+    (model / missing_name).unlink()
+    with pytest.raises(VepError) as invalid:
+        model_payload_identity(model, _profile())
+    assert invalid.value.code == "ASR_MODEL_INVALID"
+
+
+@pytest.mark.parametrize("payload", ["{", '{"feature_size": 80}'])
+def test_large_v3_profile_rejects_invalid_preprocessor_contract(
+    tmp_path: Path, payload: str
+) -> None:
+    model = tmp_path / "model"
+    _write_profile_model(model)
+    (model / "preprocessor_config.json").write_text(payload, encoding="utf-8")
+    with pytest.raises(VepError) as invalid:
+        model_payload_identity(model, _profile())
+    assert invalid.value.code == "ASR_MODEL_INVALID"
+
+
 def test_model_identity_excludes_hugging_face_control_metadata(tmp_path: Path) -> None:
     model = tmp_path / "model"
     model.mkdir()
@@ -591,8 +929,7 @@ def test_container_inference_is_network_disabled_and_model_mount_is_read_only(
     profile = _profile()
     model = model_storage_directory(tmp_path, DEFAULT_ASR_PROFILE, profile)
     model.mkdir(parents=True)
-    for name in ("config.json", "model.bin", "tokenizer.json"):
-        (model / name).write_bytes(name.encode())
+    _write_profile_model(model)
     model_identity, model_count, model_size = model_payload_identity(model)
     manifest = AsrModelProvisionManifest(
         profile=DEFAULT_ASR_PROFILE,
@@ -607,12 +944,18 @@ def test_container_inference_is_network_disabled_and_model_mount_is_read_only(
         pretty_json_bytes(manifest)
     )
     commands: list[list[str]] = []
+    gpu_preflight_calls = 0
+
+    def gpu_preflight(*_args):
+        nonlocal gpu_preflight_calls
+        gpu_preflight_calls += 1
+        return DeviceSelectionReason.CONTAINER_PASSTHROUGH_UNAVAILABLE
 
     monkeypatch.setattr(container_module, "_docker", lambda: "docker")
     monkeypatch.setattr(
         container_module,
         "_gpu_preflight_failure_reason",
-        lambda *_: DeviceSelectionReason.CONTAINER_PASSTHROUGH_UNAVAILABLE,
+        gpu_preflight,
     )
     monkeypatch.setattr(
         container_module, "_require_image_identity", lambda *_: "sha256:" + "a" * 64
@@ -667,6 +1010,102 @@ def test_container_inference_is_network_disabled_and_model_mount_is_read_only(
     assert any("dst=/input/audio,readonly" in item for item in command)
     assert not any("/.local/jobs/" in item for item in command)
     assert "--gpus" not in command
+    assert gpu_preflight_calls == 0
+
+
+def test_host_nvidia_smi_failure_does_not_block_usable_container_gpu(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shutil.copytree(Path.cwd() / "config", tmp_path / "config")
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"audio")
+    profile = _profile()
+    model = model_storage_directory(tmp_path, DEFAULT_ASR_PROFILE, profile)
+    _write_profile_model(model)
+    identity, count, size = model_payload_identity(model, profile)
+    manifest = AsrModelProvisionManifest(
+        profile=DEFAULT_ASR_PROFILE,
+        model_repository=profile.model_repository,
+        model_revision=profile.model_revision,
+        model_storage_identity=identity,
+        file_count=count,
+        total_size_bytes=size,
+        provisioned_at=datetime.now(UTC),
+    )
+    model_manifest_path(tmp_path, DEFAULT_ASR_PROFILE, profile).write_bytes(
+        pretty_json_bytes(manifest)
+    )
+    monkeypatch.setattr(
+        device_module,
+        "probe_nvidia_gpus",
+        lambda: pytest.fail("host nvidia-smi must not gate container GPU preflight"),
+    )
+    monkeypatch.setattr(container_module, "_docker", lambda: "docker")
+    monkeypatch.setattr(container_module, "_gpu_preflight_failure_reason", lambda *_: None)
+    monkeypatch.setattr(
+        container_module, "_require_image_identity", lambda *_: "sha256:" + "a" * 64
+    )
+    gpu = GpuDevice(0, "gpu", 8192, 7000)
+    backend = TranscriptionBackendIdentity(
+        source=TranscriptSource.ASR,
+        name=profile.engine,
+        version=profile.engine_version,
+        runtime=profile.runtime,
+        runtime_version=profile.runtime_version,
+        model=profile.model_repository,
+        model_repository=profile.model_repository,
+        model_revision=profile.model_revision,
+        model_storage_identity=identity,
+        device_policy="auto",
+        selection_reason=DeviceSelectionReason.AUTO_GPU_SELECTED,
+        selected_device="cuda",
+        gpu_index=gpu.index,
+        gpu_name=gpu.name,
+        total_vram_mib=gpu.total_vram_mib,
+        free_vram_at_selection_mib=gpu.free_vram_mib,
+        configured_min_free_vram_mib=profile.min_free_vram_mib,
+        candidate_gpu_index=gpu.index,
+        candidate_gpu_name=gpu.name,
+        candidate_total_vram_mib=gpu.total_vram_mib,
+        candidate_free_vram_mib=gpu.free_vram_mib,
+        compute_type=profile.gpu_compute_type,
+        container_image=profile.container_image,
+        container_image_digest="sha256:" + "a" * 64,
+        fallback=False,
+    )
+    commands: list[list[str]] = []
+
+    def run(command: list[str], *, code: str):
+        commands.append(command)
+        return types.SimpleNamespace(
+            stdout=AsrWorkerResponse(backend=backend, segments=[]).model_dump_json(),
+            stderr="",
+        )
+
+    monkeypatch.setattr(container_module, "_run", run)
+    response = container_module.run_asr_worker(
+        tmp_path,
+        audio,
+        (TranscriptInterval(start_ms=0, end_ms=1000),),
+        TranscriptionConfig(asr_profile=DEFAULT_ASR_PROFILE, asr_device="auto"),
+    )
+    assert response.backend.selected_device == "cuda"
+    assert commands[0][commands[0].index("--gpus") + 1] == "all"
+
+
+def test_public_gpu_preflight_rejects_invalid_cuda_index_before_docker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        container_module,
+        "_docker",
+        lambda: pytest.fail("invalid device policy must be rejected before Docker"),
+    )
+
+    with pytest.raises(VepError) as invalid:
+        container_module.preflight_asr_gpu(tmp_path, device_policy="cuda:not-an-index")
+
+    assert invalid.value.code == "ASR_DEVICE_INVALID"
 
 
 def test_model_provisioning_worker_uses_only_noncanonical_staging_mount(
@@ -695,9 +1134,7 @@ def test_model_provisioning_worker_uses_only_noncanonical_staging_mount(
         source = Path(mount.split("src=", 1)[1].split(",dst=", 1)[0])
         model = source / "model"
         model.mkdir()
-        (model / "config.json").write_text("{}", encoding="utf-8")
-        (model / "model.bin").write_bytes(b"model")
-        (model / "tokenizer.json").write_text("{}", encoding="utf-8")
+        _write_profile_model(model)
         return Result()
 
     monkeypatch.setattr(container_module, "_run", fake_run)

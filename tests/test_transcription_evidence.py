@@ -1021,6 +1021,7 @@ def test_faster_whisper_bounds_model_traversal_before_sorting(
     model.mkdir()
     (model / "config.json").write_text("{}", encoding="utf-8")
     (model / "model.bin").write_bytes(b"model")
+    (model / "preprocessor_config.json").write_text('{"feature_size": 128}', encoding="utf-8")
     (model / "tokenizer.json").write_text("{}", encoding="utf-8")
     monkeypatch.setattr(faster_whisper_module, "_MAXIMUM_MODEL_FILES", 2)
 
@@ -1082,6 +1083,7 @@ def _complete_model(path: Path) -> Path:
     model.mkdir()
     (model / "config.json").write_text("{}", encoding="utf-8")
     (model / "model.bin").write_bytes(b"model")
+    (model / "preprocessor_config.json").write_text('{"feature_size": 128}', encoding="utf-8")
     (model / "tokenizer.json").write_text("{}", encoding="utf-8")
     return model.resolve()
 
@@ -1425,7 +1427,7 @@ def test_faster_whisper_model_hash_is_reused_within_process(
     FasterWhisperBackend(model).identity()
     FasterWhisperBackend(model).identity()
 
-    assert len(hashed) == 3
+    assert len(hashed) == 4
 
 
 def test_artifact_fast_reuse_skips_hash_and_deep_verify_hashes(

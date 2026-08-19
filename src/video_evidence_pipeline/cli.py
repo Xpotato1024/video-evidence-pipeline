@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import sys
 from collections.abc import Callable
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -59,6 +60,86 @@ from video_evidence_pipeline.domain.transcription import (
 )
 from video_evidence_pipeline.errors import VepError, configuration_error
 from video_evidence_pipeline.schemas.generation import check_schemas, export_schemas
+
+_ASR_CONTAINER_ROOT = Path("/opt/vep")
+_ASR_INTERNAL_MARKER = "VEP_ASR_INTERNAL_RUNTIME"
+_ASR_CONTRACT_ENV = "VEP_ASR_CONTRACT_SHA256"
+
+
+def _require_asr_internal_runtime() -> Path:
+    contract = os.environ.get(_ASR_CONTRACT_ENV, "")
+    profile_registry = _ASR_CONTAINER_ROOT / "config" / "asr-profiles.yaml"
+    if (
+        os.environ.get(_ASR_INTERNAL_MARKER) != "1"
+        or re.fullmatch(r"[0-9a-f]{64}", contract) is None
+        or not profile_registry.is_file()
+        or profile_registry.is_symlink()
+    ):
+        raise configuration_error(
+            "ASR_INTERNAL_COMMAND_REQUIRED",
+            "ASR worker commands are available only inside the repository-owned ASR image",
+        )
+    return _ASR_CONTAINER_ROOT
+
+
+def _resolve_baked_worker_profile(container_root: Path, request: AsrWorkerRequest):
+    from video_evidence_pipeline.transcription.profiles import resolve_asr_profile
+
+    selected, profile = resolve_asr_profile(container_root, request.profile_id)
+    if selected != request.profile_id or (
+        request.engine,
+        request.engine_version,
+        request.runtime,
+        request.runtime_version,
+        request.model,
+        request.model_repository,
+        request.model_revision,
+        request.gpu_compute_type,
+        request.cpu_compute_type,
+        request.configured_min_free_vram_mib,
+        request.container_image,
+    ) != (
+        profile.engine,
+        profile.engine_version,
+        profile.runtime,
+        profile.runtime_version,
+        profile.model,
+        profile.model_repository,
+        profile.model_revision,
+        profile.gpu_compute_type,
+        profile.cpu_compute_type,
+        profile.min_free_vram_mib,
+        profile.container_image,
+    ):
+        raise configuration_error(
+            "ASR_WORKER_PROFILE_MISMATCH",
+            "ASR worker request does not match the baked repository profile",
+        )
+    return profile
+
+
+def _verified_worker_provision(request: AsrWorkerRequest, profile):
+    from video_evidence_pipeline.transcription.profiles import AsrModelProvisionManifest
+    from video_evidence_pipeline.transcription.provisioning import model_payload_identity
+
+    identity, file_count, total_size = model_payload_identity(Path(request.model_path), profile)
+    if (
+        identity != request.model_storage_identity
+        or file_count != request.model_file_count
+        or total_size != request.model_total_size_bytes
+    ):
+        raise configuration_error(
+            "ASR_MODEL_INVALID", "mounted ASR model does not match the host provision manifest"
+        )
+    return AsrModelProvisionManifest(
+        profile=request.profile_id,
+        model_repository=request.model_repository,
+        model_revision=request.model_revision,
+        model_storage_identity=request.model_storage_identity,
+        file_count=file_count,
+        total_size_bytes=total_size,
+        provisioned_at=request.model_provisioned_at,
+    )
 
 
 class StructuredTyper(typer.Typer):
@@ -561,6 +642,22 @@ def asr_image_smoke(
     _emit({"ok": True, **result}, json_output=json_output)
 
 
+@asr_app.command("gpu-preflight")
+def asr_gpu_preflight(
+    repository_root: Annotated[Path, typer.Option("--repository-root")] = Path("."),
+    profile: Annotated[str, typer.Option("--profile")] = "whisper-large-v3",
+    device: Annotated[str, typer.Option("--device")] = "auto",
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    from video_evidence_pipeline.transcription.container import preflight_asr_gpu
+
+    result = _run(
+        lambda: preflight_asr_gpu(repository_root.resolve(), profile, device),
+        json_output=json_output,
+    )
+    _emit({"ok": True, **result}, json_output=json_output)
+
+
 @asr_app.command("model-provision")
 def asr_model_provision(
     repository_root: Annotated[Path, typer.Option("--repository-root")] = Path("."),
@@ -590,8 +687,8 @@ def asr_worker(
 ) -> None:
     from video_evidence_pipeline.transcription.device import RuntimeCapabilities
     from video_evidence_pipeline.transcription.faster_whisper import FasterWhisperBackend
-    from video_evidence_pipeline.transcription.profiles import AsrModelProvisionManifest, AsrProfile
 
+    container_root = _run(_require_asr_internal_runtime, json_output=json_output)
     if (
         not request.is_file()
         or request.is_symlink()
@@ -604,28 +701,14 @@ def asr_worker(
         raise configuration_error(
             "ASR_WORKER_REQUEST_INVALID", "ASR worker request is invalid"
         ) from None
-    profile = AsrProfile(
-        engine=worker_request.engine,
-        engine_version=worker_request.engine_version,
-        runtime=worker_request.runtime,
-        runtime_version=worker_request.runtime_version,
-        model=worker_request.model,
-        model_repository=worker_request.model_repository,
-        model_revision=worker_request.model_revision,
-        gpu_compute_type=worker_request.gpu_compute_type,
-        cpu_compute_type=worker_request.cpu_compute_type,
-        min_free_vram_mib=worker_request.configured_min_free_vram_mib,
-        default_device_policy="auto",
-        container_image=worker_request.container_image,
+    profile = _run(
+        lambda: _resolve_baked_worker_profile(container_root, worker_request),
+        json_output=json_output,
     )
-    provision = AsrModelProvisionManifest(
-        profile=worker_request.profile_id,
-        model_repository=worker_request.model_repository,
-        model_revision=worker_request.model_revision,
-        model_storage_identity=worker_request.model_storage_identity,
-        file_count=1,
-        total_size_bytes=1,
-        provisioned_at=datetime.now(UTC),
+    model_path = Path(worker_request.model_path)
+    provision = _run(
+        lambda: _verified_worker_provision(worker_request, profile),
+        json_output=json_output,
     )
     capability_override = None
     if not worker_request.container_gpu_passthrough:
@@ -642,7 +725,7 @@ def asr_worker(
             unavailable_reason=reason,
         )
     backend = FasterWhisperBackend(
-        Path(worker_request.model_path),
+        model_path,
         device=worker_request.requested_device_policy,
         compute_type="auto",
         profile=profile,
@@ -666,17 +749,26 @@ def asr_worker(
 
 @asr_app.command("provision-worker", hidden=True)
 def asr_provision_worker(
-    repository: Annotated[str, typer.Option("--repository")],
-    revision: Annotated[str, typer.Option("--revision")],
+    profile: Annotated[str, typer.Option("--profile")],
     output: Annotated[Path, typer.Option("--output")],
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    from video_evidence_pipeline.transcription.provisioning import download_model_payload
+    from video_evidence_pipeline.transcription.profiles import resolve_asr_profile
+    from video_evidence_pipeline.transcription.provisioning import (
+        download_model_payload,
+        model_payload_identity,
+    )
 
-    _run(
-        lambda: download_model_payload(output, repository, revision),
+    container_root = _run(_require_asr_internal_runtime, json_output=json_output)
+    _selected, baked = _run(
+        lambda: resolve_asr_profile(container_root, profile),
         json_output=json_output,
     )
+    _run(
+        lambda: download_model_payload(output, baked.model_repository, baked.model_revision),
+        json_output=json_output,
+    )
+    _run(lambda: model_payload_identity(output, baked), json_output=json_output)
     _emit({"ok": True, "downloaded": True}, json_output=json_output)
 
 

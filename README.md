@@ -35,7 +35,7 @@ changing user environment variables. The installer sets
 Python 3.12と`uv`を用意し、認可済みのlocal sourceに対して次を実行します。
 
 ```bash
-uv sync --locked --all-groups
+uv sync --locked
 uv run vep job init demo-report \
   --source-kind local_file \
   --source /path/to/authorized-source.mp4 \
@@ -197,7 +197,7 @@ READMEやAI入口文書の識別情報は文書台帳だけで管理し、本文
 ## Validation
 
 ```bash
-uv sync --locked --all-groups
+uv sync --locked
 uv run ruff check src scripts tests
 uv run ruff format --check src scripts tests
 uv run pytest -q

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Literal, Self
 
@@ -14,6 +15,13 @@ from video_evidence_pipeline.errors import configuration_error, integrity_error
 
 DEFAULT_ASR_PROFILE = "whisper-large-v3"
 PROFILE_REGISTRY_PATH = Path("config/asr-profiles.yaml")
+WHISPER_LARGE_V3_REQUIRED_FILES = (
+    "config.json",
+    "model.bin",
+    "preprocessor_config.json",
+    "tokenizer.json",
+)
+LEGACY_LOCAL_MODEL_REQUIRED_FILES = ("config.json", "model.bin", "tokenizer.json")
 
 
 class AsrProfile(StrictModel):
@@ -90,6 +98,35 @@ def resolve_asr_profile(repository_root: Path, profile_id: str | None) -> tuple[
         raise configuration_error(
             "ASR_PROFILE_UNKNOWN", "ASR profile is not registered in the repository"
         ) from None
+
+
+def required_model_files(profile: AsrProfile | None) -> tuple[str, ...]:
+    """Return the runtime-essential file contract for the repository profile."""
+
+    if profile is None:
+        return LEGACY_LOCAL_MODEL_REQUIRED_FILES
+    if profile.model != "large-v3":  # pragma: no cover - schema currently fixes this profile
+        raise configuration_error("ASR_PROFILE_INVALID", "unsupported ASR model profile")
+    return WHISPER_LARGE_V3_REQUIRED_FILES
+
+
+def validate_model_runtime_contract(root: Path, profile: AsrProfile | None) -> None:
+    """Validate profile-critical model metadata before provisioning or inference."""
+
+    if any(not (root / name).is_file() for name in required_model_files(profile)):
+        raise integrity_error("ASR_MODEL_INVALID", "provisioned ASR model is incomplete")
+    if profile is None:
+        return
+    try:
+        preprocessor = json.loads((root / "preprocessor_config.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        raise integrity_error(
+            "ASR_MODEL_INVALID", "ASR model preprocessor configuration is invalid"
+        ) from None
+    if not isinstance(preprocessor, dict) or preprocessor.get("feature_size") != 128:
+        raise integrity_error(
+            "ASR_MODEL_INVALID", "large-v3 requires preprocessor feature_size 128"
+        )
 
 
 def model_storage_directory(repository_root: Path, profile_id: str, profile: AsrProfile) -> Path:

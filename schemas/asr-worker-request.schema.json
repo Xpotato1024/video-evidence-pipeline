@@ -288,10 +288,21 @@
       "title": "Model",
       "type": "string"
     },
+    "model_file_count": {
+      "maximum": 100000,
+      "minimum": 1,
+      "title": "Model File Count",
+      "type": "integer"
+    },
     "model_path": {
       "const": "/model",
       "default": "/model",
       "title": "Model Path",
+      "type": "string"
+    },
+    "model_provisioned_at": {
+      "format": "date-time",
+      "title": "Model Provisioned At",
       "type": "string"
     },
     "model_repository": {
@@ -311,6 +322,12 @@
       "pattern": "^[0-9a-f]{64}$",
       "title": "Model Storage Identity",
       "type": "string"
+    },
+    "model_total_size_bytes": {
+      "maximum": 137438953472,
+      "minimum": 1,
+      "title": "Model Total Size Bytes",
+      "type": "integer"
     },
     "profile_id": {
       "pattern": "^[a-z0-9][a-z0-9-]{0,127}$",
@@ -350,6 +367,9 @@
     "model_repository",
     "model_revision",
     "model_storage_identity",
+    "model_file_count",
+    "model_total_size_bytes",
+    "model_provisioned_at",
     "requested_device_policy",
     "container_gpu_passthrough",
     "gpu_compute_type",

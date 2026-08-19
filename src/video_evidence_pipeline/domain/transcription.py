@@ -406,6 +406,9 @@ class AsrWorkerRequest(StrictModel):
     model_repository: str = Field(min_length=1, max_length=256)
     model_revision: str = Field(pattern=r"^[0-9a-f]{40}$")
     model_storage_identity: Sha256
+    model_file_count: int = Field(ge=1, le=100_000)
+    model_total_size_bytes: int = Field(ge=1, le=128 * 1024 * 1024 * 1024)
+    model_provisioned_at: UtcDateTime
     requested_device_policy: str = Field(pattern=r"^(auto|cpu|cuda|cuda:[0-9]+)$")
     container_gpu_passthrough: bool
     gpu_unavailable_reason: DeviceSelectionReason | None = None

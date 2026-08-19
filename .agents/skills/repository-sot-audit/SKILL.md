@@ -28,7 +28,7 @@ description: 文書SoT、Skill台帳、リンク、禁止ファイル、秘密�
 ## Procedure
 
 1. 文書台帳と対象canonical文書を読む。
-2. `uv sync --locked --all-groups`を実行する。
+2. `uv sync --locked`を実行し、normal host dependencyだけを同期する。
 3. lint、tests、`scripts/validate_repository.py`を実行する。
 4. エラーを重大度付きで整理する。
 5. 修正依頼がない限り、監査結果だけを返す。

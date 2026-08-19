@@ -31,9 +31,9 @@ from video_evidence_pipeline.transcription.device import (
 from video_evidence_pipeline.transcription.profiles import (
     AsrModelProvisionManifest,
     AsrProfile,
+    required_model_files,
 )
 
-_REQUIRED_MODEL_FILES = ("config.json", "model.bin", "tokenizer.json")
 _MAXIMUM_MODEL_FILES = 10_000
 _MAXIMUM_MODEL_BYTES = 64 * 1024 * 1024 * 1024
 _MAXIMUM_WORD_PROBABILITIES_PER_SEGMENT = 4096
@@ -101,7 +101,8 @@ class FasterWhisperBackend:
                 "MODEL_UNAVAILABLE", "the configured local ASR model is unavailable"
             )
         resolved = directory.resolve(strict=True)
-        for name in _REQUIRED_MODEL_FILES:
+        required_files = required_model_files(self._profile)
+        for name in required_files:
             if not (resolved / name).is_file():
                 raise configuration_error(
                     "MODEL_UNAVAILABLE", "the configured local ASR model is incomplete"
@@ -137,7 +138,7 @@ class FasterWhisperBackend:
                     metadata.st_mtime_ns,
                 )
             )
-        if any(name not in {item[0] for item in metadata_rows} for name in _REQUIRED_MODEL_FILES):
+        if any(name not in {item[0] for item in metadata_rows} for name in required_files):
             raise configuration_error(
                 "MODEL_UNAVAILABLE", "the configured local ASR model is incomplete"
             )
@@ -151,7 +152,7 @@ class FasterWhisperBackend:
                 return dict(cached.hashes)
             from video_evidence_pipeline.transcription.provisioning import model_payload_hashes
 
-            hashes = model_payload_hashes(directory)
+            hashes = model_payload_hashes(directory, self._profile)
             _directory_after, _files_after, metadata_after = self._model_metadata()
             if metadata_after != metadata:
                 raise configuration_error("MODEL_INVALID", "the local ASR model changed")

@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import tempfile
+import threading
+from contextlib import suppress
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -22,17 +26,21 @@ from video_evidence_pipeline.domain.transcription import (
     TranscriptInterval,
     TranscriptionBackendIdentity,
     TranscriptionConfig,
-    TranscriptSource,
 )
 from video_evidence_pipeline.errors import configuration_error, integrity_error, io_error
-from video_evidence_pipeline.transcription.device import probe_nvidia_gpus
 from video_evidence_pipeline.transcription.profiles import (
     require_provisioned_model,
     resolve_asr_profile,
 )
+from video_evidence_pipeline.transcription.provisioning import (
+    cleanup_stale_provision_staging,
+    existing_provisioned_model,
+    provision_lock,
+)
 
 _ASR_CONTRACT_LABEL = "org.xpotato.vep.asr-contract-sha256"
 _MAXIMUM_WORKER_OUTPUT_BYTES = 128 * 1024 * 1024
+_MAXIMUM_WORKER_ERROR_BYTES = 1024 * 1024
 
 
 def _docker() -> str:
@@ -46,24 +54,76 @@ def _docker() -> str:
 
 
 def _run(command: list[str], *, code: str) -> subprocess.CompletedProcess[str]:
+    process: subprocess.Popen[bytes] | None = None
     try:
-        completed = subprocess.run(
+        process = subprocess.Popen(
             command,
-            check=True,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=24 * 60 * 60,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
-        if (
-            len(completed.stdout.encode("utf-8")) > _MAXIMUM_WORKER_OUTPUT_BYTES
-            or len(completed.stderr.encode("utf-8")) > 1024 * 1024
-        ):
+        if process.stdout is None or process.stderr is None:  # pragma: no cover - Popen contract
+            raise OSError("ASR container pipes are unavailable")
+        overflow = threading.Event()
+        stdout = BytesIO()
+        stderr = BytesIO()
+
+        def drain(stream, destination: BytesIO, limit: int) -> None:
+            while chunk := stream.read(64 * 1024):
+                remaining = limit - destination.tell()
+                if remaining > 0:
+                    destination.write(chunk[:remaining])
+                if len(chunk) > remaining:
+                    overflow.set()
+                    with suppress(OSError):
+                        process.kill()
+                    return
+
+        readers = (
+            threading.Thread(
+                target=drain,
+                args=(process.stdout, stdout, _MAXIMUM_WORKER_OUTPUT_BYTES),
+                daemon=True,
+            ),
+            threading.Thread(
+                target=drain,
+                args=(process.stderr, stderr, _MAXIMUM_WORKER_ERROR_BYTES),
+                daemon=True,
+            ),
+        )
+        for reader in readers:
+            reader.start()
+        try:
+            returncode = process.wait(timeout=24 * 60 * 60)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=30)
+            raise
+        finally:
+            for reader in readers:
+                reader.join(timeout=30)
+        if any(reader.is_alive() for reader in readers):
+            process.kill()
+            raise OSError("ASR container output reader did not stop")
+        if overflow.is_set():
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=30)
             raise io_error(code, "ASR container output exceeded its byte limit")
-        return completed
+        stdout_text = stdout.getvalue().decode("utf-8")
+        stderr_text = stderr.getvalue().decode("utf-8")
+        if returncode != 0:
+            raise subprocess.CalledProcessError(
+                returncode, command, output=stdout_text, stderr=stderr_text
+            )
+        return subprocess.CompletedProcess(command, returncode, stdout_text, stderr_text)
+    except UnicodeDecodeError:
+        raise io_error(code, "ASR container output is not valid UTF-8") from None
     except (OSError, subprocess.SubprocessError) as exc:
         detail = getattr(exc, "stderr", None) or str(exc)
         raise io_error(code, str(detail).strip()[:1024] or "ASR container command failed") from None
+    finally:
+        if process is not None and process.poll() is None:
+            process.kill()
 
 
 def _image_digest(docker: str, image: str) -> str | None:
@@ -162,6 +222,8 @@ def build_asr_image(repository_root: Path, profile_id: str | None = None) -> str
             profile.container_image,
             "--label",
             f"{_ASR_CONTRACT_LABEL}={contract_identity}",
+            "--build-arg",
+            f"VEP_ASR_CONTRACT_SHA256={contract_identity}",
             str(repository_root),
         ],
         code="ASR_CONTAINER_BUILD_FAILED",
@@ -170,7 +232,9 @@ def build_asr_image(repository_root: Path, profile_id: str | None = None) -> str
     return profile.container_image
 
 
-def _gpu_preflight_failure_reason(docker: str, image: str) -> DeviceSelectionReason | None:
+def _gpu_preflight_failure_reason(
+    docker: str, image: str, device_policy: str
+) -> DeviceSelectionReason | None:
     try:
         completed = subprocess.run(
             [
@@ -190,9 +254,9 @@ def _gpu_preflight_failure_reason(docker: str, image: str) -> DeviceSelectionRea
                 (
                     "import ctranslate2, json; "
                     "count = ctranslate2.get_cuda_device_count(); "
-                    "print(json.dumps({'count': count, 'float16': "
-                    "any('float16' in ctranslate2.get_supported_compute_types('cuda', i) "
-                    "for i in range(count))}))"
+                    "print(json.dumps({'count': count, 'float16_indices': "
+                    "[i for i in range(count) if 'float16' in "
+                    "ctranslate2.get_supported_compute_types('cuda', i)]}))"
                 ),
             ],
             check=True,
@@ -202,11 +266,23 @@ def _gpu_preflight_failure_reason(docker: str, image: str) -> DeviceSelectionRea
             timeout=120,
         )
         probe = json.loads(completed.stdout)
-        if not isinstance(probe, dict) or not isinstance(probe.get("count"), int):
+        if (
+            not isinstance(probe, dict)
+            or not isinstance(probe.get("count"), int)
+            or not isinstance(probe.get("float16_indices"), list)
+            or any(not isinstance(index, int) for index in probe["float16_indices"])
+        ):
             return DeviceSelectionReason.BACKEND_CUDA_UNAVAILABLE
         if probe["count"] <= 0:
-            return DeviceSelectionReason.BACKEND_CUDA_UNAVAILABLE
-        if probe.get("float16") is not True:
+            return DeviceSelectionReason.NO_GPU_VISIBLE
+        requested_index = (
+            int(device_policy.split(":", 1)[1]) if device_policy.startswith("cuda:") else None
+        )
+        if requested_index is not None and requested_index >= probe["count"]:
+            return DeviceSelectionReason.NO_GPU_VISIBLE
+        if requested_index is not None and requested_index not in probe["float16_indices"]:
+            return DeviceSelectionReason.GPU_COMPUTE_TYPE_UNSUPPORTED
+        if requested_index is None and not probe["float16_indices"]:
             return DeviceSelectionReason.GPU_COMPUTE_TYPE_UNSUPPORTED
         return None
     except subprocess.CalledProcessError as exc:
@@ -374,7 +450,7 @@ def run_asr_worker(
     model, provision_manifest = require_provisioned_model(repository_root, selected, profile)
     from video_evidence_pipeline.transcription.provisioning import model_payload_identity
 
-    identity, file_count, total_size = model_payload_identity(model)
+    identity, file_count, total_size = model_payload_identity(model, profile)
     if (
         identity != provision_manifest.model_storage_identity
         or file_count != provision_manifest.file_count
@@ -387,11 +463,8 @@ def run_asr_worker(
     gpu_unavailable_reason: DeviceSelectionReason | None = None
     if config.asr_device == "cpu":
         gpu_usable = False
-    elif not probe_nvidia_gpus():
-        gpu_usable = False
-        gpu_unavailable_reason = DeviceSelectionReason.NO_GPU_VISIBLE
     else:
-        gpu_unavailable_reason = _gpu_preflight_failure_reason(docker, digest)
+        gpu_unavailable_reason = _gpu_preflight_failure_reason(docker, digest, config.asr_device)
         gpu_usable = gpu_unavailable_reason is None
     if config.asr_device.startswith("cuda") and not gpu_usable:
         raise configuration_error(
@@ -409,6 +482,9 @@ def run_asr_worker(
         model_repository=profile.model_repository,
         model_revision=profile.model_revision,
         model_storage_identity=provision_manifest.model_storage_identity,
+        model_file_count=provision_manifest.file_count,
+        model_total_size_bytes=provision_manifest.total_size_bytes,
+        model_provisioned_at=provision_manifest.provisioned_at,
         requested_device_policy=config.asr_device,
         container_gpu_passthrough=gpu_usable,
         gpu_unavailable_reason=gpu_unavailable_reason,
@@ -469,18 +545,9 @@ class ContainerAsrBackend:
     def identity(self) -> TranscriptionBackendIdentity:
         if self._final_identity is not None:
             return self._final_identity
-        _selected, profile = resolve_asr_profile(self._repository_root, self._config.asr_profile)
-        return TranscriptionBackendIdentity(
-            source=TranscriptSource.ASR,
-            name=profile.engine,
-            version=profile.engine_version,
-            runtime=profile.runtime,
-            runtime_version=profile.runtime_version,
-            model=profile.model_repository,
-            model_repository=profile.model_repository,
-            model_revision=profile.model_revision,
-            device_policy=self._config.asr_device,
-            local_files_only=True,
+        raise configuration_error(
+            "ASR_IDENTITY_NOT_FINAL",
+            "ASR backend identity is available only after container inference",
         )
 
     def transcribe(
@@ -530,37 +597,42 @@ def run_transcription_container(workspace_path: Path, config: TranscriptionConfi
 
 def run_provision_container(repository_root: Path, profile_id: str | None = None) -> str:
     selected, profile = resolve_asr_profile(repository_root, profile_id)
-    docker = _docker()
-    digest = _require_image_identity(docker, profile.container_image, repository_root)
     from video_evidence_pipeline.transcription.provisioning import publish_model_payload
 
-    with tempfile.TemporaryDirectory(prefix="vep-asr-provision-") as temporary:
-        staging = Path(temporary)
-        command = [
-            docker,
-            "run",
-            "--rm",
-            "--pull",
-            "never",
-            "--mount",
-            f"type=bind,src={staging},dst=/output",
-            digest,
-            "asr",
-            "provision-worker",
-            "--repository",
-            profile.model_repository,
-            "--revision",
-            profile.model_revision,
-            "--output",
-            "/output/model",
-            "--json",
-        ]
-        _run(command, code="ASR_MODEL_PROVISION_FAILED")
-        model, manifest, reused = publish_model_payload(
-            repository_root,
-            selected,
-            staging / "model",
-        )
+    with provision_lock(repository_root, selected, profile.model_revision):
+        cleanup_stale_provision_staging(repository_root, selected)
+        existing = existing_provisioned_model(repository_root, selected, profile)
+        if existing is not None:
+            model, manifest, reused = existing
+        else:
+            docker = _docker()
+            digest = _require_image_identity(docker, profile.container_image, repository_root)
+            with tempfile.TemporaryDirectory(prefix="vep-asr-provision-") as temporary:
+                staging = Path(temporary)
+                command = [
+                    docker,
+                    "run",
+                    "--rm",
+                    "--pull",
+                    "never",
+                    "--mount",
+                    f"type=bind,src={staging},dst=/output",
+                    digest,
+                    "asr",
+                    "provision-worker",
+                    "--profile",
+                    selected,
+                    "--output",
+                    "/output/model",
+                    "--json",
+                ]
+                _run(command, code="ASR_MODEL_PROVISION_FAILED")
+                model, manifest, reused = publish_model_payload(
+                    repository_root,
+                    selected,
+                    staging / "model",
+                    expected_profile=profile,
+                )
     return json.dumps(
         {
             "ok": True,
@@ -620,3 +692,25 @@ def smoke_asr_image(repository_root: Path, profile_id: str | None = None) -> dic
         code="ASR_CONTAINER_SMOKE_FAILED",
     )
     return {"image": profile.container_image, "identity": digest, "contract": "valid"}
+
+
+def preflight_asr_gpu(
+    repository_root: Path,
+    profile_id: str | None = None,
+    device_policy: str = "auto",
+) -> dict[str, Any]:
+    if re.fullmatch(r"(?:auto|cuda|cuda:[0-9]+)", device_policy) is None:
+        raise configuration_error(
+            "ASR_DEVICE_INVALID", "GPU preflight requires auto, cuda, or cuda:<index>"
+        )
+    docker = _docker()
+    _selected, profile = resolve_asr_profile(repository_root, profile_id)
+    digest = _require_image_identity(docker, profile.container_image, repository_root)
+    reason = _gpu_preflight_failure_reason(docker, digest, device_policy)
+    return {
+        "image": profile.container_image,
+        "identity": digest,
+        "device_policy": device_policy,
+        "gpu_usable": reason is None,
+        "reason": reason.value if reason is not None else None,
+    }

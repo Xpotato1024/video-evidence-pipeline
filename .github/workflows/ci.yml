@@ -31,14 +31,20 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
       - run: uv python install "${{ env.PYTHON_VERSION }}"
-      - run: uv sync --locked --all-groups
+      - run: uv sync --locked
+      - name: Verify host dependency boundary
+        run: >-
+          uv run --no-sync python -c "import importlib.util;
+          assert importlib.util.find_spec('faster_whisper') is None;
+          assert importlib.util.find_spec('ctranslate2') is None;
+          assert importlib.util.find_spec('huggingface_hub') is None"
       - run: uv run ruff check src scripts tests
       - run: uv run ruff format --check src scripts tests
 
   tests:
     name: tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -48,7 +54,13 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
       - run: uv python install "${{ env.PYTHON_VERSION }}"
-      - run: uv sync --locked --all-groups
+      - run: uv sync --locked
+      - name: Verify host dependency boundary
+        run: >-
+          uv run --no-sync python -c "import importlib.util;
+          assert importlib.util.find_spec('faster_whisper') is None;
+          assert importlib.util.find_spec('ctranslate2') is None;
+          assert importlib.util.find_spec('huggingface_hub') is None"
       - name: Install system FFmpeg
         run: |
           sudo apt-get update
@@ -82,7 +94,13 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
       - run: uv python install "${{ env.PYTHON_VERSION }}"
-      - run: uv sync --locked --all-groups
+      - run: uv sync --locked
+      - name: Verify host dependency boundary
+        run: >-
+          uv run --no-sync python -c "import importlib.util;
+          assert importlib.util.find_spec('faster_whisper') is None;
+          assert importlib.util.find_spec('ctranslate2') is None;
+          assert importlib.util.find_spec('huggingface_hub') is None"
       - run: uv run python scripts/validate_repository.py --root .
 
   asr-container-build:
@@ -98,8 +116,14 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
       - run: uv python install "${{ env.PYTHON_VERSION }}"
-      - run: uv sync --locked --all-groups
+      - run: uv sync --locked --no-dev
+      - name: Verify host dependency boundary
+        run: >-
+          uv run --no-sync python -c "import importlib.util;
+          assert importlib.util.find_spec('faster_whisper') is None;
+          assert importlib.util.find_spec('ctranslate2') is None;
+          assert importlib.util.find_spec('huggingface_hub') is None"
       - name: Build pinned ASR image
-        run: uv run vep asr image-build --repository-root . --json
+        run: uv run --no-sync vep asr image-build --repository-root . --json
       - name: Validate ASR runtime contract
-        run: uv run vep asr image-smoke --repository-root . --json
+        run: uv run --no-sync vep asr image-smoke --repository-root . --json

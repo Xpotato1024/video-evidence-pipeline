@@ -152,7 +152,7 @@ continues to use `BOX_CREDENTIAL_REQUIRED`.
 - `NETWORK_SSRF_REJECTED`: public HTTPS destinationか確認する。検査無効化optionはない。
 - `NETWORK_TIMEOUT`／`SOURCE_TOO_LARGE`: `--network-timeout`、`--maximum-download-seconds`、
   `--maximum-download-bytes`のbounded runtime optionを見直す。TLS無効化はできない。
-- `YTDLP_NOT_AVAILABLE`: lock済みdependencyを`uv sync --locked --all-groups`で復元する。
+- `YTDLP_NOT_AVAILABLE`: lock済みhost dependencyを`uv sync --locked`で復元する。
 - `PANOPTO_CREDENTIAL_REQUIRED`／`BOX_CREDENTIAL_REQUIRED`: token valueではなく環境変数名を指定する。
 - `PANOPTO_DOWNLOAD_UNAVAILABLE`: tenant policyを確認する。DRMやdownload禁止を迂回しない。
 

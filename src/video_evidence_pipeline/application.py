@@ -210,6 +210,15 @@ def _load_context(path: Path) -> tuple[JobWorkspace, JobSpec, list[TransitionRec
     return workspace, job, transitions, state
 
 
+def _length_blocked_stage(transitions: list[TransitionRecord]) -> str | None:
+    if not transitions or transitions[-1].to_state is not JobState.BLOCKED:
+        return None
+    return {
+        "author.length-exhausted": "initial_authoring",
+        "revision.length-exhausted": "semantic_revision",
+    }.get(transitions[-1].trigger)
+
+
 def initialize_job(
     repository_root: Path,
     *,
@@ -461,8 +470,14 @@ def _recovery_parent(
     raw_artifact = verify_acquired_bundle(workspace, job)
     media = load_normalization_result(workspace, job, raw_artifact)
     transcript = load_transcription_result(workspace, job, media.media_manifest)
-    if workspace.safe_path("manifests/authoring/length-block.json").exists():
-        load_length_block(workspace, job, deep=False)
+    length_blocked_stage = _length_blocked_stage(transitions)
+    if length_blocked_stage is not None:
+        load_length_block(
+            workspace,
+            job,
+            deep=False,
+            expected_blocked_stage=length_blocked_stage,
+        )
     source_manifest = read_json_model(
         workspace.source_manifest_json,
         SourceManifest,
@@ -762,11 +777,14 @@ def _validate_job_unmapped(path: Path, *, deep: bool = False) -> dict[str, Any]:
                         evidence_segments,
                         deep=deep,
                     )
-                    if (
-                        state is JobState.BLOCKED
-                        and workspace.safe_path("manifests/authoring/length-block.json").exists()
-                    ):
-                        length_block = load_length_block(workspace, job, deep=deep)
+                    length_blocked_stage = _length_blocked_stage(transitions)
+                    if state is JobState.BLOCKED and length_blocked_stage is not None:
+                        length_block = load_length_block(
+                            workspace,
+                            job,
+                            deep=deep,
+                            expected_blocked_stage=length_blocked_stage,
+                        )
                         if length_block.blocked_stage == "semantic_revision":
                             _load_authoring_state_integrity(
                                 workspace,
@@ -2075,6 +2093,11 @@ def prepare_authoring_job(path: Path, skill_id: str) -> AuthoringPrepareResult:
         exclusive_append_lock(workspace.transitions_jsonl),
     ):
         workspace, job, transitions, state = _load_context(path)
+        if state is JobState.BLOCKED and _length_blocked_stage(transitions) is not None:
+            raise state_error(
+                "LENGTH_EXHAUSTION_BLOCKED",
+                "job is already BLOCKED by length exhaustion; recovery is required",
+            )
         if state not in {
             JobState.EVIDENCE_READY,
             JobState.DRAFTED,
@@ -2121,6 +2144,11 @@ def _import_authoring_job_locked(
     workspace = JobWorkspace.open(path)
     with exclusive_append_lock(workspace.transitions_jsonl):
         workspace, job, transitions, state = _load_context(path)
+        if state is JobState.BLOCKED and _length_blocked_stage(transitions) is not None:
+            raise state_error(
+                "LENGTH_EXHAUSTION_BLOCKED",
+                "job is already BLOCKED by length exhaustion; recovery is required",
+            )
         if state not in {
             JobState.EVIDENCE_READY,
             JobState.DRAFTED,
@@ -2579,6 +2607,11 @@ def prepare_revision_job(path: Path, skill_id: str) -> RevisionPrepareResult:
         exclusive_append_lock(workspace.transitions_jsonl),
     ):
         workspace, job, transitions, state = _load_context(path)
+        if state is JobState.BLOCKED and _length_blocked_stage(transitions) is not None:
+            raise state_error(
+                "LENGTH_EXHAUSTION_BLOCKED",
+                "job is already BLOCKED by length exhaustion; recovery is required",
+            )
         if state is not JobState.REVISION_REQUIRED:
             raise state_error("STATE_GATE_FAILED", "job must be REVISION_REQUIRED")
         authorization = _authorization(workspace)
@@ -2627,6 +2660,11 @@ def _import_revision_job_locked(
     workspace = JobWorkspace.open(path)
     with exclusive_append_lock(workspace.transitions_jsonl):
         workspace, job, transitions, state = _load_context(path)
+        if state is JobState.BLOCKED and _length_blocked_stage(transitions) is not None:
+            raise state_error(
+                "LENGTH_EXHAUSTION_BLOCKED",
+                "job is already BLOCKED by length exhaustion; recovery is required",
+            )
         if state not in {JobState.REVISION_REQUIRED, JobState.DRAFTED}:
             raise state_error("STATE_GATE_FAILED", "job must be REVISION_REQUIRED")
         authorization = _authorization(workspace)

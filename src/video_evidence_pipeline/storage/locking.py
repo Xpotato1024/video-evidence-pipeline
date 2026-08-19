@@ -43,9 +43,10 @@ def exclusive_file_lock(
         if not stat.S_ISREG(os.fstat(descriptor).st_mode):
             raise OSError("lock path must be a regular file")
         enforce_private_descriptor(descriptor, PRIVATE_FILE_MODE)
-        os.ftruncate(descriptor, 1)
         os.lseek(descriptor, 0, os.SEEK_SET)
         _acquire_process_lock(descriptor, timeout_seconds=timeout_seconds)
+        os.ftruncate(descriptor, 1)
+        os.lseek(descriptor, 0, os.SEEK_SET)
         yield
     except BlockingIOError as exc:
         raise integrity_error(busy_code, busy_message) from exc
