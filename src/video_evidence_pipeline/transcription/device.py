@@ -63,7 +63,6 @@ def select_device(
         )
 
     ordered = sorted(capabilities.gpus, key=lambda gpu: (-gpu.free_vram_mib, gpu.index))
-    candidate = ordered[0] if ordered else None
     per_gpu = dict(capabilities.cuda_compute_types_by_gpu)
     compute_eligible = [
         gpu
@@ -94,6 +93,11 @@ def select_device(
                 reason = DeviceSelectionReason.GPU_COMPUTE_TYPE_UNSUPPORTED
             else:
                 reason = DeviceSelectionReason.INSUFFICIENT_FREE_VRAM
+            candidate = (
+                compute_eligible[0]
+                if reason is DeviceSelectionReason.INSUFFICIENT_FREE_VRAM
+                else None
+            )
             return DeviceSelection(
                 device_policy,
                 "cpu",

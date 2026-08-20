@@ -36,6 +36,7 @@ from video_evidence_pipeline.errors import VepError
 from video_evidence_pipeline.transcription import container as container_module
 from video_evidence_pipeline.transcription import device as device_module
 from video_evidence_pipeline.transcription.device import (
+    DeviceSelection,
     GpuDevice,
     RuntimeCapabilities,
     is_gpu_resource_error,
@@ -76,8 +77,9 @@ def _caps(
     passthrough: bool = True,
     cuda: bool = True,
     compute: frozenset[str] = frozenset({"float16"}),
+    compute_by_gpu: tuple[tuple[int, frozenset[str]], ...] = (),
 ) -> RuntimeCapabilities:
-    return RuntimeCapabilities(tuple(gpus), passthrough, cuda, compute)
+    return RuntimeCapabilities(tuple(gpus), passthrough, cuda, compute, compute_by_gpu)
 
 
 def _worker_request(device: str = "cpu") -> AsrWorkerRequest:
@@ -150,6 +152,42 @@ def _profiled_cpu_backend(
         fallback_from="cuda" if fallback else None,
         fallback_reason=fallback_reason,
         **candidate,
+    )
+
+
+def _profiled_backend_from_selection(
+    request: AsrWorkerRequest, selection: DeviceSelection
+) -> TranscriptionBackendIdentity:
+    profile = _profile()
+    selected = selection.gpu
+    candidate = selection.candidate_gpu
+    return TranscriptionBackendIdentity(
+        source=TranscriptSource.ASR,
+        name=profile.engine,
+        version=profile.engine_version,
+        runtime=profile.runtime,
+        runtime_version=profile.runtime_version,
+        model=profile.model_repository,
+        model_repository=profile.model_repository,
+        model_revision=profile.model_revision,
+        model_fingerprint=request.model_storage_identity,
+        model_storage_identity=request.model_storage_identity,
+        device_policy=request.requested_device_policy,
+        selection_reason=selection.reason,
+        selected_device=selection.selected_device,
+        gpu_index=selected.index if selected is not None else None,
+        gpu_name=selected.name if selected is not None else None,
+        total_vram_mib=selected.total_vram_mib if selected is not None else None,
+        free_vram_at_selection_mib=(selected.free_vram_mib if selected is not None else None),
+        configured_min_free_vram_mib=profile.min_free_vram_mib,
+        candidate_gpu_index=candidate.index if candidate is not None else None,
+        candidate_gpu_name=candidate.name if candidate is not None else None,
+        candidate_total_vram_mib=(candidate.total_vram_mib if candidate is not None else None),
+        candidate_free_vram_mib=(candidate.free_vram_mib if candidate is not None else None),
+        compute_type=selection.compute_type,
+        container_image=request.container_image,
+        container_image_digest=request.container_image_digest,
+        fallback=False,
     )
 
 
@@ -682,6 +720,101 @@ def test_multi_gpu_selection_and_explicit_semantics() -> None:
     assert unavailable.value.code == "ASR_DEVICE_UNAVAILABLE"
     tied = _caps(GpuDevice(2, "later", 8192, 7000), GpuDevice(1, "earlier", 8192, 7000))
     assert select_device(_profile(), "auto", tied).gpu.index == 1  # type: ignore[union-attr]
+
+
+def test_auto_candidate_is_best_compute_eligible_gpu_below_threshold() -> None:
+    capabilities = _caps(
+        GpuDevice(0, "unsupported-large", 16384, 12000),
+        GpuDevice(1, "supported-small", 8192, 5000),
+        compute_by_gpu=(
+            (0, frozenset({"int8"})),
+            (1, frozenset({"float16"})),
+        ),
+    )
+
+    selection = select_device(_profile(), "auto", capabilities)
+
+    assert selection.selected_device == "cpu"
+    assert selection.reason is DeviceSelectionReason.INSUFFICIENT_FREE_VRAM
+    assert selection.candidate_gpu == capabilities.gpus[1]
+
+
+def test_auto_selects_compute_eligible_gpu_at_exact_threshold() -> None:
+    capabilities = _caps(
+        GpuDevice(0, "unsupported-large", 16384, 12000),
+        GpuDevice(1, "supported-threshold", 8192, 6144),
+        compute_by_gpu=(
+            (0, frozenset({"int8"})),
+            (1, frozenset({"float16"})),
+        ),
+    )
+
+    selection = select_device(_profile(), "auto", capabilities)
+
+    assert selection.selected_device == "cuda"
+    assert selection.compute_type == "float16"
+    assert selection.gpu == capabilities.gpus[1]
+
+
+def test_auto_selects_best_supported_gpu_and_ties_by_lowest_index() -> None:
+    capabilities = _caps(
+        GpuDevice(0, "unsupported-largest", 24576, 20000),
+        GpuDevice(3, "supported-later", 12288, 7000),
+        GpuDevice(2, "supported-earlier", 12288, 7000),
+        GpuDevice(1, "supported-smaller", 8192, 6500),
+        compute_by_gpu=(
+            (0, frozenset({"int8"})),
+            (1, frozenset({"float16"})),
+            (2, frozenset({"float16"})),
+            (3, frozenset({"float16"})),
+        ),
+    )
+
+    selection = select_device(_profile(), "auto", capabilities)
+
+    assert selection.gpu == capabilities.gpus[2]
+    assert selection.candidate_gpu == capabilities.gpus[2]
+
+
+def test_host_accepts_compute_eligible_candidate_below_threshold() -> None:
+    request = _worker_request("auto")
+    capabilities = _caps(
+        GpuDevice(0, "unsupported-large", 16384, 12000),
+        GpuDevice(1, "supported-small", 8192, 5000),
+        compute_by_gpu=(
+            (0, frozenset({"int8"})),
+            (1, frozenset({"float16"})),
+        ),
+    )
+    selection = select_device(_profile(), "auto", capabilities)
+    response = AsrWorkerResponse(
+        backend=_profiled_backend_from_selection(request, selection), segments=[]
+    )
+
+    assert request.gpu_unavailable_reason is None
+    assert container_module._validate_worker_response(request, response) is response
+
+
+def test_all_compute_unsupported_gpus_have_no_candidate_provenance() -> None:
+    capabilities = _caps(
+        GpuDevice(0, "unsupported-large", 16384, 12000),
+        GpuDevice(1, "unsupported-small", 8192, 7000),
+        compute_by_gpu=(
+            (0, frozenset({"int8"})),
+            (1, frozenset({"int8"})),
+        ),
+    )
+    selection = select_device(_profile(), "auto", capabilities)
+    request = _worker_request("auto").model_copy(
+        update={"gpu_unavailable_reason": DeviceSelectionReason.GPU_COMPUTE_TYPE_UNSUPPORTED}
+    )
+    response = AsrWorkerResponse(
+        backend=_profiled_backend_from_selection(request, selection), segments=[]
+    )
+
+    assert selection.reason is DeviceSelectionReason.GPU_COMPUTE_TYPE_UNSUPPORTED
+    assert selection.candidate_gpu is None
+    assert container_module._validate_worker_response(request, response) is response
 
 
 def test_only_gpu_resource_failures_are_fallback_eligible() -> None:
