@@ -262,10 +262,11 @@ def _expected_request(
     skill = (
         load_skill_snapshot(workspace, "refine-video-transcript", allowed=REFINEMENT_SKILLS)
         if bind_skill
-        else None
+        else frozen_skill
     )
     if (
-        skill is not None
+        bind_skill
+        and skill is not None
         and frozen_skill is not None
         and same_skill_snapshot_except_lifecycle(frozen_skill, skill)
     ):
@@ -290,6 +291,53 @@ def _expected_request(
     )
 
 
+def _refinement_request_matches(
+    stored: RefinementRequestManifest, expected: RefinementRequestManifest, *, deep: bool
+) -> bool:
+    if deep:
+        return stored == expected
+    return stored.model_dump(
+        mode="json",
+        exclude={"request_fingerprint", "raw_transcript_fingerprint"},
+    ) == expected.model_dump(
+        mode="json",
+        exclude={"request_fingerprint", "raw_transcript_fingerprint"},
+    )
+
+
+def _load_stored_refinement_request(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    media_manifest: MediaManifest,
+    raw_manifest: TranscriptManifest,
+    raw_segments: tuple[TranscriptSegment, ...],
+    *,
+    deep: bool,
+    enforce_current_skill: bool,
+) -> RefinementRequestManifest:
+    """Validate a stored request from deterministic inputs and the selected Skill binding."""
+
+    stored = _read_model(
+        workspace.refinement_request_json,
+        RefinementRequestManifest,
+        code="REFINEMENT_REQUEST_INVALID",
+    )
+    expected = _expected_request(
+        workspace,
+        job,
+        media_manifest,
+        raw_manifest,
+        raw_segments,
+        created_at=stored.created_at,
+        deep=deep,
+        bind_skill=enforce_current_skill and stored.skill is not None,
+        frozen_skill=stored.skill,
+    )
+    if not _refinement_request_matches(stored, expected, deep=deep):
+        raise state_error("REFINEMENT_REQUEST_STALE", "refinement request is stale")
+    return stored
+
+
 def prepare_refinement_request(
     workspace: JobWorkspace,
     job: JobSpec,
@@ -302,36 +350,16 @@ def prepare_refinement_request(
     if job.supporting_inputs:
         prepare_supporting_inputs(workspace, job)
     if workspace.refinement_request_json.exists():
-        stored = _read_model(
-            workspace.refinement_request_json,
-            RefinementRequestManifest,
-            code="REFINEMENT_REQUEST_INVALID",
-        )
-        expected = _expected_request(
+        # A committed refinement validates the frozen request; pending imports keep the live gate.
+        stored = _load_stored_refinement_request(
             workspace,
             job,
             media_manifest,
             raw_manifest,
             raw_segments,
-            created_at=stored.created_at,
             deep=deep,
-            bind_skill=stored.skill is not None,
-            frozen_skill=stored.skill,
+            enforce_current_skill=not workspace.refinement_manifest_json.exists(),
         )
-        request_matches = (
-            stored == expected
-            if deep
-            else stored.model_dump(
-                mode="json",
-                exclude={"request_fingerprint", "raw_transcript_fingerprint"},
-            )
-            == expected.model_dump(
-                mode="json",
-                exclude={"request_fingerprint", "raw_transcript_fingerprint"},
-            )
-        )
-        if not request_matches:
-            raise state_error("REFINEMENT_REQUEST_STALE", "refinement request is stale")
         return RefinementPrepareResult(stored, reused=True)
     request = _expected_request(
         workspace,

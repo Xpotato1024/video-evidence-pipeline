@@ -406,10 +406,11 @@ def _expected_request(
     skill = (
         load_skill_snapshot(workspace, "analyze-video-evidence", allowed=EVIDENCE_SKILLS)
         if bind_skill
-        else None
+        else frozen_skill
     )
     if (
-        skill is not None
+        bind_skill
+        and skill is not None
         and frozen_skill is not None
         and same_skill_snapshot_except_lifecycle(frozen_skill, skill)
     ):
@@ -472,6 +473,59 @@ def _expected_request(
     )
 
 
+def _evidence_request_matches(
+    stored: EvidenceRequestManifest, expected: EvidenceRequestManifest, *, deep: bool
+) -> bool:
+    if deep:
+        return stored == expected
+    stored_values = stored.model_dump(mode="json", exclude={"request_fingerprint"})
+    expected_values = expected.model_dump(mode="json", exclude={"request_fingerprint"})
+    stored_values.pop("transcript_bundle_fingerprint", None)
+    expected_values.pop("transcript_bundle_fingerprint", None)
+    stored_values.pop("media_bundle_fingerprint", None)
+    expected_values.pop("media_bundle_fingerprint", None)
+    stored_values["analyzer_contract"].pop("atomic_proposition_contract", None)
+    expected_values["analyzer_contract"].pop("atomic_proposition_contract", None)
+    return stored_values == expected_values
+
+
+def _load_stored_evidence_request(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    media_manifest: MediaManifest,
+    transcript_manifest: TranscriptManifest,
+    segments: tuple[TranscriptSegment, ...],
+    *,
+    deep: bool,
+    enforce_current_skill: bool,
+) -> EvidenceRequestManifest:
+    """Validate a stored request from deterministic inputs and the selected Skill binding."""
+
+    stored = _read_bounded_model(
+        workspace.evidence_request_json,
+        EvidenceRequestManifest,
+        maximum_bytes=_MAXIMUM_REQUEST_BYTES,
+        code="EVIDENCE_REQUEST_INVALID",
+    )
+    expected = _expected_request(
+        workspace,
+        job,
+        media_manifest,
+        transcript_manifest,
+        segments,
+        created_at=stored.created_at,
+        deep=deep,
+        bind_skill=enforce_current_skill and stored.skill is not None,
+        frozen_skill=stored.skill,
+    )
+    if not _evidence_request_matches(stored, expected, deep=deep):
+        raise state_error(
+            "EVIDENCE_REQUEST_STALE",
+            "prepared evidence request no longer matches canonical inputs",
+        )
+    return stored
+
+
 def prepare_evidence_request(
     workspace: JobWorkspace,
     job: JobSpec,
@@ -482,36 +536,16 @@ def prepare_evidence_request(
     deep: bool = False,
 ) -> EvidencePrepareResult:
     if workspace.evidence_request_json.exists():
-        stored = _read_bounded_model(
-            workspace.evidence_request_json,
-            EvidenceRequestManifest,
-            maximum_bytes=_MAXIMUM_REQUEST_BYTES,
-            code="EVIDENCE_REQUEST_INVALID",
-        )
-        expected = _expected_request(
+        # A committed evidence bundle validates its frozen request; pending imports keep the live gate.
+        stored = _load_stored_evidence_request(
             workspace,
             job,
             media_manifest,
             transcript_manifest,
             segments,
-            created_at=stored.created_at,
             deep=deep,
-            bind_skill=stored.skill is not None,
-            frozen_skill=stored.skill,
+            enforce_current_skill=not workspace.evidence_manifest_json.exists(),
         )
-        stored_values = stored.model_dump(mode="json", exclude={"request_fingerprint"})
-        expected_values = expected.model_dump(mode="json", exclude={"request_fingerprint"})
-        stored_values.pop("transcript_bundle_fingerprint", None)
-        expected_values.pop("transcript_bundle_fingerprint", None)
-        stored_values.pop("media_bundle_fingerprint", None)
-        expected_values.pop("media_bundle_fingerprint", None)
-        stored_values["analyzer_contract"].pop("atomic_proposition_contract", None)
-        expected_values["analyzer_contract"].pop("atomic_proposition_contract", None)
-        if stored_values != expected_values:
-            raise state_error(
-                "EVIDENCE_REQUEST_STALE",
-                "prepared evidence request no longer matches canonical inputs",
-            )
         return EvidencePrepareResult(stored, reused=True)
     request = _expected_request(
         workspace,
@@ -546,38 +580,15 @@ def load_evidence_request(
     *,
     deep: bool = False,
 ) -> EvidenceRequestManifest:
-    stored = _read_bounded_model(
-        workspace.evidence_request_json,
-        EvidenceRequestManifest,
-        maximum_bytes=_MAXIMUM_REQUEST_BYTES,
-        code="EVIDENCE_REQUEST_INVALID",
-    )
-    expected = _expected_request(
+    return _load_stored_evidence_request(
         workspace,
         job,
         media_manifest,
         transcript_manifest,
         segments,
-        created_at=stored.created_at,
         deep=deep,
-        bind_skill=stored.skill is not None,
-        frozen_skill=stored.skill,
+        enforce_current_skill=not workspace.evidence_manifest_json.exists(),
     )
-    if deep:
-        request_matches = stored == expected
-    else:
-        stored_values = stored.model_dump(mode="json", exclude={"request_fingerprint"})
-        expected_values = expected.model_dump(mode="json", exclude={"request_fingerprint"})
-        stored_values.pop("transcript_bundle_fingerprint", None)
-        expected_values.pop("transcript_bundle_fingerprint", None)
-        stored_values.pop("media_bundle_fingerprint", None)
-        expected_values.pop("media_bundle_fingerprint", None)
-        stored_values["analyzer_contract"].pop("atomic_proposition_contract", None)
-        expected_values["analyzer_contract"].pop("atomic_proposition_contract", None)
-        request_matches = stored_values == expected_values
-    if not request_matches:
-        raise state_error("EVIDENCE_REQUEST_STALE", "evidence request is stale")
-    return stored
 
 
 def _fixture_identity(identity: AnalyzerIdentity) -> bool:
