@@ -2,7 +2,7 @@
   "$id": "https://schemas.video-evidence-pipeline.local/v1/recovery-manifest.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Bind a fresh child job to the minimal eligible parent provenance.",
+  "description": "Bind a fresh child job to immutable pre-semantic parent provenance.",
   "properties": {
     "child_assignment_fingerprint": {
       "anyOf": [

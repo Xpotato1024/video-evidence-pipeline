@@ -331,6 +331,8 @@ def job_recover(
     child_spec: Annotated[Path | None, typer.Option("--child-spec")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
+    """Fork verified pre-semantic artifacts from a transcript-bearing parent."""
+
     result = _run(
         lambda: recover_job(
             parent,

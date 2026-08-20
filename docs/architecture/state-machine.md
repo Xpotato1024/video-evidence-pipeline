@@ -212,10 +212,13 @@ stateDiagram-v2
 `HUMAN_APPROVED`でもapproval bindingが壊れていれば`APPROVAL_STALE`としてexportを拒否します。有効な別contentは
 新しいjobで承認します。
 
-`BLOCKED` parentからのrecoveryは別child jobを作り、source／primary／supporting identityが一致する場合だけ
-acquisition、normalization、raw transcript、supporting artifactを再利用します。child assignment／outputは変更可能で、
-parent／child assignment fingerprintをmanifestへ記録します。evidence、draft、audit、revision、human-review、approval、
-exportはコピーせず、childを`TRANSCRIBED`から再開します。
+`job recover`はverified raw transcriptを持つparentから別child jobを作ります。`TRANSCRIBED`以降の成功stateと、
+一度`TRANSCRIBED`へ到達した`BLOCKED` parentを受け付け、pre-transcript parentは拒否します。
+source／primary／supporting identityが一致する場合だけacquisition、normalization、raw transcript、supporting artifactを
+再利用します。child assignment／outputは変更可能で、parent／child assignment fingerprintをmanifestへ記録します。
+evidence、refinement、draft、audit、revision、human-review、approval、exportはコピーせず、childを`TRANSCRIBED`で
+停止します。parentの作成時eligibilityと既存childのprovenance検証は分離し、parentが後で別の正規stateへ進んでも、
+parent job/specとpre-semantic artifactが不変ならchild provenanceを無効化しません。
 
 ## 6. 失敗とblockedの区別
 

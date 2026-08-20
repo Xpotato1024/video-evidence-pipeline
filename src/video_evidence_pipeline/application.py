@@ -319,7 +319,12 @@ class _RecoveryParent:
     finding_ids: tuple[str, ...]
 
 
-def _load_recovery_manifest(workspace: JobWorkspace, job: JobSpec) -> RecoveryManifest:
+def _load_recovery_manifest(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    *,
+    deep: bool = False,
+) -> RecoveryManifest:
     manifest = read_json_model(
         workspace.recovery_manifest_json,
         RecoveryManifest,
@@ -332,8 +337,28 @@ def _load_recovery_manifest(workspace: JobWorkspace, job: JobSpec) -> RecoveryMa
             "RECOVERY_MANIFEST_MISMATCH",
             "recovery manifest does not match the child job",
         )
-    parent = _recovery_parent(workspace.jobs_root / manifest.parent_job_id)
+    parent = _recovery_parent(
+        workspace.jobs_root / manifest.parent_job_id,
+        require_creation_eligibility=False,
+        deep=deep,
+    )
     authorization = _authorization(workspace)
+    child_source = read_json_model(
+        workspace.source_manifest_json,
+        SourceManifest,
+        code="SOURCE_MANIFEST_INVALID",
+    )
+    child_raw = verify_acquired_bundle(workspace, job, deep=deep)
+    child_media = load_normalization_result(workspace, job, child_raw, deep=deep)
+    child_transcript = load_transcription_result(
+        workspace,
+        job,
+        child_media.media_manifest,
+        deep=deep,
+    )
+    child_supporting = (
+        load_supporting_inputs(workspace, job, deep=deep) if job.supporting_inputs else None
+    )
     if (
         manifest.parent_job_fingerprint != job_fingerprint(parent.job)
         or (
@@ -349,6 +374,13 @@ def _load_recovery_manifest(workspace: JobWorkspace, job: JobSpec) -> RecoveryMa
         or authorization.allow_local_processing != parent.authorization.allow_local_processing
         or authorization.allow_network_acquisition != parent.authorization.allow_network_acquisition
         or authorization.allow_external_api != parent.authorization.allow_external_api
+        or child_source.artifact_record.artifact != parent.source.artifact_record.artifact
+        or child_media.media_manifest.model_dump(mode="json", exclude={"job_id"})
+        != parent.media.media_manifest.model_dump(mode="json", exclude={"job_id"})
+        or child_transcript.transcript_manifest.model_dump(mode="json", exclude={"job_id"})
+        != parent.transcript.transcript_manifest.model_dump(mode="json", exclude={"job_id"})
+        or (tuple(child_supporting.inputs) if child_supporting is not None else ())
+        != (tuple(parent.supporting.inputs) if parent.supporting is not None else ())
     ):
         raise integrity_error(
             "RECOVERY_PROVENANCE_MISMATCH",
@@ -455,27 +487,64 @@ def _copy_recovery_artifacts(
             _verify_recovery_copy(target, artifact)
 
 
+_TRANSCRIPT_BEARING_PARENT_STATES = frozenset(
+    {
+        JobState.TRANSCRIBED,
+        JobState.TRANSCRIPT_REFINED,
+        JobState.EVIDENCE_READY,
+        JobState.DRAFTED,
+        JobState.AUDITED,
+        JobState.REVISION_REQUIRED,
+        JobState.HUMAN_REVIEW_READY,
+        JobState.HUMAN_APPROVED,
+        JobState.EXPORTED,
+    }
+)
+
+
+def _recovery_parent_is_creation_eligible(
+    transitions: list[TransitionRecord],
+    state: JobState,
+) -> bool:
+    if state in _TRANSCRIPT_BEARING_PARENT_STATES:
+        return True
+    return state is JobState.BLOCKED and any(
+        record.to_state in _TRANSCRIPT_BEARING_PARENT_STATES for record in transitions
+    )
+
+
 def _recovery_parent(
     parent_path: Path,
+    *,
+    require_creation_eligibility: bool = True,
+    deep: bool = False,
 ) -> _RecoveryParent:
     workspace, job, transitions, state = _load_context(parent_path)
-    if state is not JobState.BLOCKED:
+    if require_creation_eligibility and not _recovery_parent_is_creation_eligible(
+        transitions,
+        state,
+    ):
         raise state_error(
             "RECOVERY_PARENT_NOT_ELIGIBLE",
-            "recovery parent must be BLOCKED",
+            "recovery parent must contain a verified transcript",
         )
     authorization = _authorization(workspace)
     _validate_authorization_binding(job, transitions, authorization)
     _require_current_authorization_fingerprint(job, authorization)
-    raw_artifact = verify_acquired_bundle(workspace, job)
-    media = load_normalization_result(workspace, job, raw_artifact)
-    transcript = load_transcription_result(workspace, job, media.media_manifest)
+    raw_artifact = verify_acquired_bundle(workspace, job, deep=deep)
+    media = load_normalization_result(workspace, job, raw_artifact, deep=deep)
+    transcript = load_transcription_result(
+        workspace,
+        job,
+        media.media_manifest,
+        deep=deep,
+    )
     length_blocked_stage = _length_blocked_stage(transitions)
     if length_blocked_stage is not None:
         load_length_block(
             workspace,
             job,
-            deep=False,
+            deep=deep,
             expected_blocked_stage=length_blocked_stage,
         )
     source_manifest = read_json_model(
@@ -488,7 +557,9 @@ def _recovery_parent(
         StageManifest,
         code="STAGE_MANIFEST_INVALID",
     )
-    supporting = load_supporting_inputs(workspace, job) if job.supporting_inputs else None
+    supporting = (
+        load_supporting_inputs(workspace, job, deep=deep) if job.supporting_inputs else None
+    )
     return _RecoveryParent(
         workspace=workspace,
         job=job,
@@ -512,7 +583,7 @@ def recover_job(
     basis: str,
     child_spec_path: Path | None = None,
 ) -> RecoveryResult:
-    """Fork only an eligible blocked job at its raw-transcript reuse boundary."""
+    """Fork an eligible transcript-bearing job at its raw-transcript reuse boundary."""
 
     if not confirm:
         raise state_error(
@@ -720,7 +791,7 @@ def _validate_job_unmapped(path: Path, *, deep: bool = False) -> dict[str, Any]:
             "recovery child is missing its required provenance manifest",
         )
     if is_recovery_child:
-        _load_recovery_manifest(workspace, job)
+        _load_recovery_manifest(workspace, job, deep=deep)
     if state is not JobState.CREATED:
         authorization = _authorization(workspace)
         _validate_authorization_binding(job, transitions, authorization)

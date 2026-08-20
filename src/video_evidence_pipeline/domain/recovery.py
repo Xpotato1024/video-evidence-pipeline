@@ -1,4 +1,4 @@
-"""Narrow provenance contract for a blocked content-integrity recovery fork."""
+"""Provenance contract for a transcript-boundary recovery fork."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from video_evidence_pipeline.domain.identifiers import JobId, Sha256
 
 
 class RecoveryManifest(StrictModel):
-    """Bind a fresh child job to the minimal eligible parent provenance."""
+    """Bind a fresh child job to immutable pre-semantic parent provenance."""
 
     schema_version: Literal["1.0"] = "1.0"
     parent_job_id: JobId

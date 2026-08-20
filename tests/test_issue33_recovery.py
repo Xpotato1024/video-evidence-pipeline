@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import threading
 from datetime import UTC, datetime
@@ -31,6 +32,7 @@ from video_evidence_pipeline.application import (
     _import_revision_fixture,
     _import_transcript_refinement_fixture,
     acquire_job,
+    approve_job,
     authorize_job,
     initialize_job,
     normalize_job,
@@ -55,6 +57,9 @@ from video_evidence_pipeline.domain.job import (
     AssignmentSpec,
     PrimaryInputKind,
     SourceKind,
+    SourceSpec,
+    SupportingInputKind,
+    SupportingInputSpec,
     job_fingerprint,
     job_to_yaml,
     load_job_yaml,
@@ -178,6 +183,28 @@ def _prepare_fresh_semantic_inputs(tmp_path: Path, workspace, job_id: str) -> No
     )
     _import_evidence_fixture(workspace.root, evidence_path)
     assert validate_job(workspace.root)["state"] == JobState.EVIDENCE_READY.value
+
+
+def _human_review_ready_parent(tmp_path: Path, job_id: str):
+    workspace = _transcript_parent(tmp_path, job_id)
+    request = prepare_authoring_job(workspace.root, "draft-video-report").request
+    author_path = tmp_path / f"{job_id}-author.json"
+    _write_model(author_path, _author_response(request, context_id=f"{job_id}-author"))
+    _import_authoring_fixture(workspace.root, author_path)
+    audit_request = prepare_audit_job(workspace.root, "independent-content-audit").request
+    audit_path = tmp_path / f"{job_id}-audit.json"
+    _write_model(
+        audit_path,
+        _audit_response(
+            audit_request,
+            context_id=f"{job_id}-auditor",
+            material=False,
+        ),
+    )
+    audit = _import_audit_fixture(workspace.root, audit_path)
+    assert audit.human_review is not None
+    assert validate_job(workspace.root)["state"] == JobState.HUMAN_REVIEW_READY.value
+    return workspace
 
 
 def _author_response_with_draft(request, draft_markdown: str):
@@ -477,6 +504,170 @@ def test_recovery_accepts_a_blocked_parent_without_category_gate(tmp_path: Path)
     assert validate_job(recovered.workspace.root)["state"] == JobState.TRANSCRIBED.value
 
 
+def test_recovery_forks_human_review_ready_parent_with_changed_assignment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent = _human_review_ready_parent(tmp_path, "successful-parent")
+    parent_before = _file_bytes(parent.root)
+    parent_job = load_job_yaml(parent.job_yaml)
+    child_job = parent_job.model_copy(
+        update={
+            "job_id": "successful-child",
+            "created_at": datetime.now(UTC),
+            "assignment": AssignmentSpec(
+                task_type="short-report",
+                language="en",
+                requirements=["Use only the verified transcript."],
+                length=CharacterLengthConstraint(max_chars=300),
+            ),
+        }
+    )
+    child_spec = tmp_path / "successful-child.yaml"
+    child_spec.write_text(job_to_yaml(child_job), encoding="utf-8")
+
+    def forbidden_stage(*_args, **_kwargs):
+        pytest.fail("recovery must not execute acquisition, normalization, or transcription")
+
+    monkeypatch.setattr(application_module, "acquire_job", forbidden_stage)
+    monkeypatch.setattr(application_module, "normalize_job", forbidden_stage)
+    monkeypatch.setattr(application_module, "transcribe_job", forbidden_stage)
+    runner = CliRunner()
+    invoked = runner.invoke(
+        app,
+        [
+            "job",
+            "recover",
+            str(parent.root),
+            child_job.job_id,
+            "--confirm",
+            "--basis",
+            "rerun a successful transcript under a changed assignment",
+            "--child-spec",
+            str(child_spec),
+            "--json",
+        ],
+    )
+
+    assert invoked.exit_code == 0, invoked.stdout
+    child = parent.jobs_root / child_job.job_id
+    assert json.loads(invoked.stdout)["state"] == JobState.TRANSCRIBED.value
+    assert validate_job(child, deep=True)["state"] == JobState.TRANSCRIBED.value
+    stored_child = load_job_yaml(child / "job.yaml")
+    assert stored_child.assignment == child_job.assignment
+    assert stored_child.assignment.length is not None
+    assert stored_child.assignment.length.max_chars == 300
+    assert _file_bytes(parent.root) == parent_before
+    transitions = read_jsonl(child / "manifests" / "transitions.jsonl", TransitionRecord)
+    assert [record.to_state for record in transitions] == [
+        JobState.CREATED,
+        JobState.AUTHORIZED,
+        JobState.ACQUIRED,
+        JobState.NORMALIZED,
+        JobState.TRANSCRIBED,
+    ]
+    for relative in (
+        "refinement",
+        "evidence",
+        "authoring",
+        "human-review",
+        "approval",
+        "exports",
+    ):
+        assert not any(path.is_file() for path in (child / relative).rglob("*"))
+
+    approval_target = json.loads(parent.human_review_manifest_json.read_text("utf-8"))[
+        "approval_target_sha256"
+    ]
+    approve_job(
+        parent.root,
+        approval_target_sha256=approval_target,
+        reviewer="pytest-reviewer",
+        basis="progress the parent after child creation",
+        confirm=True,
+    )
+    assert validate_job(parent.root)["state"] == JobState.HUMAN_APPROVED.value
+    assert validate_job(child, deep=True)["state"] == JobState.TRANSCRIBED.value
+
+
+def test_recovery_rejects_a_pre_transcript_parent(tmp_path: Path) -> None:
+    repository = tmp_path / "r"
+    repository.mkdir()
+    shutil.copytree(Path(__file__).parents[1] / ".agents", repository / ".agents")
+    source = repository / "source.txt"
+    source.write_text("verified input is not transcribed yet", encoding="utf-8")
+    workspace, _job = initialize_job(
+        repository,
+        job_id="pre-transcript-parent",
+        source_kind=SourceKind.LOCAL_FILE,
+        source=str(source),
+        task_type="report",
+        language="en",
+        output_format="markdown",
+        primary_input=PrimaryInputKind.TRANSCRIPT,
+    )
+    authorize_job(
+        workspace.root,
+        confirm=True,
+        basis="authorized pre-transcript fixture",
+        allow_local_processing=True,
+        allow_external_api=False,
+        confirmer_identity="pytest",
+    )
+    acquire_job(workspace.root)
+    normalize_job(workspace.root)
+
+    with pytest.raises(VepError) as error:
+        recover_job(
+            workspace.root,
+            "pre-transcript-child",
+            confirm=True,
+            basis="must reject before transcript verification",
+        )
+    assert error.value.code == "RECOVERY_PARENT_NOT_ELIGIBLE"
+    assert not (workspace.jobs_root / "pre-transcript-child").exists()
+
+
+def test_recovery_rejects_changed_source_and_supporting_input_identity(tmp_path: Path) -> None:
+    parent = _human_review_ready_parent(tmp_path, "identity-parent")
+    parent_job = load_job_yaml(parent.job_yaml)
+    other_source = tmp_path / "other-source.txt"
+    other_source.write_text("different source", encoding="utf-8")
+    note = tmp_path / "note.txt"
+    note.write_text("new supporting input", encoding="utf-8")
+    children = (
+        parent_job.model_copy(
+            update={
+                "job_id": "changed-source-child",
+                "created_at": datetime.now(UTC),
+                "source": SourceSpec(kind=SourceKind.LOCAL_FILE, locator=str(other_source)),
+            }
+        ),
+        parent_job.model_copy(
+            update={
+                "job_id": "changed-support-child",
+                "created_at": datetime.now(UTC),
+                "supporting_inputs": [
+                    SupportingInputSpec(kind=SupportingInputKind.NOTES, locator=str(note))
+                ],
+            }
+        ),
+    )
+    for child_job in children:
+        child_spec = tmp_path / f"{child_job.job_id}.yaml"
+        child_spec.write_text(job_to_yaml(child_job), encoding="utf-8")
+        with pytest.raises(VepError) as error:
+            recover_job(
+                parent.root,
+                child_job.job_id,
+                confirm=True,
+                basis="identity changes are not assignment-only forks",
+                child_spec_path=child_spec,
+            )
+        assert error.value.code == "RECOVERY_SOURCE_IDENTITY_MISMATCH"
+        assert not (parent.jobs_root / child_job.job_id).exists()
+
+
 def test_recovery_changed_assignment_reuses_only_source_artifacts_and_starts_fresh_authoring(
     tmp_path: Path,
 ) -> None:
@@ -735,6 +926,49 @@ def test_recovery_provenance_tamper_is_rejected_against_the_parent(tmp_path: Pat
     assert captured.value.code == "RECOVERY_PROVENANCE_MISMATCH"
 
 
+def test_recovery_child_detects_parent_presemantic_manifest_tamper(tmp_path: Path) -> None:
+    parent = _human_review_ready_parent(tmp_path, "parent-presemantic-tamper")
+    recovered = recover_job(
+        parent.root,
+        "parent-presemantic-tamper-child",
+        confirm=True,
+        basis="bind the child to verified parent pre-semantic artifacts",
+    )
+    payload = json.loads(parent.transcript_manifest_json.read_text("utf-8"))
+    payload["job_id"] = "different-parent"
+    parent.transcript_manifest_json.write_bytes(pretty_json_bytes(payload))
+
+    with pytest.raises(VepError) as captured:
+        validate_job(recovered.workspace.root)
+    assert captured.value.code in {
+        "TRANSCRIPT_MANIFEST_MISMATCH",
+        "TRANSCRIPT_BUNDLE_INVALID",
+    }
+
+
+def test_recovery_child_deep_validation_detects_parent_artifact_byte_tamper(
+    tmp_path: Path,
+) -> None:
+    parent = _human_review_ready_parent(tmp_path, "parent-artifact-tamper")
+    recovered = recover_job(
+        parent.root,
+        "parent-artifact-tamper-child",
+        confirm=True,
+        basis="bind the child to immutable parent artifact bytes",
+    )
+    transcript = json.loads(parent.transcript_manifest_json.read_text("utf-8"))
+    segments_path = parent.safe_path(transcript["segments_artifact"]["relative_storage_path"])
+    before = segments_path.stat()
+    payload = segments_path.read_bytes()
+    replacement = b"x" if payload[:1] != b"x" else b"y"
+    segments_path.write_bytes(replacement + payload[1:])
+    os.utime(segments_path, ns=(before.st_atime_ns, before.st_mtime_ns))
+
+    with pytest.raises(VepError) as captured:
+        validate_job(recovered.workspace.root, deep=True)
+    assert captured.value.code == "TRANSCRIPT_BUNDLE_TAMPERED"
+
+
 def test_recovery_provenance_manifest_deletion_is_rejected(tmp_path: Path) -> None:
     parent, _blocked = _blocked_parent(tmp_path, "missingp", category="content-integrity")
     recovered = recover_job(
@@ -843,6 +1077,44 @@ def test_recovery_rebinds_a_box_source_without_reacquisition(
     ] == ("boxc")
     assert json.loads(recovered.workspace.evidence_manifest_json.read_text("utf-8"))["job_id"] == (
         "boxc"
+    )
+    assert _file_bytes(parent.root) == parent_before
+
+
+def test_recovery_forks_successful_box_parent_without_network_normalize_or_asr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent, requests = _box_transcribed_parent(tmp_path, "successful-box-parent", monkeypatch)
+    _prepare_fresh_semantic_inputs(tmp_path, parent, "successful-box-parent")
+    author_request = prepare_authoring_job(parent.root, "draft-video-report").request
+    author_path = tmp_path / "successful-box-parent-author.json"
+    _write_model(author_path, _author_response(author_request))
+    _import_authoring_fixture(parent.root, author_path)
+    audit_request = prepare_audit_job(parent.root, "independent-content-audit").request
+    audit_path = tmp_path / "successful-box-parent-audit.json"
+    _write_model(audit_path, _audit_response(audit_request, material=False))
+    _import_audit_fixture(parent.root, audit_path)
+    assert validate_job(parent.root)["state"] == JobState.HUMAN_REVIEW_READY.value
+    parent_before = _file_bytes(parent.root)
+    network_calls_before = len(requests)
+
+    def forbidden_stage(*_args, **_kwargs):
+        pytest.fail("successful-parent recovery must only copy verified artifacts")
+
+    monkeypatch.setattr(application_module, "acquire_job", forbidden_stage)
+    monkeypatch.setattr(application_module, "normalize_job", forbidden_stage)
+    monkeypatch.setattr(application_module, "transcribe_job", forbidden_stage)
+    recovered = recover_job(
+        parent.root,
+        "successful-box-child",
+        confirm=True,
+        basis="reuse a successful Box transcript without rerunning pre-semantic stages",
+    )
+
+    assert len(requests) == network_calls_before
+    assert validate_job(recovered.workspace.root, deep=True)["state"] == (
+        JobState.TRANSCRIBED.value
     )
     assert _file_bytes(parent.root) == parent_before
 
