@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -27,12 +28,14 @@ from video_evidence_pipeline.domain.job import (
 )
 from video_evidence_pipeline.domain.semantic import SkillSnapshot
 from video_evidence_pipeline.domain.serialization import fingerprint
-from video_evidence_pipeline.errors import VepError
+from video_evidence_pipeline.errors import ExitCode, VepError
+from video_evidence_pipeline.evidence import pipeline as evidence_pipeline
 from video_evidence_pipeline.semantic.skills import (
     load_skill_snapshot,
     same_skill_snapshot_except_lifecycle,
 )
 from video_evidence_pipeline.storage.layout import JobWorkspace
+from video_evidence_pipeline.transcription import refinement as refinement_pipeline
 
 _NOW = "2026-08-20T00:00:00Z"
 
@@ -283,3 +286,82 @@ def test_known_roles_are_allowed_unknown_roles_fail_closed_and_legacy_flags_rema
     assert accepted.flags == ["legacy:kept", "role:action-item", "role:deadline"]
     with pytest.raises(ValidationError, match="unknown evidence information role"):
         EvidenceRecord(**base, flags=["role:important"])
+
+
+@pytest.mark.parametrize(
+    ("validator", "error_code"),
+    [
+        (refinement_pipeline.validate_refinement_import_skill, "REFINEMENT_SKILL_REQUIRED"),
+        (evidence_pipeline.validate_evidence_import_skill, "EVIDENCE_SKILL_REQUIRED"),
+    ],
+)
+def test_new_semantic_import_rejects_legacy_request_without_skill(
+    validator: object, error_code: str, tmp_path: Path
+) -> None:
+    workspace = _draft_skill_repository(tmp_path)
+
+    with pytest.raises(VepError) as error:
+        validator(  # type: ignore[operator]
+            workspace,
+            SimpleNamespace(skill=None),
+            SimpleNamespace(),
+            allow_fixture=False,
+        )
+
+    assert error.value.code == error_code
+
+
+@pytest.mark.parametrize(
+    ("module", "validator", "allowed"),
+    [
+        (
+            refinement_pipeline,
+            refinement_pipeline.validate_refinement_import_skill,
+            refinement_pipeline.REFINEMENT_SKILLS,
+        ),
+        (
+            evidence_pipeline,
+            evidence_pipeline.validate_evidence_import_skill,
+            evidence_pipeline.EVIDENCE_SKILLS,
+        ),
+    ],
+)
+@pytest.mark.parametrize("gate_error", ["DRAFT_SKILL_FORBIDDEN", "SKILL_SNAPSHOT_STALE"])
+def test_new_semantic_import_propagates_current_skill_gate(
+    module: object,
+    validator: object,
+    allowed: frozenset[str],
+    gate_error: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    workspace = _draft_skill_repository(tmp_path)
+    frozen = SimpleNamespace(skill_id=next(iter(allowed)))
+
+    def reject_gate(
+        actual_workspace: JobWorkspace,
+        actual_skill: object,
+        *,
+        allowed: frozenset[str],
+    ) -> None:
+        assert actual_workspace is workspace
+        assert actual_skill is frozen
+        assert allowed == allowed_set
+        exit_code = (
+            ExitCode.INTEGRITY
+            if gate_error == "SKILL_SNAPSHOT_STALE"
+            else ExitCode.AUTHORIZATION_OR_STATE
+        )
+        raise VepError(gate_error, "synthetic gate failure", exit_code)
+
+    allowed_set = allowed
+    monkeypatch.setattr(module, "validate_import_skill", reject_gate)
+    with pytest.raises(VepError) as error:
+        validator(  # type: ignore[operator]
+            workspace,
+            SimpleNamespace(skill=frozen),
+            SimpleNamespace(),
+            allow_fixture=False,
+        )
+
+    assert error.value.code == gate_error
