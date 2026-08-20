@@ -3242,6 +3242,24 @@ def _guide_operation(
     authoring = status.get("authoring_integrity", {})
     draft_version = authoring.get("draft_version")
     if state is JobState.CREATED:
+        if job.source.kind is not SourceKind.LOCAL_FILE:
+            authorize_base = (
+                f"vep job authorize {quoted} --confirm --basis <basis> --allow-local-processing"
+            )
+            return {
+                "status": "human-action-required",
+                "next_operation": "authorize",
+                "reason": (
+                    "network acquisition authorization is a one-time human decision; choose exactly "
+                    "one explicit permission before the job can advance"
+                ),
+                "command": None,
+                "authorization_choices": {
+                    "allow_network_acquisition": (f"{authorize_base} --allow-network-acquisition"),
+                    "deny_network_acquisition": (f"{authorize_base} --deny-network-acquisition"),
+                },
+                "side_effects": _guide_side_effects(workspace_write=True),
+            }
         return {
             "status": "ready",
             "next_operation": "authorize",
@@ -3250,6 +3268,20 @@ def _guide_operation(
             "side_effects": _guide_side_effects(workspace_write=True),
         }
     if state is JobState.AUTHORIZED:
+        if (
+            job.source.kind is not SourceKind.LOCAL_FILE
+            and status.get("authorization", {}).get("allow_network_acquisition") is not True
+        ):
+            return {
+                "status": "blocked",
+                "next_operation": None,
+                "reason": (
+                    "NETWORK_ACQUISITION_NOT_AUTHORIZED: recorded authorization denies network "
+                    "acquisition, and authorization cannot be changed after job creation"
+                ),
+                "command": None,
+                "side_effects": _guide_side_effects(),
+            }
         return {
             "status": "ready",
             "next_operation": "acquire",
@@ -3317,11 +3349,9 @@ def _guide_operation(
             "next_operation": operation,
             "reason": "prepare the frozen semantic request before an independent AI exchange",
             "command": f"{command} {quoted}",
-            "side_effects": _guide_side_effects(
-                external_api_possible=(
-                    status.get("authorization", {}).get("allow_external_api") is True
-                ),
-                workspace_write=True,
+            "side_effects": _guide_side_effects(workspace_write=True),
+            "semantic_exchange_external_api_allowed": (
+                status.get("authorization", {}).get("allow_external_api") is True
             ),
             **_guide_semantic_paths(
                 workspace,

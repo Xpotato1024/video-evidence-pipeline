@@ -19,13 +19,25 @@ from video_evidence_pipeline.domain.job import PrimaryInputKind, SourceKind
 from video_evidence_pipeline.domain.state import JobState
 
 
-def _created_workspace(tmp_path: Path, *, task_type: str = "report", transcript: bool = False):
-    source = tmp_path / ("source.txt" if transcript else "source.mp4")
-    source.write_text("synthetic", encoding="utf-8")
+def _created_workspace(
+    tmp_path: Path,
+    *,
+    task_type: str = "report",
+    transcript: bool = False,
+    source_kind: SourceKind = SourceKind.LOCAL_FILE,
+):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    source = (
+        tmp_path / ("source.txt" if transcript else "source.mp4")
+        if source_kind is SourceKind.LOCAL_FILE
+        else "https://example.invalid/source.mp4"
+    )
+    if isinstance(source, Path):
+        source.write_text("synthetic", encoding="utf-8")
     workspace, job = initialize_job(
         tmp_path,
         job_id="guide-job",
-        source_kind=SourceKind.LOCAL_FILE,
+        source_kind=source_kind,
         source=str(source),
         task_type=task_type,
         language="en",
@@ -119,6 +131,61 @@ def test_guide_refuses_fuzzy_author_skill_selection(tmp_path: Path) -> None:
     assert result["command"].endswith("--skill <skill-id>")
 
 
+def test_network_source_guide_requires_an_explicit_one_time_authorization_choice(
+    tmp_path: Path,
+) -> None:
+    workspace, job = _created_workspace(tmp_path, source_kind=SourceKind.DIRECT_HTTP)
+
+    result = _guide_operation(workspace, job, [], JobState.CREATED, {})
+
+    assert result["status"] == "human-action-required"
+    assert result["next_operation"] == "authorize"
+    assert result["command"] is None
+    assert "one-time human decision" in result["reason"]
+    choices = result["authorization_choices"]
+    assert choices["allow_network_acquisition"].endswith("--allow-network-acquisition")
+    assert choices["deny_network_acquisition"].endswith("--deny-network-acquisition")
+
+
+def test_network_acquisition_denial_blocks_acquire_but_local_source_stays_ready(
+    tmp_path: Path,
+) -> None:
+    network_workspace, network_job = _created_workspace(
+        tmp_path / "network",
+        source_kind=SourceKind.DIRECT_HTTP,
+    )
+    local_workspace, local_job = _created_workspace(tmp_path / "local")
+    denied = {"authorization": {"allow_network_acquisition": False}}
+    allowed = {"authorization": {"allow_network_acquisition": True}}
+
+    network = _guide_operation(
+        network_workspace,
+        network_job,
+        [],
+        JobState.AUTHORIZED,
+        denied,
+    )
+    permitted_network = _guide_operation(
+        network_workspace,
+        network_job,
+        [],
+        JobState.AUTHORIZED,
+        allowed,
+    )
+    local = _guide_operation(local_workspace, local_job, [], JobState.AUTHORIZED, denied)
+
+    assert network["status"] == "blocked"
+    assert network["next_operation"] is None
+    assert network["command"] is None
+    assert network["reason"].startswith("NETWORK_ACQUISITION_NOT_AUTHORIZED")
+    assert permitted_network["status"] == "ready"
+    assert permitted_network["next_operation"] == "acquire"
+    assert permitted_network["side_effects"]["network_acquisition"] is True
+    assert local["status"] == "ready"
+    assert local["next_operation"] == "acquire"
+    assert local["side_effects"]["network_acquisition"] is False
+
+
 def test_author_skill_defaults_are_exact_and_deterministic() -> None:
     assert default_authoring_skill("report") == "draft-video-report"
     assert default_authoring_skill("summary") == "draft-video-summary"
@@ -193,7 +260,7 @@ def test_guide_reports_stale_mapped_skill_without_a_prepare_command(
     assert result["side_effects"]["workspace_write"] is False
 
 
-def test_semantic_guidance_only_declares_an_authorized_external_api(
+def test_semantic_prepare_side_effects_exclude_later_external_api_capability(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     workspace, job = _created_workspace(tmp_path)
@@ -219,7 +286,9 @@ def test_semantic_guidance_only_declares_an_authorized_external_api(
     )
 
     assert denied["side_effects"]["external_api_possible"] is False
-    assert authorized["side_effects"]["external_api_possible"] is True
+    assert authorized["side_effects"]["external_api_possible"] is False
+    assert denied["semantic_exchange_external_api_allowed"] is False
+    assert authorized["semantic_exchange_external_api_allowed"] is True
 
 
 def test_integrity_error_does_not_invent_a_repair(
