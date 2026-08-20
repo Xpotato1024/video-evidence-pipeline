@@ -26,9 +26,9 @@ related_documents:
 - Python 3.12とlock済みの`uv`
 - VEPが受け付ける認可済みsource
 - local処理を行う権限の明示確認
-- semantic responseを作るrunnerまたはreviewer
+- semantic responseを作るlocal runner／reviewer、または外部送信を明示認可したexternal provider
 
-最短経路ではUTF-8のsupplied transcriptを使います。この経路はmedia decode、FFmpeg、ASR modelを必要としません。実sourceやresponseはrepository外のprivate workspaceに置いてください。
+最短経路ではUTF-8のsupplied transcriptとlocal runnerを使います。この経路はmedia decode、FFmpeg、ASR modelを必要とせず、semantic requestをcloud AIやexternal APIへ送信しません。実sourceやresponseはrepository外のprivate workspaceに置いてください。
 
 ## 2. Transcriptから始める最短経路
 
@@ -61,9 +61,11 @@ uv run vep transcribe "$WORKSPACE"
 
 `transcript` primaryでは`normalize`はno-media manifestを作り、`transcribe`はsupplied transcriptを検証します。FFmpegを先にインストールしたり、ASR modelをdownloadしたりする必要はありません。
 
+上の`--deny-external-api`はlocal-only経路の契約です。external providerを使う場合は、入力の外部送信が許可されていることを人間が確認し、一度限りの`job authorize`で代わりに`--allow-external-api`を指定してください。denyのまま外部へ送信してはならず、VEPも`external_api_used=true`のresponse importを拒否します。
+
 ## 3. Requestを渡してsemantic stageを実行する
 
-各semantic stageは、先にdeterministic executorがrequestを固定します。`prepare --json`の出力をrunnerへの入力として扱い、ファイル名やSkillを推測しないでください。
+各semantic stageは、先にdeterministic executorがrequestを固定します。`prepare --json`の出力を認可条件に合うrunnerへの入力として扱い、ファイル名やSkillを推測しないでください。
 
 | Stage | Prepare | runnerへ渡すもの | Import |
 | --- | --- | --- | --- |

@@ -54,9 +54,11 @@ VEPは実データをGitへ追加しません。workspaceはprivate local state�
 
 最短の確認経路は、認可済みのsupplied transcriptをprimary inputにする方法です。これならFFmpegやASRを先に用意せず、request → Skill → response schemaのsemantic exchangeから`HUMAN_REVIEW_READY`までを確認できます。
 
-ここでsemantic runnerとは、利用者が認可してVEPの外で動かすAI agentまたはlocal modelです。各`prepare --json`が返す`request_path`（固定入力）、`skill_path`（repository-owned手順）、`response_schema_path`（返却JSONの形）をそのrunnerへ渡し、得たJSONをrepository外の一時pathへ保存して`import`します。VEPは特定providerを暗黙起動しません。frozen Skillはprepare時の手順bytesとresource hashを固定したsnapshot、fingerprintはrequestとresponseの取り違えを検出するhashです。
+ここでsemantic runnerとは、利用者がVEPの外で動かすAI実行環境です。local model／local agent、または入力を外部へ送信することを人間が明示認可したexternal providerを使用できます。各`prepare --json`が返す`request_path`（固定入力）、`skill_path`（repository-owned手順）、`response_schema_path`（返却JSONの形）をそのrunnerへ渡し、得たJSONをrepository外の一時pathへ保存して`import`します。VEPは特定providerを暗黙起動しません。frozen Skillはprepare時の手順bytesとresource hashを固定したsnapshot、fingerprintはrequestとresponseの取り違えを検出するhashです。
 
-監査severityのP0は承認・exportを禁止する致命的finding、P1は解消が必要な重大findingです。以下は両方が0になって`HUMAN_REVIEW_READY`へ到達するまでの例であり、人間承認とexportはその後の別段階です。実動画やresponseをrepositoryへ置く必要はありません。
+監査severityのP0は承認・exportを禁止する致命的finding、P1は解消が必要な重大findingです。以下は両方が0になって`HUMAN_REVIEW_READY`へ到達するまでの**local-only**例であり、semantic requestをcloud AIやexternal APIへ送信しません。人間承認とexportはその後の別段階です。実動画やresponseをrepositoryへ置く必要はありません。
+
+external providerを使う場合は、入力の外部送信が許可されていることを人間が確認し、一度限りの`job authorize`で`--deny-external-api`を`--allow-external-api`へ置き換えてください。denyのまま外部へ送信してはならず、VEPも`external_api_used=true`のresponse importを拒否します。
 
 ```bash
 # 1. Assignmentとsourceを固定する（sourceは認可済みのUTF-8 transcript）
@@ -87,7 +89,7 @@ uv run vep transcribe "$WORKSPACE"      # supplied transcript: ASRなし
 
 # 3. Transcript refinement exchange: raw transcriptを保持したままsemantic correctionを分離する
 uv run vep refine prepare "$WORKSPACE" --json
-# 表示されたrequest_path + skill_path + response_schema_pathをsemantic runnerへ渡す
+# 表示されたrequest_path + skill_path + response_schema_pathをlocal semantic runnerへ渡す
 uv run vep refine import "$WORKSPACE" \
   --response /absolute/path/to/refinement-response.json
 
