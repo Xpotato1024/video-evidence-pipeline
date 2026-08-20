@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import subprocess
 import sys
 import threading
 import time
 import types
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -105,6 +107,52 @@ def _worker_request(device: str = "cpu") -> AsrWorkerRequest:
     )
 
 
+def _profiled_cpu_backend(
+    request: AsrWorkerRequest,
+    *,
+    fallback_reason: str | None = None,
+) -> TranscriptionBackendIdentity:
+    profile = _profile()
+    fallback = fallback_reason is not None
+    candidate = (
+        {
+            "candidate_gpu_index": 0,
+            "candidate_gpu_name": "synthetic",
+            "candidate_total_vram_mib": 8192,
+            "candidate_free_vram_mib": 7000,
+        }
+        if fallback
+        else {}
+    )
+    return TranscriptionBackendIdentity(
+        source=TranscriptSource.ASR,
+        name=profile.engine,
+        version=profile.engine_version,
+        runtime=profile.runtime,
+        runtime_version=profile.runtime_version,
+        model=profile.model_repository,
+        model_repository=profile.model_repository,
+        model_revision=profile.model_revision,
+        model_fingerprint=request.model_storage_identity,
+        model_storage_identity=request.model_storage_identity,
+        device_policy=request.requested_device_policy,
+        selection_reason=(
+            DeviceSelectionReason.GPU_RESOURCE_FALLBACK
+            if fallback
+            else DeviceSelectionReason.EXPLICIT_CPU
+        ),
+        selected_device="cpu",
+        configured_min_free_vram_mib=profile.min_free_vram_mib,
+        compute_type=profile.cpu_compute_type,
+        container_image=profile.container_image,
+        container_image_digest=request.container_image_digest,
+        fallback=fallback,
+        fallback_from="cuda" if fallback else None,
+        fallback_reason=fallback_reason,
+        **candidate,
+    )
+
+
 def test_default_profile_is_pinned_and_repository_owned() -> None:
     profile = _profile()
     assert profile.engine == "faster-whisper"
@@ -126,6 +174,7 @@ def test_profiled_runtime_conditions_are_exported_to_json_schema() -> None:
         "runtime_version",
         "model_repository",
         "model_revision",
+        "model_fingerprint",
         "model_storage_identity",
         "selection_reason",
         "selected_device",
@@ -134,6 +183,9 @@ def test_profiled_runtime_conditions_are_exported_to_json_schema() -> None:
         "fallback",
     } <= required
     assert backend_schema["allOf"][0]["then"]["properties"]["runtime_version"] == {
+        "not": {"type": "null"}
+    }
+    assert backend_schema["allOf"][0]["then"]["properties"]["model_fingerprint"] == {
         "not": {"type": "null"}
     }
     transcript_condition = TranscriptManifest.model_json_schema()["allOf"][0]
@@ -149,6 +201,108 @@ def test_profiled_runtime_conditions_are_exported_to_json_schema() -> None:
     }
 
 
+def test_profiled_worker_response_requires_model_fingerprint() -> None:
+    request = _worker_request()
+    backend = _profiled_cpu_backend(request).model_dump(mode="json")
+    backend.pop("model_fingerprint")
+
+    with pytest.raises(ValidationError):
+        AsrWorkerResponse.model_validate({"backend": backend, "segments": []})
+
+
+def test_host_rejects_missing_model_fingerprint_defense_in_depth() -> None:
+    request = _worker_request()
+    backend = _profiled_cpu_backend(request).model_copy(update={"model_fingerprint": None})
+    response = AsrWorkerResponse.model_construct(backend=backend, segments=[])
+
+    with pytest.raises(VepError) as rejected:
+        container_module._validate_worker_response(request, response)
+
+    assert rejected.value.code == "ASR_WORKER_RESPONSE_INVALID"
+
+
+def test_host_rejects_model_fingerprint_that_differs_from_storage_identity() -> None:
+    request = _worker_request()
+    backend = _profiled_cpu_backend(request).model_copy(update={"model_fingerprint": "3" * 64})
+
+    with pytest.raises(VepError) as rejected:
+        container_module._validate_worker_response(
+            request, AsrWorkerResponse(backend=backend, segments=[])
+        )
+
+    assert rejected.value.code == "ASR_WORKER_RESPONSE_INVALID"
+
+
+def test_host_accepts_model_fingerprint_bound_to_storage_identity() -> None:
+    request = _worker_request()
+    response = AsrWorkerResponse(backend=_profiled_cpu_backend(request), segments=[])
+
+    assert container_module._validate_worker_response(request, response) is response
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "CUDA failed with error out of memory",
+        "CUDA out of memory",
+        "CUBLAS_STATUS_ALLOC_FAILED",
+        "CUDNN_STATUS_ALLOC_FAILED",
+    ],
+)
+def test_host_accepts_only_canonical_gpu_resource_fallback_reasons(reason: str) -> None:
+    request = _worker_request("auto")
+    response = AsrWorkerResponse(
+        backend=_profiled_cpu_backend(request, fallback_reason=reason), segments=[]
+    )
+
+    assert container_module._validate_worker_response(request, response) is response
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "corrupted model",
+        "invalid input",
+        "invalid device",
+        "bad parameter",
+        "filesystem error",
+        "arbitrary RuntimeError",
+    ],
+)
+def test_host_rejects_nonresource_gpu_fallback_reasons(reason: str) -> None:
+    request = _worker_request("auto")
+    response = AsrWorkerResponse(
+        backend=_profiled_cpu_backend(request, fallback_reason=reason), segments=[]
+    )
+
+    with pytest.raises(VepError) as rejected:
+        container_module._validate_worker_response(request, response)
+
+    assert rejected.value.code == "ASR_WORKER_RESPONSE_INVALID"
+
+
+@pytest.mark.parametrize(
+    "update",
+    [
+        {"selection_reason": DeviceSelectionReason.NO_GPU_VISIBLE},
+        {"fallback_from": None},
+        {"fallback_reason": None},
+    ],
+)
+def test_host_revalidates_gpu_fallback_provenance_fields(update: dict[str, object]) -> None:
+    request = _worker_request("auto")
+    backend = _profiled_cpu_backend(request, fallback_reason="CUDA out of memory").model_copy(
+        update=update
+    )
+
+    with pytest.raises(VepError) as rejected:
+        container_module._validate_worker_response(
+            request, AsrWorkerResponse.model_construct(backend=backend, segments=[])
+        )
+
+    assert rejected.value.code == "ASR_WORKER_RESPONSE_INVALID"
+
+
 @pytest.mark.parametrize("case", ["runtime", "explicit_cpu_cuda", "explicit_cuda_cpu"])
 def test_host_rejects_contradictory_worker_provenance(case: str) -> None:
     request = _worker_request("cuda" if case == "explicit_cuda_cpu" else "cpu")
@@ -162,6 +316,7 @@ def test_host_rejects_contradictory_worker_provenance(case: str) -> None:
         model=profile.model_repository,
         model_repository=profile.model_repository,
         model_revision=profile.model_revision,
+        model_fingerprint=request.model_storage_identity,
         model_storage_identity=request.model_storage_identity,
         device_policy=request.requested_device_policy,
         selection_reason=(
@@ -232,6 +387,7 @@ def test_host_rejects_worker_candidate_gpu_provenance_gaps(
         model=profile.model_repository,
         model_repository=profile.model_repository,
         model_revision=profile.model_revision,
+        model_fingerprint=request.model_storage_identity,
         model_storage_identity=request.model_storage_identity,
         device_policy=policy,
         selection_reason=reason,
@@ -287,6 +443,7 @@ def test_host_rejects_impossible_gpu_capacity_and_threshold_provenance(
         model=profile.model_repository,
         model_repository=profile.model_repository,
         model_revision=profile.model_revision,
+        model_fingerprint=request.model_storage_identity,
         model_storage_identity=request.model_storage_identity,
         device_policy="auto",
         selection_reason=reason,
@@ -328,9 +485,9 @@ def test_container_gpu_preflight_preserves_backend_and_compute_failure_reasons(
     expected: DeviceSelectionReason | None,
 ) -> None:
     monkeypatch.setattr(
-        container_module.subprocess,
-        "run",
-        lambda *_args, **_kwargs: types.SimpleNamespace(stdout=stdout),
+        container_module,
+        "_run_managed_docker_container",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0, stdout, ""),
     )
     assert container_module._gpu_preflight_failure_reason("docker", "image", "auto") is expected
 
@@ -348,9 +505,9 @@ def test_container_gpu_preflight_classifies_process_and_docker_failures(
     expected: DeviceSelectionReason,
 ) -> None:
     def fail(*_args, **_kwargs):
-        raise container_module.subprocess.CalledProcessError(returncode, ["docker", "run"])
+        return subprocess.CompletedProcess([], returncode, "", "docker failure")
 
-    monkeypatch.setattr(container_module.subprocess, "run", fail)
+    monkeypatch.setattr(container_module, "_run_managed_docker_container", fail)
     assert container_module._gpu_preflight_failure_reason("docker", "image", "auto") is expected
 
 
@@ -358,10 +515,10 @@ def test_explicit_cuda_index_is_rejected_during_container_preflight(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        container_module.subprocess,
-        "run",
-        lambda *_args, **_kwargs: types.SimpleNamespace(
-            stdout='{"count": 1, "float16_indices": [0]}'
+        container_module,
+        "_run_managed_docker_container",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            [], 0, '{"count": 1, "float16_indices": [0]}', ""
         ),
     )
     assert (
@@ -390,6 +547,41 @@ def test_container_build_contract_pins_base_and_python_dependencies() -> None:
     assert "--no-build-isolation --no-deps ." in dockerfile
     assert "12.6.3-cudnn-runtime-ubuntu24.04" in first_line
     assert re.fullmatch(r"[0-9a-f]{64}", container_module._container_contract_identity(Path.cwd()))
+
+
+def test_image_smoke_runs_actual_managed_timeout_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def managed(_docker: str, arguments: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+        calls.append((arguments, kwargs))
+        if len(calls) == 3:
+            raise container_module.io_error(
+                "ASR_CONTAINER_LIFECYCLE_SMOKE_TIMEOUT",
+                "ASR container command timed out",
+            )
+        return subprocess.CompletedProcess(arguments, 0, "ok", "")
+
+    monkeypatch.setattr(container_module, "_docker", lambda: "docker")
+    monkeypatch.setattr(
+        container_module,
+        "resolve_asr_profile",
+        lambda *_args: (DEFAULT_ASR_PROFILE, _profile()),
+    )
+    monkeypatch.setattr(
+        container_module,
+        "_require_image_identity",
+        lambda *_args: "sha256:" + "a" * 64,
+    )
+    monkeypatch.setattr(container_module, "_run_managed_docker_container", managed)
+
+    result = container_module.smoke_asr_image(tmp_path, DEFAULT_ASR_PROFILE)
+
+    assert result["managed_lifecycle"] == "verified"
+    assert len(calls) == 3
+    assert calls[2][1]["timeout_seconds"] == 2
+    assert any("time.sleep(30)" in argument for argument in calls[2][0])
 
 
 def test_container_execution_rejects_missing_or_stale_build_identity(
@@ -585,11 +777,12 @@ def test_public_provision_serializes_download_and_reuses_before_docker(
         docker_calls += 1
         return "docker"
 
-    def run(command: list[str], *, code: str):
+    def run(docker: str, arguments: list[str], *, code: str, **_kwargs):
         nonlocal worker_calls
         assert code == "ASR_MODEL_PROVISION_FAILED"
         worker_calls += 1
         time.sleep(0.1)
+        command = [docker, "run", *arguments]
         mount = next(item for item in command if "dst=/output" in item)
         source = Path(mount.split("src=", 1)[1].split(",dst=", 1)[0])
         _write_profile_model(source / "model")
@@ -599,7 +792,7 @@ def test_public_provision_serializes_download_and_reuses_before_docker(
     monkeypatch.setattr(
         container_module, "_require_image_identity", lambda *_: "sha256:" + "a" * 64
     )
-    monkeypatch.setattr(container_module, "_run", run)
+    monkeypatch.setattr(container_module, "_run_managed_docker_container", run)
 
     def provision_after_barrier(_index: int) -> str:
         simultaneous_start.wait()
@@ -655,7 +848,8 @@ def test_public_provision_cleans_only_safe_stale_staging(
     (stale / "partial.bin").write_bytes(b"partial")
     (unknown / "owned.bin").write_bytes(b"owned")
 
-    def run(command: list[str], *, code: str):
+    def run(docker: str, arguments: list[str], *, code: str, **_kwargs):
+        command = [docker, "run", *arguments]
         mount = next(item for item in command if "dst=/output" in item)
         source = Path(mount.split("src=", 1)[1].split(",dst=", 1)[0])
         _write_profile_model(source / "model")
@@ -665,7 +859,7 @@ def test_public_provision_cleans_only_safe_stale_staging(
     monkeypatch.setattr(
         container_module, "_require_image_identity", lambda *_: "sha256:" + "a" * 64
     )
-    monkeypatch.setattr(container_module, "_run", run)
+    monkeypatch.setattr(container_module, "_run_managed_docker_container", run)
     container_module.run_provision_container(tmp_path, DEFAULT_ASR_PROFILE)
 
     assert not stale.exists()
@@ -678,8 +872,9 @@ def test_public_provision_rejects_profile_revision_drift_during_worker(
     shutil.copytree(Path.cwd() / "config", tmp_path / "config")
     original_profile = _profile()
 
-    def run(command: list[str], *, code: str):
+    def run(docker: str, arguments: list[str], *, code: str, **_kwargs):
         assert code == "ASR_MODEL_PROVISION_FAILED"
+        command = [docker, "run", *arguments]
         mount = next(item for item in command if "dst=/output" in item)
         source = Path(mount.split("src=", 1)[1].split(",dst=", 1)[0])
         _write_profile_model(source / "model")
@@ -697,7 +892,7 @@ def test_public_provision_rejects_profile_revision_drift_during_worker(
     monkeypatch.setattr(
         container_module, "_require_image_identity", lambda *_: "sha256:" + "a" * 64
     )
-    monkeypatch.setattr(container_module, "_run", run)
+    monkeypatch.setattr(container_module, "_run_managed_docker_container", run)
 
     with pytest.raises(VepError) as changed:
         container_module.run_provision_container(tmp_path, DEFAULT_ASR_PROFILE)
@@ -856,6 +1051,237 @@ def test_container_output_limits_are_enforced_while_process_is_running(
     assert "byte limit" in str(overflow.value)
 
 
+def test_container_output_reader_exception_is_not_silent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closed_stdout = BytesIO()
+    closed_stdout.close()
+
+    class Process:
+        stdout = closed_stdout
+        stderr = BytesIO()
+
+        def wait(self, *, timeout: float) -> int:
+            return 0
+
+        def kill(self) -> None:
+            return None
+
+        def poll(self) -> int:
+            return 0
+
+    monkeypatch.setattr(container_module.subprocess, "Popen", lambda *_args, **_kwargs: Process())
+
+    with pytest.raises(container_module._BoundedProcessFailure) as reader_failed:
+        container_module._run_bounded_process(["test"], timeout_seconds=1)
+
+    assert reader_failed.value.kind == "reader_failure"
+
+
+def test_managed_docker_normal_completion_does_not_kill_daemon_container(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed_cid_path: Path | None = None
+
+    def complete(command: list[str], **_kwargs) -> subprocess.CompletedProcess[str]:
+        nonlocal observed_cid_path
+        observed_cid_path = Path(command[command.index("--cidfile") + 1])
+        assert not observed_cid_path.exists()
+        observed_cid_path.write_text("a" * 64, encoding="ascii")
+        return subprocess.CompletedProcess(command, 0, "ok", "")
+
+    monkeypatch.setattr(container_module, "_run_bounded_process", complete)
+    monkeypatch.setattr(
+        container_module,
+        "_docker_cleanup_command",
+        lambda *_args, **_kwargs: pytest.fail("normal completion must not invoke daemon cleanup"),
+    )
+
+    completed = container_module._run_managed_docker_container(
+        "docker", ["--rm", "image", "true"], code="ASR_TEST_FAILED"
+    )
+
+    assert completed.stdout == "ok"
+    assert observed_cid_path is not None
+    assert not observed_cid_path.parent.exists()
+
+
+@pytest.mark.parametrize(
+    "failure_kind",
+    ["timeout", "stdout_overflow", "stderr_overflow", "reader_failure", "host_failure"],
+)
+def test_managed_docker_bounded_failure_kills_only_exact_cid(
+    monkeypatch: pytest.MonkeyPatch, failure_kind: str
+) -> None:
+    container_id = "a" * 64
+    unrelated_id = "b" * 64
+    cleanup_calls: list[list[str]] = []
+
+    def fail(command: list[str], **_kwargs):
+        cid_path = Path(command[command.index("--cidfile") + 1])
+        assert not cid_path.exists()
+        cid_path.write_text(container_id, encoding="ascii")
+        raise container_module._BoundedProcessFailure(failure_kind, failure_kind)
+
+    def cleanup(_docker: str, arguments: list[str]) -> subprocess.CompletedProcess[str]:
+        cleanup_calls.append(arguments)
+        assert unrelated_id not in arguments
+        assert arguments[-1] == container_id
+        if arguments[1:4] == ["inspect", "--format", "{{.State.Running}}"]:
+            return subprocess.CompletedProcess(arguments, 0, "true\n", "")
+        if arguments[1] == "kill":
+            return subprocess.CompletedProcess(arguments, 0, container_id, "")
+        if arguments[1:3] == ["rm", "--force"]:
+            return subprocess.CompletedProcess(arguments, 0, container_id, "")
+        return subprocess.CompletedProcess(
+            arguments, 1, "", f"Error: No such object: {container_id}"
+        )
+
+    monkeypatch.setattr(container_module, "_run_bounded_process", fail)
+    monkeypatch.setattr(container_module, "_docker_cleanup_command", cleanup)
+
+    with pytest.raises(VepError) as bounded:
+        container_module._run_managed_docker_container(
+            "docker", ["--rm", "image", "sleep", "30"], code="ASR_TEST_FAILED"
+        )
+
+    assert bounded.value.code == "ASR_TEST_FAILED"
+    assert ["container", "kill", container_id] in cleanup_calls
+    assert ["container", "rm", "--force", container_id] in cleanup_calls
+    assert cleanup_calls[-1][1:4] == ["inspect", "--format", "{{.Id}}"]
+
+
+def test_managed_docker_already_removed_container_is_safe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    container_id = "a" * 64
+    cleanup_calls: list[list[str]] = []
+
+    def fail(command: list[str], **_kwargs):
+        Path(command[command.index("--cidfile") + 1]).write_text(container_id, encoding="ascii")
+        raise container_module._BoundedProcessFailure("timeout", "timed out")
+
+    def absent(_docker: str, arguments: list[str]) -> subprocess.CompletedProcess[str]:
+        cleanup_calls.append(arguments)
+        return subprocess.CompletedProcess(
+            arguments, 1, "", f"Error: No such object: {container_id}"
+        )
+
+    monkeypatch.setattr(container_module, "_run_bounded_process", fail)
+    monkeypatch.setattr(container_module, "_docker_cleanup_command", absent)
+
+    with pytest.raises(VepError) as timed_out:
+        container_module._run_managed_docker_container(
+            "docker", ["--rm", "image", "sleep", "30"], code="ASR_TEST_FAILED"
+        )
+
+    assert timed_out.value.code == "ASR_TEST_FAILED"
+    assert cleanup_calls == [
+        ["container", "inspect", "--format", "{{.State.Running}}", container_id]
+    ]
+
+
+def test_managed_docker_cleanup_failure_is_distinct_and_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    container_id = "a" * 64
+
+    def fail(command: list[str], **_kwargs):
+        Path(command[command.index("--cidfile") + 1]).write_text(container_id, encoding="ascii")
+        raise container_module._BoundedProcessFailure("timeout", "timed out")
+
+    monkeypatch.setattr(container_module, "_run_bounded_process", fail)
+    monkeypatch.setattr(
+        container_module,
+        "_docker_cleanup_command",
+        lambda _docker, arguments: subprocess.CompletedProcess(
+            arguments, 1, "", "Error response from daemon: permission denied"
+        ),
+    )
+
+    with pytest.raises(VepError) as cleanup_failed:
+        container_module._run_managed_docker_container(
+            "docker", ["--rm", "image", "sleep", "30"], code="ASR_TEST_FAILED"
+        )
+
+    assert cleanup_failed.value.code == "ASR_CONTAINER_CLEANUP_FAILED"
+
+
+def test_managed_docker_kill_error_is_not_hidden_by_later_absence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    container_id = "a" * 64
+    cleanup_calls: list[list[str]] = []
+
+    def fail(command: list[str], **_kwargs):
+        Path(command[command.index("--cidfile") + 1]).write_text(container_id, encoding="ascii")
+        raise container_module._BoundedProcessFailure("timeout", "timed out")
+
+    def cleanup(_docker: str, arguments: list[str]) -> subprocess.CompletedProcess[str]:
+        cleanup_calls.append(arguments)
+        if arguments[1:4] == ["inspect", "--format", "{{.State.Running}}"]:
+            return subprocess.CompletedProcess(arguments, 0, "true\n", "")
+        if arguments[1] == "kill":
+            return subprocess.CompletedProcess(
+                arguments, 1, "", "Error response from daemon: permission denied"
+            )
+        return subprocess.CompletedProcess(
+            arguments, 1, "", f"Error: No such object: {container_id}"
+        )
+
+    monkeypatch.setattr(container_module, "_run_bounded_process", fail)
+    monkeypatch.setattr(container_module, "_docker_cleanup_command", cleanup)
+
+    with pytest.raises(VepError) as cleanup_failed:
+        container_module._run_managed_docker_container(
+            "docker", ["--rm", "image", "sleep", "30"], code="ASR_TEST_FAILED"
+        )
+
+    assert cleanup_failed.value.code == "ASR_CONTAINER_CLEANUP_FAILED"
+    assert cleanup_calls[-1] == ["container", "kill", container_id]
+
+
+def test_docker_cleanup_commands_have_a_short_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(container_module.subprocess, "run", run)
+
+    container_module._docker_cleanup_command("docker", ["container", "inspect", "a" * 64])
+
+    assert captured["timeout"] == 10
+    assert captured["check"] is False
+
+
+def test_managed_docker_malformed_cid_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail(command: list[str], **_kwargs):
+        Path(command[command.index("--cidfile") + 1]).write_text(
+            "not-a-container-id", encoding="ascii"
+        )
+        raise container_module._BoundedProcessFailure("stdout_overflow", "overflow")
+
+    monkeypatch.setattr(container_module, "_run_bounded_process", fail)
+    monkeypatch.setattr(
+        container_module,
+        "_docker_cleanup_command",
+        lambda *_args, **_kwargs: pytest.fail("malformed CID must not select a container"),
+    )
+
+    with pytest.raises(VepError) as malformed:
+        container_module._run_managed_docker_container(
+            "docker", ["--rm", "image", "sleep", "30"], code="ASR_TEST_FAILED"
+        )
+
+    assert malformed.value.code == "ASR_CONTAINER_CLEANUP_FAILED"
+
+
 def test_model_payload_rejects_missing_required_file_and_unexpected_link(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -982,6 +1408,7 @@ def test_container_inference_is_network_disabled_and_model_mount_is_read_only(
         model=profile.model_repository,
         model_repository=profile.model_repository,
         model_revision=profile.model_revision,
+        model_fingerprint=manifest.model_storage_identity,
         model_storage_identity=manifest.model_storage_identity,
         device_policy="cpu",
         selection_reason=DeviceSelectionReason.EXPLICIT_CPU,
@@ -997,12 +1424,13 @@ def test_container_inference_is_network_disabled_and_model_mount_is_read_only(
         stdout = AsrWorkerResponse(backend=backend, segments=[]).model_dump_json()
         stderr = ""
 
-    def fake_run(command: list[str], *, code: str):
+    def fake_run(docker: str, arguments: list[str], *, code: str, **_kwargs):
         assert code == "ASR_CONTAINER_TRANSCRIPTION_FAILED"
+        command = [docker, "run", *arguments]
         commands.append(command)
         return Result()
 
-    monkeypatch.setattr(container_module, "_run", fake_run)
+    monkeypatch.setattr(container_module, "_run_managed_docker_container", fake_run)
     result = container_module.run_asr_worker(
         tmp_path,
         audio,
@@ -1062,6 +1490,7 @@ def test_host_nvidia_smi_failure_does_not_block_usable_container_gpu(
         model=profile.model_repository,
         model_repository=profile.model_repository,
         model_revision=profile.model_revision,
+        model_fingerprint=identity,
         model_storage_identity=identity,
         device_policy="auto",
         selection_reason=DeviceSelectionReason.AUTO_GPU_SELECTED,
@@ -1082,14 +1511,15 @@ def test_host_nvidia_smi_failure_does_not_block_usable_container_gpu(
     )
     commands: list[list[str]] = []
 
-    def run(command: list[str], *, code: str):
+    def run(docker: str, arguments: list[str], *, code: str, **_kwargs):
+        command = [docker, "run", *arguments]
         commands.append(command)
         return types.SimpleNamespace(
             stdout=AsrWorkerResponse(backend=backend, segments=[]).model_dump_json(),
             stderr="",
         )
 
-    monkeypatch.setattr(container_module, "_run", run)
+    monkeypatch.setattr(container_module, "_run_managed_docker_container", run)
     response = container_module.run_asr_worker(
         tmp_path,
         audio,
@@ -1134,8 +1564,9 @@ def test_model_provisioning_worker_uses_only_noncanonical_staging_mount(
         stdout = '{"ok": true}'
         stderr = ""
 
-    def fake_run(command: list[str], *, code: str):
+    def fake_run(docker: str, arguments: list[str], *, code: str, **_kwargs):
         assert code == "ASR_MODEL_PROVISION_FAILED"
+        command = [docker, "run", *arguments]
         commands.append(command)
         mount = next(item for item in command if "dst=/output" in item)
         source = Path(mount.split("src=", 1)[1].split(",dst=", 1)[0])
@@ -1144,7 +1575,7 @@ def test_model_provisioning_worker_uses_only_noncanonical_staging_mount(
         _write_profile_model(model)
         return Result()
 
-    monkeypatch.setattr(container_module, "_run", fake_run)
+    monkeypatch.setattr(container_module, "_run_managed_docker_container", fake_run)
     container_module.run_provision_container(tmp_path, DEFAULT_ASR_PROFILE)
 
     command = commands[0]

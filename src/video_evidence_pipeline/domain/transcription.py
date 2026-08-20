@@ -266,6 +266,7 @@ class TranscriptionBackendIdentity(StrictModel):
                                 "model",
                                 "model_repository",
                                 "model_revision",
+                                "model_fingerprint",
                                 "model_storage_identity",
                                 "device_policy",
                                 "selection_reason",
@@ -283,6 +284,7 @@ class TranscriptionBackendIdentity(StrictModel):
                             "model",
                             "model_repository",
                             "model_revision",
+                            "model_fingerprint",
                             "model_storage_identity",
                             "device_policy",
                             "selection_reason",
@@ -346,6 +348,12 @@ class TranscriptionBackendIdentity(StrictModel):
 
     @model_validator(mode="after")
     def provenance_is_consistent(self) -> Self:
+        if (
+            self.source is TranscriptSource.ASR
+            and self.model_repository is not None
+            and self.model_fingerprint is None
+        ):
+            raise ValueError("profiled ASR identity requires a model fingerprint")
         if (
             self.selected_device == "cpu"
             and self.gpu_index is not None
@@ -493,6 +501,7 @@ class TranscriptManifest(StrictModel):
                                                 "runtime",
                                                 "model",
                                                 "model_revision",
+                                                "model_fingerprint",
                                                 "model_storage_identity",
                                                 "device_policy",
                                                 "selected_device",
@@ -661,6 +670,7 @@ class TranscriptManifest(StrictModel):
                 asr_backend.model,
                 asr_backend.model_repository,
                 asr_backend.model_revision,
+                asr_backend.model_fingerprint,
                 asr_backend.model_storage_identity,
                 asr_backend.device_policy,
                 asr_backend.selection_reason,

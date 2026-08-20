@@ -27,7 +27,8 @@ from video_evidence_pipeline.domain.transcription import (
     TranscriptionBackendIdentity,
     TranscriptionConfig,
 )
-from video_evidence_pipeline.errors import configuration_error, integrity_error, io_error
+from video_evidence_pipeline.errors import VepError, configuration_error, integrity_error, io_error
+from video_evidence_pipeline.transcription.device import is_gpu_resource_error
 from video_evidence_pipeline.transcription.profiles import (
     require_provisioned_model,
     resolve_asr_profile,
@@ -41,6 +42,16 @@ from video_evidence_pipeline.transcription.provisioning import (
 _ASR_CONTRACT_LABEL = "org.xpotato.vep.asr-contract-sha256"
 _MAXIMUM_WORKER_OUTPUT_BYTES = 128 * 1024 * 1024
 _MAXIMUM_WORKER_ERROR_BYTES = 1024 * 1024
+_DEFAULT_PROCESS_TIMEOUT_SECONDS = 24 * 60 * 60
+_DOCKER_CLEANUP_TIMEOUT_SECONDS = 10
+_CONTAINER_ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+
+
+class _BoundedProcessFailure(Exception):
+    def __init__(self, kind: str, detail: str) -> None:
+        super().__init__(detail)
+        self.kind = kind
+        self.detail = detail
 
 
 def _docker() -> str:
@@ -53,77 +64,275 @@ def _docker() -> str:
     return executable
 
 
-def _run(command: list[str], *, code: str) -> subprocess.CompletedProcess[str]:
+def _run_bounded_process(
+    command: list[str],
+    *,
+    timeout_seconds: float = _DEFAULT_PROCESS_TIMEOUT_SECONDS,
+    stdout_limit_bytes: int = _MAXIMUM_WORKER_OUTPUT_BYTES,
+    stderr_limit_bytes: int = _MAXIMUM_WORKER_ERROR_BYTES,
+) -> subprocess.CompletedProcess[str]:
     process: subprocess.Popen[bytes] | None = None
     try:
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+        try:
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        except OSError as exc:
+            raise _BoundedProcessFailure("start_failure", str(exc)) from None
         if process.stdout is None or process.stderr is None:  # pragma: no cover - Popen contract
-            raise OSError("ASR container pipes are unavailable")
-        overflow = threading.Event()
+            raise _BoundedProcessFailure("start_failure", "ASR container pipes are unavailable")
+        failure_lock = threading.Lock()
+        failures: list[_BoundedProcessFailure] = []
         stdout = BytesIO()
         stderr = BytesIO()
 
-        def drain(stream, destination: BytesIO, limit: int) -> None:
-            while chunk := stream.read(64 * 1024):
-                remaining = limit - destination.tell()
-                if remaining > 0:
-                    destination.write(chunk[:remaining])
-                if len(chunk) > remaining:
-                    overflow.set()
-                    with suppress(OSError):
-                        process.kill()
-                    return
+        def fail(kind: str, detail: str) -> None:
+            with failure_lock:
+                if not failures:
+                    failures.append(_BoundedProcessFailure(kind, detail))
+            with suppress(OSError):
+                process.kill()
+
+        def drain(stream, destination: BytesIO, limit: int, stream_name: str) -> None:
+            try:
+                while chunk := stream.read(64 * 1024):
+                    remaining = limit - destination.tell()
+                    if remaining > 0:
+                        destination.write(chunk[:remaining])
+                    if len(chunk) > remaining:
+                        fail(
+                            f"{stream_name}_overflow",
+                            f"ASR container {stream_name} exceeded its byte limit",
+                        )
+                        return
+            except Exception as exc:
+                fail("reader_failure", f"ASR container output reader failed: {exc}")
 
         readers = (
             threading.Thread(
                 target=drain,
-                args=(process.stdout, stdout, _MAXIMUM_WORKER_OUTPUT_BYTES),
+                args=(process.stdout, stdout, stdout_limit_bytes, "stdout"),
                 daemon=True,
             ),
             threading.Thread(
                 target=drain,
-                args=(process.stderr, stderr, _MAXIMUM_WORKER_ERROR_BYTES),
+                args=(process.stderr, stderr, stderr_limit_bytes, "stderr"),
                 daemon=True,
             ),
         )
         for reader in readers:
             reader.start()
         try:
-            returncode = process.wait(timeout=24 * 60 * 60)
+            returncode = process.wait(timeout=timeout_seconds)
         except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=30)
-            raise
+            fail("timeout", "ASR container command timed out")
+            with suppress(OSError, subprocess.SubprocessError):
+                process.wait(timeout=30)
         finally:
             for reader in readers:
                 reader.join(timeout=30)
         if any(reader.is_alive() for reader in readers):
-            process.kill()
-            raise OSError("ASR container output reader did not stop")
-        if overflow.is_set():
-            if process.poll() is None:
-                process.kill()
-                process.wait(timeout=30)
-            raise io_error(code, "ASR container output exceeded its byte limit")
-        stdout_text = stdout.getvalue().decode("utf-8")
-        stderr_text = stderr.getvalue().decode("utf-8")
-        if returncode != 0:
-            raise subprocess.CalledProcessError(
-                returncode, command, output=stdout_text, stderr=stderr_text
-            )
+            fail("reader_failure", "ASR container output reader did not stop")
+        if failures:
+            raise failures[0]
+        try:
+            stdout_text = stdout.getvalue().decode("utf-8")
+            stderr_text = stderr.getvalue().decode("utf-8")
+        except UnicodeDecodeError:
+            raise _BoundedProcessFailure(
+                "decode_failure", "ASR container output is not valid UTF-8"
+            ) from None
         return subprocess.CompletedProcess(command, returncode, stdout_text, stderr_text)
-    except UnicodeDecodeError:
-        raise io_error(code, "ASR container output is not valid UTF-8") from None
-    except (OSError, subprocess.SubprocessError) as exc:
-        detail = getattr(exc, "stderr", None) or str(exc)
-        raise io_error(code, str(detail).strip()[:1024] or "ASR container command failed") from None
+    except _BoundedProcessFailure:
+        raise
+    except Exception as exc:
+        raise _BoundedProcessFailure(
+            "host_failure", f"ASR container host process failed: {exc}"
+        ) from exc
     finally:
         if process is not None and process.poll() is None:
-            process.kill()
+            with suppress(OSError):
+                process.kill()
+
+
+def _process_failure_error(
+    code: str,
+    command: list[str],
+    failure: _BoundedProcessFailure | subprocess.CalledProcessError,
+) -> VepError:
+    if isinstance(failure, subprocess.CalledProcessError):
+        detail = failure.stderr or failure.output or str(failure)
+    else:
+        detail = failure.detail
+    return io_error(code, str(detail).strip()[:1024] or "ASR container command failed")
+
+
+def _run(
+    command: list[str],
+    *,
+    code: str,
+    timeout_seconds: float = _DEFAULT_PROCESS_TIMEOUT_SECONDS,
+) -> subprocess.CompletedProcess[str]:
+    try:
+        completed = _run_bounded_process(
+            command,
+            timeout_seconds=timeout_seconds,
+            stdout_limit_bytes=_MAXIMUM_WORKER_OUTPUT_BYTES,
+            stderr_limit_bytes=_MAXIMUM_WORKER_ERROR_BYTES,
+        )
+        if completed.returncode != 0:
+            raise subprocess.CalledProcessError(
+                completed.returncode,
+                command,
+                output=completed.stdout,
+                stderr=completed.stderr,
+            )
+        return completed
+    except (_BoundedProcessFailure, subprocess.CalledProcessError) as exc:
+        raise _process_failure_error(code, command, exc) from None
+
+
+def _docker_cleanup_error(message: str) -> VepError:
+    return io_error("ASR_CONTAINER_CLEANUP_FAILED", message)
+
+
+def _docker_cleanup_command(docker: str, arguments: list[str]) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            [docker, *arguments],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=_DOCKER_CLEANUP_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise _docker_cleanup_error(f"Docker container cleanup command failed: {exc}") from None
+
+
+def _is_exact_container_not_found(
+    completed: subprocess.CompletedProcess[str], container_id: str
+) -> bool:
+    if completed.returncode == 0:
+        return False
+    detail = completed.stderr.strip()
+    escaped = re.escape(container_id)
+    return any(
+        re.fullmatch(pattern, detail) is not None
+        for pattern in (
+            rf"(?:(?:Error response from daemon: )|Error: )?No such container: {escaped}",
+            rf"Error: No such object: {escaped}",
+        )
+    )
+
+
+def _read_managed_container_id(cid_path: Path, *, required: bool) -> str | None:
+    if not cid_path.exists():
+        if required:
+            raise _docker_cleanup_error(
+                "Docker did not publish the managed container ID after a bounded failure"
+            )
+        return None
+    if cid_path.is_symlink() or not cid_path.is_file() or cid_path.stat().st_size > 65:
+        raise _docker_cleanup_error("Docker managed container ID file is invalid")
+    try:
+        container_id = cid_path.read_text(encoding="ascii").strip()
+    except (OSError, UnicodeError):
+        raise _docker_cleanup_error("Docker managed container ID file is unreadable") from None
+    if _CONTAINER_ID_PATTERN.fullmatch(container_id) is None:
+        raise _docker_cleanup_error("Docker managed container ID is malformed")
+    return container_id
+
+
+def _terminate_managed_docker_container(
+    docker: str, cid_path: Path, *, identity_required: bool
+) -> None:
+    container_id = _read_managed_container_id(cid_path, required=identity_required)
+    if container_id is None:
+        return
+    inspected = _docker_cleanup_command(
+        docker, ["container", "inspect", "--format", "{{.State.Running}}", container_id]
+    )
+    if _is_exact_container_not_found(inspected, container_id):
+        return
+    if inspected.returncode != 0:
+        raise _docker_cleanup_error(
+            "Docker could not inspect the exact managed container during cleanup"
+        )
+    running = inspected.stdout.strip().lower()
+    if running not in {"true", "false"}:
+        raise _docker_cleanup_error("Docker returned an invalid managed container state")
+    if running == "true":
+        killed = _docker_cleanup_command(docker, ["container", "kill", container_id])
+        if _is_exact_container_not_found(killed, container_id):
+            return
+        if killed.returncode != 0:
+            raise _docker_cleanup_error("Docker could not kill the exact managed container")
+        inspected = _docker_cleanup_command(
+            docker,
+            ["container", "inspect", "--format", "{{.State.Running}}", container_id],
+        )
+        if _is_exact_container_not_found(inspected, container_id):
+            return
+        if inspected.returncode != 0:
+            raise _docker_cleanup_error(
+                "Docker could not inspect the exact managed container after kill"
+            )
+    removed = _docker_cleanup_command(docker, ["container", "rm", "--force", container_id])
+    if removed.returncode != 0 and not _is_exact_container_not_found(removed, container_id):
+        raise _docker_cleanup_error("Docker could not remove the exact managed container")
+    verified = _docker_cleanup_command(
+        docker, ["container", "inspect", "--format", "{{.Id}}", container_id]
+    )
+    if _is_exact_container_not_found(verified, container_id):
+        return
+    if verified.returncode != 0:
+        raise _docker_cleanup_error("Docker could not verify the exact managed container cleanup")
+    raise _docker_cleanup_error("Docker managed container still exists after cleanup")
+
+
+def _run_managed_docker_container(
+    docker: str,
+    run_arguments: list[str],
+    *,
+    code: str,
+    timeout_seconds: float = _DEFAULT_PROCESS_TIMEOUT_SECONDS,
+    stdout_limit_bytes: int = _MAXIMUM_WORKER_OUTPUT_BYTES,
+    stderr_limit_bytes: int = _MAXIMUM_WORKER_ERROR_BYTES,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    with tempfile.TemporaryDirectory(prefix="vep-docker-cid-") as temporary:
+        cid_path = Path(temporary) / "container.cid"
+        command = [docker, "run", "--cidfile", str(cid_path), *run_arguments]
+        try:
+            completed = _run_bounded_process(
+                command,
+                timeout_seconds=timeout_seconds,
+                stdout_limit_bytes=stdout_limit_bytes,
+                stderr_limit_bytes=stderr_limit_bytes,
+            )
+        except _BoundedProcessFailure as exc:
+            if exc.kind != "start_failure":
+                _terminate_managed_docker_container(docker, cid_path, identity_required=True)
+            raise _process_failure_error(code, command, exc) from None
+        except BaseException:
+            _terminate_managed_docker_container(docker, cid_path, identity_required=True)
+            raise
+        if completed.returncode == 0:
+            _read_managed_container_id(cid_path, required=True)
+            return completed
+        _terminate_managed_docker_container(docker, cid_path, identity_required=False)
+        if check:
+            failure = subprocess.CalledProcessError(
+                completed.returncode,
+                command,
+                output=completed.stdout,
+                stderr=completed.stderr,
+            )
+            raise _process_failure_error(code, command, failure) from None
+        return completed
 
 
 def _image_digest(docker: str, image: str) -> str | None:
@@ -236,10 +445,9 @@ def _gpu_preflight_failure_reason(
     docker: str, image: str, device_policy: str
 ) -> DeviceSelectionReason | None:
     try:
-        completed = subprocess.run(
+        completed = _run_managed_docker_container(
+            docker,
             [
-                docker,
-                "run",
                 "--rm",
                 "--pull",
                 "never",
@@ -259,12 +467,14 @@ def _gpu_preflight_failure_reason(
                     "ctranslate2.get_supported_compute_types('cuda', i)]}))"
                 ),
             ],
-            check=True,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=120,
+            code="ASR_CONTAINER_GPU_PREFLIGHT_FAILED",
+            timeout_seconds=120,
+            check=False,
         )
+        if completed.returncode != 0:
+            if completed.returncode in {125, 126, 127}:
+                return DeviceSelectionReason.CONTAINER_PASSTHROUGH_UNAVAILABLE
+            return DeviceSelectionReason.BACKEND_CUDA_UNAVAILABLE
         probe = json.loads(completed.stdout)
         if (
             not isinstance(probe, dict)
@@ -285,11 +495,9 @@ def _gpu_preflight_failure_reason(
         if requested_index is None and not probe["float16_indices"]:
             return DeviceSelectionReason.GPU_COMPUTE_TYPE_UNSUPPORTED
         return None
-    except subprocess.CalledProcessError as exc:
-        if exc.returncode in {125, 126, 127}:
-            return DeviceSelectionReason.CONTAINER_PASSTHROUGH_UNAVAILABLE
-        return DeviceSelectionReason.BACKEND_CUDA_UNAVAILABLE
-    except (OSError, subprocess.TimeoutExpired):
+    except VepError as exc:
+        if exc.code == "ASR_CONTAINER_CLEANUP_FAILED":
+            raise
         return DeviceSelectionReason.CONTAINER_PASSTHROUGH_UNAVAILABLE
     except (json.JSONDecodeError, TypeError, ValueError):
         return DeviceSelectionReason.BACKEND_CUDA_UNAVAILABLE
@@ -308,6 +516,8 @@ def _validate_worker_response(
         or backend.model_repository != request.model_repository
         or backend.model != request.model_repository
         or backend.model_revision != request.model_revision
+        or backend.model_fingerprint is None
+        or backend.model_fingerprint != request.model_storage_identity
         or backend.model_storage_identity != request.model_storage_identity
         or backend.device_policy != request.requested_device_policy
         or backend.container_image != request.container_image
@@ -414,7 +624,27 @@ def _validate_worker_response(
                 backend.candidate_free_vram_mib is not None
                 and backend.candidate_free_vram_mib >= request.configured_min_free_vram_mib
             )
-    if not capacity_contract_valid or not device_contract_valid or not policy_contract_valid:
+    fallback_contract_valid = (
+        (
+            backend.fallback is True
+            and backend.selection_reason is DeviceSelectionReason.GPU_RESOURCE_FALLBACK
+            and backend.fallback_from == "cuda"
+            and backend.fallback_reason is not None
+            and is_gpu_resource_error(backend.fallback_reason)
+        )
+        if backend.fallback is True
+        else (
+            backend.fallback is False
+            and backend.fallback_from is None
+            and backend.fallback_reason is None
+        )
+    )
+    if (
+        not capacity_contract_valid
+        or not device_contract_valid
+        or not policy_contract_valid
+        or not fallback_contract_valid
+    ):
         raise integrity_error(
             "ASR_WORKER_RESPONSE_INVALID",
             "ASR worker device provenance contradicts the host request",
@@ -505,10 +735,10 @@ def run_asr_worker(
                 "ASR_WORKER_REQUEST_INVALID", "ASR worker request exceeds its byte limit"
             )
         request_path.write_bytes(request_payload)
-        command = [docker, "run", "--rm", "--pull", "never", "--network", "none"]
+        run_arguments = ["--rm", "--pull", "never", "--network", "none"]
         if gpu_usable:
-            command.extend(["--gpus", "all"])
-        command.extend(
+            run_arguments.extend(["--gpus", "all"])
+        run_arguments.extend(
             [
                 "--mount",
                 f"type=bind,src={audio_path},dst=/input/audio,readonly",
@@ -524,7 +754,11 @@ def run_asr_worker(
                 "--json",
             ]
         )
-        raw = _run(command, code="ASR_CONTAINER_TRANSCRIPTION_FAILED").stdout
+        raw = _run_managed_docker_container(
+            docker,
+            run_arguments,
+            code="ASR_CONTAINER_TRANSCRIPTION_FAILED",
+        ).stdout
     try:
         response = AsrWorkerResponse.model_validate_json(raw)
     except ValidationError:
@@ -610,8 +844,6 @@ def run_provision_container(repository_root: Path, profile_id: str | None = None
             with tempfile.TemporaryDirectory(prefix="vep-asr-provision-") as temporary:
                 staging = Path(temporary)
                 command = [
-                    docker,
-                    "run",
                     "--rm",
                     "--pull",
                     "never",
@@ -626,7 +858,11 @@ def run_provision_container(repository_root: Path, profile_id: str | None = None
                     "/output/model",
                     "--json",
                 ]
-                _run(command, code="ASR_MODEL_PROVISION_FAILED")
+                _run_managed_docker_container(
+                    docker,
+                    command,
+                    code="ASR_MODEL_PROVISION_FAILED",
+                )
                 model, manifest, reused = publish_model_payload(
                     repository_root,
                     selected,
@@ -658,10 +894,9 @@ def smoke_asr_image(repository_root: Path, profile_id: str | None = None) -> dic
         "ctypes.CDLL('libcublas.so.12'); ctypes.CDLL('libcudnn.so.9'); "
         "print('ok')"
     )
-    _run(
+    _run_managed_docker_container(
+        docker,
         [
-            docker,
-            "run",
             "--rm",
             "--pull",
             "never",
@@ -675,10 +910,9 @@ def smoke_asr_image(repository_root: Path, profile_id: str | None = None) -> dic
         ],
         code="ASR_CONTAINER_SMOKE_FAILED",
     )
-    _run(
+    _run_managed_docker_container(
+        docker,
         [
-            docker,
-            "run",
             "--rm",
             "--pull",
             "never",
@@ -691,7 +925,42 @@ def smoke_asr_image(repository_root: Path, profile_id: str | None = None) -> dic
         ],
         code="ASR_CONTAINER_SMOKE_FAILED",
     )
-    return {"image": profile.container_image, "identity": digest, "contract": "valid"}
+    lifecycle_timeout_code = "ASR_CONTAINER_LIFECYCLE_SMOKE_TIMEOUT"
+    try:
+        _run_managed_docker_container(
+            docker,
+            [
+                "--rm",
+                "--pull",
+                "never",
+                "--network",
+                "none",
+                "--entrypoint",
+                "python3",
+                digest,
+                "-c",
+                "import time; time.sleep(30)",
+            ],
+            code=lifecycle_timeout_code,
+            timeout_seconds=2,
+        )
+    except VepError as exc:
+        if (
+            exc.code != lifecycle_timeout_code
+            or exc.safe_message != "ASR container command timed out"
+        ):
+            raise
+    else:  # pragma: no cover - actual image command must outlive the injected timeout
+        raise integrity_error(
+            "ASR_CONTAINER_LIFECYCLE_SMOKE_FAILED",
+            "ASR lifecycle smoke container unexpectedly completed before timeout",
+        )
+    return {
+        "image": profile.container_image,
+        "identity": digest,
+        "contract": "valid",
+        "managed_lifecycle": "verified",
+    }
 
 
 def preflight_asr_gpu(

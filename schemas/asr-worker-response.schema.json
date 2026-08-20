@@ -237,6 +237,11 @@
                   "type": "null"
                 }
               },
+              "model_fingerprint": {
+                "not": {
+                  "type": "null"
+                }
+              },
               "model_repository": {
                 "not": {
                   "type": "null"
@@ -279,6 +284,7 @@
               "model",
               "model_repository",
               "model_revision",
+              "model_fingerprint",
               "model_storage_identity",
               "device_policy",
               "selection_reason",

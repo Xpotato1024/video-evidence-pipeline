@@ -124,10 +124,10 @@ def select_device(
     )
 
 
-def is_gpu_resource_error(exc: BaseException) -> bool:
+def is_gpu_resource_error(error: BaseException | str) -> bool:
     """Recognize only resource exhaustion; invalid input/configuration must surface."""
 
-    message = " ".join(str(exc).casefold().replace("_", " ").split())
+    message = " ".join(str(error).casefold().replace("_", " ").split())
     markers = (
         "cuda failed with error out of memory",
         "cuda out of memory",

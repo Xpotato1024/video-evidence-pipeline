@@ -74,7 +74,11 @@ canonical artifact／manifest／transition／lock／permissionを所有します
 modelも不要です。不足区間がある場合だけASR workerを`--pull never --network none`で起動し、exact speech audioと
 modelをread-only、typed requestをread-onlyでmountします。canonical `.local/jobs/<job>`やjob rootをcontainerへ
 read-write mountしません。worker requestは4 MiB、stdoutは128 MiB、stderrは1 MiBを上限とし、hostは
-process実行中のbounded readerで超過を検出してworkerを停止します。typed JSONはhostが再検証してからpublishします。
+process実行中のbounded readerで超過を検出してworkerを停止します。すべての`docker run`はDockerが作成する
+task-owned temporary cidfileでそのexecutionのcontainer IDだけを追跡します。host timeout、stdout／stderr overflow、
+reader failure時はdocker CLI processだけでなく、厳格に検証したexact IDのdaemon-side containerを明示的にkill／removeし、
+残存しないことを確認します。cleanup不能またはcidfile不整合は`ASR_CONTAINER_CLEANUP_FAILED`としてfail closedです。
+typed JSONはhostが再検証してからpublishします。
 inference中のmodel download、package install、cloud fallbackはできません。
 profileまたはprovision manifestと一致するmodelがなければ`ASR_MODEL_NOT_PROVISIONED`で停止し、
 `vep asr model-provision`を案内します。caption coverageが十分なjobはmodelをloadしません。

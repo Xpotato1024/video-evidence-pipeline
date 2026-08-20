@@ -125,5 +125,5 @@ jobs:
           assert importlib.util.find_spec('huggingface_hub') is None"
       - name: Build pinned ASR image
         run: uv run --no-sync vep asr image-build --repository-root . --json
-      - name: Validate ASR runtime contract
+      - name: Validate ASR runtime and managed lifecycle contract
         run: uv run --no-sync vep asr image-smoke --repository-root . --json
