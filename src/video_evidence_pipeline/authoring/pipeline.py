@@ -70,6 +70,14 @@ from video_evidence_pipeline.domain.evidence import (
 )
 from video_evidence_pipeline.domain.hashing import sha256_bytes, sha256_file
 from video_evidence_pipeline.domain.job import JobSpec, utc_now
+from video_evidence_pipeline.domain.length import (
+    CharacterLengthAdjustmentAttempt,
+    CharacterLengthAdjustmentRequest,
+    CharacterLengthCheck,
+    LengthBlockManifest,
+    resolve_length_constraint,
+    validate_character_range,
+)
 from video_evidence_pipeline.domain.manifests import StageManifest, StageStatus
 from video_evidence_pipeline.domain.serialization import (
     canonical_json_bytes,
@@ -82,6 +90,7 @@ from video_evidence_pipeline.storage.atomic import (
     atomic_copy_exclusive,
     atomic_write_bytes,
 )
+from video_evidence_pipeline.storage.jsonl import append_jsonl
 from video_evidence_pipeline.storage.layout import JobWorkspace
 from video_evidence_pipeline.storage.permissions import (
     enforce_private_file,
@@ -605,12 +614,592 @@ def build_fixed_evidence_bundle(
 
 
 def _constraints(job: JobSpec, fixed: FixedEvidenceBundle) -> OutputConstraints:
+    effective_length = resolve_length_constraint(job.assignment.length)
     return OutputConstraints(
         format=job.output.format,
         language=job.assignment.language,
         task_type=job.assignment.task_type,
         requirements=fixed.evidence_request.assignment.requirements,
+        length=job.assignment.length if effective_length is not None else None,
+        effective_length=effective_length,
     )
+
+
+def _length_attempt_path(workspace: JobWorkspace, version: str) -> Path:
+    return workspace.safe_path(f"authoring/length/{version}-attempts.jsonl")
+
+
+def _length_request_path(workspace: JobWorkspace, version: str) -> Path:
+    return workspace.safe_path(f"authoring/length/{version}-request.json")
+
+
+def _length_candidate_path(
+    workspace: JobWorkspace, version: str, response_fingerprint: str
+) -> tuple[Path, str]:
+    relative = f"authoring/length/{version}/{response_fingerprint}/candidate-response.json"
+    return workspace.safe_path(relative), relative
+
+
+def _length_attempts(
+    workspace: JobWorkspace, version: str
+) -> tuple[CharacterLengthAdjustmentAttempt, ...]:
+    path = _length_attempt_path(workspace, version)
+    if not path.exists():
+        return ()
+    return _read_jsonl(
+        path,
+        CharacterLengthAdjustmentAttempt,
+        code="LENGTH_ADJUSTMENT_HISTORY_INVALID",
+    )
+
+
+def _durable_length_candidate(
+    workspace: JobWorkspace,
+    *,
+    version: str,
+    response_fingerprint: str,
+    response_payload: bytes,
+) -> ArtifactRef:
+    path, relative = _length_candidate_path(workspace, version, response_fingerprint)
+    ensure_private_directory(path.parent.parent)
+    ensure_private_directory(path.parent)
+    if path.exists():
+        if (
+            _read_bounded_bytes(
+                path,
+                maximum_bytes=_MAXIMUM_MACHINE_BYTES,
+                code="LENGTH_CANDIDATE_INVALID",
+            )
+            != response_payload
+        ):
+            raise integrity_error(
+                "LENGTH_CANDIDATE_INVALID", "length candidate identity is ambiguous"
+            )
+    else:
+        atomic_write_bytes(path, response_payload, private=True)
+    return _artifact(
+        path,
+        artifact_type="failed_length_candidate_response",
+        relative_path=relative,
+    )
+
+
+def _recover_orphan_length_candidate(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    *,
+    version: str,
+    effective,
+    request_fingerprint: str,
+    attempts: tuple[CharacterLengthAdjustmentAttempt, ...],
+) -> tuple[CharacterLengthAdjustmentAttempt, ...]:
+    candidate_root = workspace.safe_path(f"authoring/length/{version}")
+    if not candidate_root.exists():
+        return attempts
+    referenced = {item.response_fingerprint for item in attempts}
+    orphan_fingerprints = sorted(
+        child.name
+        for child in candidate_root.iterdir()
+        if re.fullmatch(r"[0-9a-f]{64}", child.name)
+        and child.name not in referenced
+        and (child / "candidate-response.json").is_file()
+    )
+    if not orphan_fingerprints:
+        return attempts
+    if len(orphan_fingerprints) != 1:
+        raise integrity_error(
+            "LENGTH_CANDIDATE_INVALID", "multiple unreferenced length candidates are ambiguous"
+        )
+    response_fingerprint = orphan_fingerprints[0]
+    candidate_path, relative = _length_candidate_path(workspace, version, response_fingerprint)
+    response_payload = _read_bounded_bytes(
+        candidate_path,
+        maximum_bytes=_MAXIMUM_MACHINE_BYTES,
+        code="LENGTH_CANDIDATE_INVALID",
+    )
+    response_type = AuthoringResponseManifest if version == "v001" else RevisionResponseManifest
+    try:
+        response = response_type.model_validate_json(response_payload)
+    except ValidationError:
+        raise integrity_error(
+            "LENGTH_CANDIDATE_INVALID", "orphan length candidate is invalid"
+        ) from None
+    if (
+        response.request_fingerprint != request_fingerprint
+        or pretty_json_bytes(response) != response_payload
+        or fingerprint(response) != response_fingerprint
+    ):
+        raise integrity_error(
+            "LENGTH_CANDIDATE_INVALID", "orphan length candidate identity is invalid"
+        )
+    check = validate_character_range(response.draft_markdown, effective)
+    if check is None or check.passed:
+        raise integrity_error(
+            "LENGTH_CANDIDATE_INVALID", "orphan length candidate is not a failed gate"
+        )
+    correction_count = sum(item.correction_number > 0 for item in attempts)
+    correction_number = 0 if not attempts else correction_count + 1
+    if correction_number > check.effective.maximum_adjustments:
+        raise integrity_error(
+            "LENGTH_ADJUSTMENT_HISTORY_INVALID", "orphan length candidate exceeds the budget"
+        )
+    attempt = CharacterLengthAdjustmentAttempt(
+        job_id=job.job_id,
+        target_draft_version=version,
+        correction_number=correction_number,
+        response_fingerprint=response_fingerprint,
+        candidate_artifact=_artifact(
+            candidate_path,
+            artifact_type="failed_length_candidate_response",
+            relative_path=relative,
+        ),
+        check=check,
+        created_at=response.created_at,
+    )
+    append_jsonl(_length_attempt_path(workspace, version), attempt)
+    return (*attempts, attempt)
+
+
+def _length_request_matches_attempt(
+    request: CharacterLengthAdjustmentRequest,
+    job: JobSpec,
+    version: str,
+    attempt: CharacterLengthAdjustmentAttempt,
+) -> bool:
+    check = attempt.check
+    return (
+        request.job_id == job.job_id
+        and request.target_draft_version == version
+        and request.actual_chars == check.actual_chars
+        and request.effective_min_chars == check.effective.min_chars
+        and request.effective_max_chars == check.effective.max_chars
+        and request.below_minimum_by == check.below_minimum_by
+        and request.over_maximum_by == check.over_maximum_by
+        and request.adjustment_number == attempt.correction_number + 1
+        and request.adjustments_remaining_after_this
+        == check.effective.maximum_adjustments - request.adjustment_number
+        and request.candidate_fingerprint == attempt.response_fingerprint
+        and request.candidate_artifact == attempt.candidate_artifact
+        and request.created_at == attempt.created_at
+    )
+
+
+def _length_adjustment_request_for_attempt(
+    job: JobSpec,
+    version: str,
+    attempt: CharacterLengthAdjustmentAttempt,
+) -> CharacterLengthAdjustmentRequest:
+    check = attempt.check
+    adjustment_number = attempt.correction_number + 1
+    return CharacterLengthAdjustmentRequest(
+        job_id=job.job_id,
+        target_draft_version=version,
+        actual_chars=check.actual_chars,
+        effective_min_chars=check.effective.min_chars,
+        effective_max_chars=check.effective.max_chars,
+        below_minimum_by=check.below_minimum_by,
+        over_maximum_by=check.over_maximum_by,
+        adjustment_number=adjustment_number,
+        adjustments_remaining_after_this=(check.effective.maximum_adjustments - adjustment_number),
+        candidate_fingerprint=attempt.response_fingerprint,
+        candidate_artifact=attempt.candidate_artifact,
+        created_at=attempt.created_at,
+    )
+
+
+def _expected_length_adjustment_request(
+    job: JobSpec,
+    version: str,
+    attempts: tuple[CharacterLengthAdjustmentAttempt, ...],
+) -> CharacterLengthAdjustmentRequest:
+    maximum = attempts[-1].check.effective.maximum_adjustments
+    request_attempt = attempts[-2] if attempts[-1].correction_number == maximum else attempts[-1]
+    return _length_adjustment_request_for_attempt(job, version, request_attempt)
+
+
+def _recover_length_adjustment_request(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    version: str,
+    attempts: tuple[CharacterLengthAdjustmentAttempt, ...],
+) -> CharacterLengthAdjustmentRequest:
+    expected = _expected_length_adjustment_request(job, version, attempts)
+    request_path = _length_request_path(workspace, version)
+    if not request_path.exists():
+        _write_machine_json(
+            request_path,
+            expected,
+            code="LENGTH_ADJUSTMENT_REQUEST_WRITE_FAILED",
+        )
+        return expected
+    request = _read_model(
+        request_path,
+        CharacterLengthAdjustmentRequest,
+        maximum_bytes=_MAXIMUM_MACHINE_BYTES,
+        code="LENGTH_ADJUSTMENT_REQUEST_INVALID",
+    )
+    if request != expected:
+        if any(
+            _length_request_matches_attempt(request, job, version, prior)
+            for prior in attempts
+            if prior.correction_number < expected.adjustment_number - 1
+        ):
+            _write_machine_json(
+                request_path,
+                expected,
+                code="LENGTH_ADJUSTMENT_REQUEST_WRITE_FAILED",
+            )
+            return expected
+        raise integrity_error(
+            "LENGTH_ADJUSTMENT_REQUEST_INVALID",
+            "length adjustment request does not match the durable ledger",
+        )
+    return request
+
+
+def _read_length_adjustment_request(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    version: str,
+    attempts: tuple[CharacterLengthAdjustmentAttempt, ...],
+) -> CharacterLengthAdjustmentRequest:
+    request_path = _length_request_path(workspace, version)
+    if not request_path.exists():
+        raise integrity_error(
+            "LENGTH_ADJUSTMENT_REQUEST_INVALID",
+            "length adjustment request is missing",
+        )
+    request = _read_model(
+        request_path,
+        CharacterLengthAdjustmentRequest,
+        maximum_bytes=_MAXIMUM_MACHINE_BYTES,
+        code="LENGTH_ADJUSTMENT_REQUEST_INVALID",
+    )
+    if request != _expected_length_adjustment_request(job, version, attempts):
+        raise integrity_error(
+            "LENGTH_ADJUSTMENT_REQUEST_INVALID",
+            "length adjustment request does not match the durable ledger",
+        )
+    return request
+
+
+def _length_adjustment_message(
+    request: CharacterLengthAdjustmentRequest,
+    maximum: int,
+) -> str:
+    required = (
+        f"{request.effective_min_chars if request.effective_min_chars is not None else 'none'}-"
+        f"{request.effective_max_chars if request.effective_max_chars is not None else 'none'}"
+    )
+    return (
+        f"current character count: {request.actual_chars}; required range: {required}; "
+        f"below minimum by: {request.below_minimum_by}; over maximum by: "
+        f"{request.over_maximum_by}; adjustment: {request.adjustment_number}/{maximum}"
+    )
+
+
+def _enforce_length_gate(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    *,
+    version: str,
+    draft_markdown: str,
+    response_fingerprint: str,
+    response_payload: bytes,
+    response_created_at: datetime,
+    request_fingerprint: str,
+) -> tuple[CharacterLengthCheck | None, int]:
+    effective = resolve_length_constraint(job.assignment.length)
+    check = validate_character_range(draft_markdown, effective)
+    attempts = _recover_orphan_length_candidate(
+        workspace,
+        job,
+        version=version,
+        effective=effective,
+        request_fingerprint=request_fingerprint,
+        attempts=_length_attempts(workspace, version),
+    )
+    if attempts:
+        _recover_length_adjustment_request(workspace, job, version, attempts)
+    correction_count = sum(item.correction_number > 0 for item in attempts)
+    if check is None:
+        return check, correction_count
+    maximum = check.effective.maximum_adjustments
+    if check.passed:
+        if attempts and correction_count >= maximum:
+            raise state_error(
+                "LENGTH_ADJUSTMENT_EXHAUSTED",
+                f"length adjustment limit {maximum} reached for {version}",
+            )
+        return check, correction_count + int(bool(attempts))
+    existing = next(
+        (item for item in attempts if item.response_fingerprint == response_fingerprint),
+        None,
+    )
+    if existing is not None:
+        candidate = _durable_length_candidate(
+            workspace,
+            version=version,
+            response_fingerprint=response_fingerprint,
+            response_payload=response_payload,
+        )
+        if existing.candidate_artifact != candidate or existing.check != check:
+            raise integrity_error(
+                "LENGTH_ADJUSTMENT_HISTORY_INVALID",
+                "duplicate length candidate does not match its durable ledger entry",
+            )
+        latest = attempts[-1]
+        if latest.correction_number >= maximum:
+            raise state_error(
+                "LENGTH_ADJUSTMENT_EXHAUSTED",
+                f"length adjustment limit {maximum} reached for {version}",
+            )
+        request = _read_length_adjustment_request(workspace, job, version, attempts)
+        raise state_error(
+            "LENGTH_ADJUSTMENT_REQUIRED",
+            _length_adjustment_message(request, maximum),
+        )
+    correction_number = 0 if not attempts else correction_count + 1
+    if correction_number > maximum:
+        raise state_error(
+            "LENGTH_ADJUSTMENT_EXHAUSTED",
+            f"length adjustment limit {maximum} reached for {version}",
+        )
+    candidate = _durable_length_candidate(
+        workspace,
+        version=version,
+        response_fingerprint=response_fingerprint,
+        response_payload=response_payload,
+    )
+    attempt = CharacterLengthAdjustmentAttempt(
+        job_id=job.job_id,
+        target_draft_version=version,
+        correction_number=correction_number,
+        response_fingerprint=response_fingerprint,
+        candidate_artifact=candidate,
+        check=check,
+        created_at=response_created_at,
+    )
+    append_jsonl(_length_attempt_path(workspace, version), attempt)
+    correction_count += int(correction_number > 0)
+    if attempt.correction_number >= maximum and attempt.correction_number > 0:
+        raise state_error(
+            "LENGTH_ADJUSTMENT_EXHAUSTED",
+            f"length adjustment limit {maximum} reached for {version}",
+        )
+    adjustment_request = _length_adjustment_request_for_attempt(job, version, attempt)
+    _write_machine_json(
+        _length_request_path(workspace, version),
+        adjustment_request,
+        code="LENGTH_ADJUSTMENT_REQUEST_WRITE_FAILED",
+    )
+    raise state_error(
+        "LENGTH_ADJUSTMENT_REQUIRED",
+        _length_adjustment_message(adjustment_request, maximum),
+    )
+
+
+def publish_length_block(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    *,
+    version: str,
+    blocked_stage: str,
+) -> LengthBlockManifest:
+    attempts = _validate_length_ledger(
+        workspace,
+        job,
+        version=version,
+        blocked_stage=blocked_stage,
+        exhausted=True,
+        deep=False,
+    )
+    final = attempts[-1]
+    maximum = final.check.effective.maximum_adjustments
+    if final.correction_number != maximum:
+        raise integrity_error("LENGTH_BLOCK_INVALID", "length adjustment budget is not exhausted")
+    manifest = LengthBlockManifest(
+        job_id=job.job_id,
+        blocked_stage=blocked_stage,
+        target_draft_version=version,
+        effective_min_chars=final.check.effective.min_chars,
+        effective_max_chars=final.check.effective.max_chars,
+        maximum_adjustments=maximum,
+        final_actual_chars=final.check.actual_chars,
+        final_below_minimum_by=final.check.below_minimum_by,
+        final_over_maximum_by=final.check.over_maximum_by,
+        final_candidate_fingerprint=final.response_fingerprint,
+        final_candidate_artifact=final.candidate_artifact,
+        created_at=final.created_at,
+    )
+    _write_or_verify_model(
+        workspace.safe_path("manifests/authoring/length-block.json"),
+        manifest,
+        LengthBlockManifest,
+        code="LENGTH_BLOCK_INVALID",
+    )
+    return manifest
+
+
+def _validate_length_ledger(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    *,
+    version: str,
+    blocked_stage: str,
+    exhausted: bool,
+    deep: bool,
+) -> tuple[CharacterLengthAdjustmentAttempt, ...]:
+    attempts = _length_attempts(workspace, version)
+    if not attempts:
+        raise integrity_error("LENGTH_BLOCK_INVALID", "length adjustment history is absent")
+    effective = resolve_length_constraint(job.assignment.length)
+    if effective is None:
+        raise integrity_error("LENGTH_BLOCK_INVALID", "length constraint is absent")
+    maximum = effective.maximum_adjustments
+    expected_numbers = list(range(len(attempts)))
+    if (
+        [item.correction_number for item in attempts] != expected_numbers
+        or len({item.response_fingerprint for item in attempts}) != len(attempts)
+        or any(
+            item.job_id != job.job_id
+            or item.target_draft_version != version
+            or item.check.effective != effective
+            for item in attempts
+        )
+        or (
+            exhausted
+            and (len(attempts) != maximum + 1 or attempts[-1].correction_number != maximum)
+        )
+        or (not exhausted and attempts[-1].correction_number >= maximum)
+    ):
+        raise integrity_error("LENGTH_BLOCK_INVALID", "length adjustment ledger is not canonical")
+    for attempt in attempts:
+        candidate_path, expected_relative = _length_candidate_path(
+            workspace, version, attempt.response_fingerprint
+        )
+        if (
+            attempt.candidate_artifact.artifact_type != "failed_length_candidate_response"
+            or attempt.candidate_artifact.relative_storage_path != expected_relative
+        ):
+            raise integrity_error(
+                "LENGTH_BLOCK_INVALID", "length candidate reference is not canonical"
+            )
+        _verify_artifact(candidate_path, attempt.candidate_artifact, deep=deep)
+        if deep:
+            model_type = (
+                AuthoringResponseManifest
+                if blocked_stage == "initial_authoring"
+                else RevisionResponseManifest
+            )
+            model = _read_model(
+                candidate_path,
+                model_type,
+                maximum_bytes=_MAXIMUM_MACHINE_BYTES,
+                code="LENGTH_CANDIDATE_INVALID",
+            )
+            recalculated = validate_character_range(model.draft_markdown, effective)
+            if fingerprint(model) != attempt.response_fingerprint or recalculated != attempt.check:
+                raise integrity_error(
+                    "LENGTH_CANDIDATE_INVALID",
+                    "failed length candidate bytes do not match the durable ledger",
+                )
+    _read_length_adjustment_request(workspace, job, version, attempts)
+    return attempts
+
+
+def load_length_block(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    *,
+    deep: bool = False,
+    expected_blocked_stage: str | None = None,
+) -> LengthBlockManifest:
+    manifest = _read_model(
+        workspace.safe_path("manifests/authoring/length-block.json"),
+        LengthBlockManifest,
+        maximum_bytes=_MAXIMUM_MACHINE_BYTES,
+        code="LENGTH_BLOCK_INVALID",
+    )
+    if manifest.job_id != job.job_id or (
+        expected_blocked_stage is not None and manifest.blocked_stage != expected_blocked_stage
+    ):
+        raise integrity_error("LENGTH_BLOCK_INVALID", "length block provenance is invalid")
+    attempts = _validate_length_ledger(
+        workspace,
+        job,
+        version=manifest.target_draft_version,
+        blocked_stage=manifest.blocked_stage,
+        exhausted=True,
+        deep=deep,
+    )
+    final = attempts[-1]
+    if (
+        final.correction_number != manifest.maximum_adjustments
+        or final.check.effective.min_chars != manifest.effective_min_chars
+        or final.check.effective.max_chars != manifest.effective_max_chars
+        or final.check.effective.maximum_adjustments != manifest.maximum_adjustments
+        or final.response_fingerprint != manifest.final_candidate_fingerprint
+        or final.candidate_artifact != manifest.final_candidate_artifact
+        or final.check.actual_chars != manifest.final_actual_chars
+        or final.check.below_minimum_by != manifest.final_below_minimum_by
+        or final.check.over_maximum_by != manifest.final_over_maximum_by
+    ):
+        raise integrity_error("LENGTH_BLOCK_INVALID", "length block ledger binding is invalid")
+    return manifest
+
+
+def _recovered_length_state(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    *,
+    version: str,
+    draft_markdown: str,
+) -> tuple[CharacterLengthCheck | None, int]:
+    check = validate_character_range(
+        draft_markdown,
+        resolve_length_constraint(job.assignment.length),
+    )
+    if check is not None and not check.passed:
+        raise integrity_error(
+            "DRAFT_BUNDLE_INVALID",
+            "recovered draft does not satisfy the effective character range",
+        )
+    return check, _validate_successful_length_ledger(
+        workspace,
+        job,
+        version=version,
+        blocked_stage=("initial_authoring" if version == "v001" else "semantic_revision"),
+        deep=False,
+    )
+
+
+def _validate_successful_length_ledger(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    *,
+    version: str,
+    blocked_stage: str,
+    deep: bool,
+) -> int:
+    attempts = _length_attempts(workspace, version)
+    request_path = _length_request_path(workspace, version)
+    if not attempts:
+        if request_path.exists():
+            raise integrity_error(
+                "DRAFT_BUNDLE_INVALID",
+                "draft length-adjustment request exists without a ledger",
+            )
+        return 0
+    validated = _validate_length_ledger(
+        workspace,
+        job,
+        version=version,
+        blocked_stage=blocked_stage,
+        exhausted=False,
+        deep=deep,
+    )
+    return len(validated)
 
 
 def _validate_fixed_job(job: JobSpec, fixed: FixedEvidenceBundle, *, code: str) -> None:
@@ -620,6 +1209,10 @@ def _validate_fixed_job(job: JobSpec, fixed: FixedEvidenceBundle, *, code: str) 
 
 def _request_fingerprint(value: BaseModel) -> str:
     payload = value.model_dump(mode="json", exclude={"request_fingerprint"})
+    constraints = payload.get("output_constraints")
+    if isinstance(constraints, dict) and constraints.get("length") is None:
+        constraints.pop("length", None)
+        constraints.pop("effective_length", None)
     return fingerprint(payload)
 
 
@@ -824,7 +1417,12 @@ def _draft_stage_path(workspace: JobWorkspace, version: str) -> Path:
 
 
 def _draft_fingerprint(manifest: DraftManifest) -> str:
-    return fingerprint(manifest.model_dump(mode="json", exclude={"bundle_fingerprint"}))
+    payload = manifest.model_dump(mode="json", exclude={"bundle_fingerprint"})
+    if manifest.semantic_revision_count is None:
+        payload.pop("semantic_revision_count", None)
+        payload.pop("length_adjustment_count", None)
+        payload.pop("length_check", None)
+    return fingerprint(payload)
 
 
 def _response_artifact_path(response_fingerprint: str, role: str) -> str:
@@ -868,6 +1466,16 @@ def stage_initial_draft(
         raise integrity_error("AUTHORING_OUTPUT_INVALID", "draft exceeds the UTF-8 byte limit")
     response_fingerprint = fingerprint(response)
     version = "v001"
+    length_check, length_adjustment_count = _enforce_length_gate(
+        workspace,
+        job,
+        version=version,
+        draft_markdown=response.draft_markdown,
+        response_fingerprint=response_fingerprint,
+        response_payload=pretty_json_bytes(response),
+        response_created_at=response.created_at,
+        request_fingerprint=response.request_fingerprint,
+    )
     base = f"authoring/drafts/{version}"
     draft_path, draft_artifact = _write_attempt_artifact(
         attempt,
@@ -924,6 +1532,9 @@ def stage_initial_draft(
         job_id=job.job_id,
         draft_version=version,
         revision_count=0,
+        semantic_revision_count=0,
+        length_adjustment_count=length_adjustment_count,
+        length_check=length_check,
         fixed_evidence_fingerprint=request.fixed_evidence.fixed_evidence_fingerprint,
         request_fingerprint=request.request_fingerprint,
         response_fingerprint=response_fingerprint,
@@ -1106,10 +1717,19 @@ def recover_initial_draft(
         raise integrity_error(
             "AUTHORING_ORPHAN_INVALID", "orphan authoring content is inconsistent"
         )
+    length_check, length_adjustment_count = _recovered_length_state(
+        workspace,
+        job,
+        version=version,
+        draft_markdown=response.draft_markdown,
+    )
     provisional = DraftManifest(
         job_id=job.job_id,
         draft_version=version,
         revision_count=0,
+        semantic_revision_count=0,
+        length_adjustment_count=length_adjustment_count,
+        length_check=length_check,
         fixed_evidence_fingerprint=request.fixed_evidence.fixed_evidence_fingerprint,
         request_fingerprint=request.request_fingerprint,
         response_fingerprint=response_fingerprint,
@@ -1264,6 +1884,30 @@ def load_draft(
         draft_markdown = draft_bytes.decode("utf-8")
     except UnicodeError:
         raise integrity_error("DRAFT_BUNDLE_INVALID", "draft is not valid UTF-8") from None
+    current_length_check = validate_character_range(
+        draft_markdown,
+        resolve_length_constraint(job.assignment.length),
+    )
+    if manifest.length_check != current_length_check or (
+        current_length_check is not None and not current_length_check.passed
+    ):
+        raise integrity_error(
+            "DRAFT_BUNDLE_INVALID",
+            "draft character-length provenance is missing, stale, or out of range",
+        )
+    validated_length_adjustments = _validate_successful_length_ledger(
+        workspace,
+        job,
+        version=version,
+        blocked_stage=(
+            "initial_authoring" if manifest.revision_count == 0 else "semantic_revision"
+        ),
+        deep=deep,
+    )
+    if manifest.length_adjustment_count != validated_length_adjustments:
+        raise integrity_error(
+            "DRAFT_BUNDLE_INVALID", "draft length-adjustment count is not bound to its ledger"
+        )
     claims = _read_jsonl(
         workspace.safe_path(manifest.claims_artifact.relative_storage_path),
         ClaimRecord,
@@ -2578,6 +3222,16 @@ def stage_revision(
         raise integrity_error("REVISION_RESPONSE_INVALID", "draft exceeds the UTF-8 byte limit")
     response_fingerprint = fingerprint(response)
     version = request.next_draft_version
+    length_check, length_adjustment_count = _enforce_length_gate(
+        workspace,
+        job,
+        version=version,
+        draft_markdown=response.draft_markdown,
+        response_fingerprint=response_fingerprint,
+        response_payload=pretty_json_bytes(response),
+        response_created_at=response.created_at,
+        request_fingerprint=response.request_fingerprint,
+    )
     draft_base = f"authoring/drafts/{version}"
     revision_base = f"authoring/revisions/{version}"
     draft_path, draft_artifact = _write_attempt_artifact(
@@ -2648,6 +3302,9 @@ def stage_revision(
         job_id=job.job_id,
         draft_version=version,
         revision_count=request.revision_count,
+        semantic_revision_count=request.revision_count,
+        length_adjustment_count=length_adjustment_count,
+        length_check=length_check,
         predecessor_draft_sha256=draft.manifest.draft_artifact.content_sha256,
         fixed_evidence_fingerprint=request.fixed_evidence.fixed_evidence_fingerprint,
         request_fingerprint=request.request_fingerprint,
@@ -2873,10 +3530,19 @@ def recover_revision(
         or run.output_artifacts != expected_outputs
     ):
         raise integrity_error("REVISION_ORPHAN_INVALID", "orphan revision content is inconsistent")
+    length_check, length_adjustment_count = _recovered_length_state(
+        workspace,
+        job,
+        version=version,
+        draft_markdown=response.draft_markdown,
+    )
     provisional_draft = DraftManifest(
         job_id=job.job_id,
         draft_version=version,
         revision_count=request.revision_count,
+        semantic_revision_count=request.revision_count,
+        length_adjustment_count=length_adjustment_count,
+        length_check=length_check,
         predecessor_draft_sha256=predecessor.manifest.draft_artifact.content_sha256,
         fixed_evidence_fingerprint=request.fixed_evidence.fixed_evidence_fingerprint,
         request_fingerprint=request.request_fingerprint,
@@ -3149,6 +3815,15 @@ def _build_human_review_bundle(
     draft_text = _draft_text(workspace, draft)
     if not draft_text.strip():
         raise state_error("HUMAN_REVIEW_GATE_FAILED", "draft Markdown is empty")
+    length_check = validate_character_range(
+        draft_text,
+        resolve_length_constraint(job.assignment.length),
+    )
+    if length_check is not None and not length_check.passed:
+        raise state_error(
+            "HUMAN_REVIEW_LENGTH_GATE_FAILED",
+            "current draft does not satisfy the effective character range",
+        )
     evidence_by_id = {item.evidence_id: item for item in fixed.evidence_records}
     replay: dict[tuple[str, str, int | None, int | None, str], SourceRef] = {}
     for claim in draft.claims:
@@ -3217,7 +3892,29 @@ def _build_human_review_bundle(
                 passed=True,
                 detail="deterministic author-versus-audit comparison is attached",
             ),
+            *(
+                [
+                    FormatCheck(
+                        check_id="length.character-range",
+                        passed=True,
+                        detail=(
+                            f"deterministic character count {length_check.actual_chars} is within "
+                            f"{length_check.effective.min_chars}-"
+                            f"{length_check.effective.max_chars}"
+                        ),
+                    )
+                ]
+                if length_check is not None
+                else []
+            ),
         ],
+        length_check=length_check,
+        semantic_revision_count=draft.manifest.semantic_revision_count,
+        length_adjustment_count=(
+            draft.manifest.length_adjustment_count
+            if draft.manifest.semantic_revision_count is not None
+            else None
+        ),
         revision_history=history_entries,
         approval_target_sha256=draft.manifest.draft_artifact.content_sha256,
         is_approval=False,

@@ -1,0 +1,63 @@
+{
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/asr-model-provision-manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "file_count": {
+      "maximum": 100000,
+      "minimum": 1,
+      "title": "File Count",
+      "type": "integer"
+    },
+    "model_repository": {
+      "title": "Model Repository",
+      "type": "string"
+    },
+    "model_revision": {
+      "pattern": "^[0-9a-f]{40}$",
+      "title": "Model Revision",
+      "type": "string"
+    },
+    "model_storage_identity": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Model Storage Identity",
+      "type": "string"
+    },
+    "profile": {
+      "pattern": "^[a-z0-9][a-z0-9-]{0,127}$",
+      "title": "Profile",
+      "type": "string"
+    },
+    "provisioned_at": {
+      "format": "date-time",
+      "title": "Provisioned At",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "total_size_bytes": {
+      "maximum": 137438953472,
+      "minimum": 1,
+      "title": "Total Size Bytes",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "profile",
+    "model_repository",
+    "model_revision",
+    "model_storage_identity",
+    "file_count",
+    "total_size_bytes",
+    "provisioned_at"
+  ],
+  "title": "AsrModelProvisionManifest",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

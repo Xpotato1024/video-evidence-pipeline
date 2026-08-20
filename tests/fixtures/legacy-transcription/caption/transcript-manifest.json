@@ -1,0 +1,59 @@
+{
+  "backends": [
+    {
+      "local_files_only": true,
+      "model": "embedded:stream-1",
+      "model_fingerprint": "288bf0744ed392e62e5ad804fcc7902b78b563a65b87a8cea4ce6c9b2acf8863",
+      "name": "normalized-subtitle",
+      "runtime": null,
+      "source": "normalized_subtitle",
+      "version": "media-normalization-v1"
+    }
+  ],
+  "caption_coverage": 1.0,
+  "configuration": {
+    "asr_beam_size": 5,
+    "asr_compute_type": "auto",
+    "asr_condition_on_previous_text": false,
+    "asr_device": "auto",
+    "asr_language": null,
+    "asr_temperature": 0.0,
+    "gap_policy": "record",
+    "maximum_segments": 100000,
+    "maximum_total_text_chars": 64000000,
+    "minimum_caption_coverage": 0.8,
+    "overlap_policy": "preserve",
+    "preferred_languages": [],
+    "schema_version": "1.0"
+  },
+  "created_at": "2026-08-19T17:11:23.457277Z",
+  "duration_ms": 3000,
+  "gaps": [],
+  "implementation_version": "transcription-v1",
+  "job_id": "legacy-caption-transcript",
+  "media_bundle_fingerprint": "65fe1bfdfb8019a1f1707b2832a776ba967c17c2f15ba95ca77d0e46cac221b2",
+  "overlaps": [],
+  "schema_version": "1.0",
+  "segment_count": 1,
+  "segments_artifact": {
+    "artifact_id": "transcript-995bbe7829ed00f4",
+    "artifact_type": "transcript_segments",
+    "content_sha256": "995bbe7829ed00f487c3ea95259eec88404505aea6b0f69c58453188a9cf11b3",
+    "relative_storage_path": "transcript/segments/995bbe7829ed00f487c3ea95259eec88404505aea6b0f69c58453188a9cf11b3/transcript.jsonl",
+    "size_bytes": 951
+  },
+  "selected_source_artifacts": [
+    {
+      "artifact_id": "subtitle-cues-1-288bf0744ed392e6",
+      "artifact_type": "normalized_subtitle_cues",
+      "content_sha256": "288bf0744ed392e62e5ad804fcc7902b78b563a65b87a8cea4ce6c9b2acf8863",
+      "relative_storage_path": "normalized/subtitles/288bf0744ed392e62e5ad804fcc7902b78b563a65b87a8cea4ce6c9b2acf8863/subtitle-0001.jsonl",
+      "size_bytes": 85
+    }
+  ],
+  "selected_subtitle_provenance": "embedded",
+  "selected_subtitle_stream_index": 1,
+  "started_at": "2026-08-19T17:11:23.429670Z",
+  "transcription_fingerprint": "dda1c092aa36528e8fbb2eccf688489cb99b00a9abb12838336b79b19c9b26a5",
+  "warnings": []
+}

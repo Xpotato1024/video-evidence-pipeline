@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import json
 import shutil
+from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 
 from test_authoring_pipeline import _author_response, _write_model
 from test_issue33_recovery import _block_initial_draft, _file_bytes
+from test_media_normalization import _synthetic_source
 from test_transcription_evidence import (
-    _response as _evidence_response,
+    _FakeAsr,
+    _synthetic_captioned_source,
 )
 from test_transcription_evidence import (
-    _synthetic_captioned_source,
+    _response as _evidence_response,
 )
 from test_transcription_evidence import (
     _write_response as _write_evidence_response,
@@ -50,22 +54,129 @@ from video_evidence_pipeline.domain.evidence import (
     EvidenceResponseManifest,
 )
 from video_evidence_pipeline.domain.job import (
+    AssignmentSpec,
     PrimaryInputKind,
+    PrimaryInputSpec,
     SourceKind,
+    job_to_yaml,
     load_job_yaml,
     requires_transcript_refinement,
 )
+from video_evidence_pipeline.domain.length import CharacterLengthConstraint
 from video_evidence_pipeline.domain.media import MediaManifest
 from video_evidence_pipeline.domain.serialization import fingerprint, pretty_json_bytes
 from video_evidence_pipeline.domain.state import JobState
-from video_evidence_pipeline.domain.transcription import TranscriptManifest
+from video_evidence_pipeline.domain.transcription import (
+    TranscriptionBackendIdentity,
+    TranscriptionConfig,
+    TranscriptManifest,
+    TranscriptSegment,
+)
 from video_evidence_pipeline.errors import VepError
 from video_evidence_pipeline.evidence.pipeline import load_evidence_result
 from video_evidence_pipeline.media.normalization import load_normalization_result
 from video_evidence_pipeline.transcription.pipeline import (
+    backend_identity_fingerprint,
     load_transcription_result,
     media_bundle_fingerprint,
+    transcription_fingerprint,
 )
+
+_LEGACY_TRANSCRIPTION_FIXTURES = Path(__file__).parent / "fixtures/legacy-transcription"
+
+
+def test_frozen_pre_46_transcript_contracts_keep_literal_fingerprints() -> None:
+    for fixture_name in ("caption", "asr"):
+        fixture = _LEGACY_TRANSCRIPTION_FIXTURES / fixture_name
+        manifest_payload = fixture.joinpath("transcript-manifest.json").read_bytes()
+        segment_payload = fixture.joinpath("segments.jsonl").read_bytes()
+        raw_manifest = json.loads(manifest_payload)
+        assert "asr_profile" not in raw_manifest["configuration"]
+        assert "model_revision" not in raw_manifest["backends"][0]
+
+        manifest = TranscriptManifest.model_validate_json(manifest_payload)
+        segment = TranscriptSegment.model_validate_json(segment_payload.strip())
+        assert manifest.segments_artifact.content_sha256 == sha256(segment_payload).hexdigest()
+        assert segment.lineage.backend_identity_fingerprint == backend_identity_fingerprint(
+            manifest.backends[0]
+        )
+        assert manifest.transcription_fingerprint == transcription_fingerprint(
+            media_fingerprint=manifest.media_bundle_fingerprint,
+            selected_artifacts=tuple(manifest.selected_source_artifacts),
+            configuration=manifest.configuration,
+            backends=tuple(manifest.backends),
+        )
+
+
+def test_audited_pr46_profiled_caption_and_asr_payload_shapes_keep_fingerprints() -> None:
+    legacy_backend_fields = json.loads(
+        (_LEGACY_TRANSCRIPTION_FIXTURES / "caption" / "transcript-manifest.json").read_bytes()
+    )["backends"][0]
+    pr46_fields = {
+        "model_revision": None,
+        "model_storage_identity": None,
+        "device_policy": None,
+        "selected_device": None,
+        "gpu_index": None,
+        "gpu_name": None,
+        "total_vram_mib": None,
+        "free_vram_at_selection_mib": None,
+        "configured_min_free_vram_mib": None,
+        "compute_type": None,
+        "container_image": None,
+        "container_image_digest": None,
+        "fallback": None,
+        "fallback_from": None,
+        "fallback_reason": None,
+    }
+    caption_payload = {**legacy_backend_fields, **pr46_fields}
+    asr_payload = {
+        **caption_payload,
+        "source": "asr",
+        "name": "faster-whisper",
+        "version": "1.2.1",
+        "runtime": "ctranslate2-4.8.1;device=cpu;compute_type=int8;device_index=none",
+        "model": "Systran/faster-whisper-large-v3",
+        "model_revision": "1" * 40,
+        "model_fingerprint": "2" * 64,
+        "model_storage_identity": "3" * 64,
+        "device_policy": "auto",
+        "selected_device": "cpu",
+        "configured_min_free_vram_mib": 6144,
+        "compute_type": "int8",
+        "container_image": "vep-asr:whisper-large-v3",
+        "container_image_digest": "sha256:" + "4" * 64,
+        "fallback": False,
+    }
+    raw_config = json.loads(
+        (_LEGACY_TRANSCRIPTION_FIXTURES / "caption" / "transcript-manifest.json").read_bytes()
+    )["configuration"]
+    raw_config["asr_profile"] = "whisper-large-v3"
+    configuration = TranscriptionConfig.model_validate(raw_config)
+    selected = TranscriptManifest.model_validate_json(
+        (_LEGACY_TRANSCRIPTION_FIXTURES / "caption" / "transcript-manifest.json").read_bytes()
+    ).selected_source_artifacts
+    for raw_backend in (caption_payload, asr_payload):
+        backend = TranscriptionBackendIdentity.model_validate(raw_backend)
+        assert backend_identity_fingerprint(backend) == fingerprint(raw_backend)
+        expected = fingerprint(
+            {
+                "media_bundle_fingerprint": "5" * 64,
+                "selected_artifact_hashes": [selected[0].content_sha256],
+                "configuration": raw_config,
+                "backends": [raw_backend],
+                "implementation_version": "transcription-v1",
+            }
+        )
+        assert (
+            transcription_fingerprint(
+                media_fingerprint="5" * 64,
+                selected_artifacts=tuple(selected),
+                configuration=configuration,
+                backends=(backend,),
+            )
+            == expected
+        )
 
 
 def _video_evidence_parent(tmp_path: Path, job_id: str):
@@ -194,6 +305,29 @@ def _freeze_pre_35_evidence(
     )
 
 
+def _freeze_pre_46_transcription(workspace) -> None:
+    """Persist the exact pre-#46 config/backend JSON shape, not a current model dump."""
+
+    manifest_payload = json.loads(workspace.transcript_manifest_json.read_text(encoding="utf-8"))
+    manifest_payload["configuration"].pop("asr_profile")
+    legacy_identity_fields = {
+        "source",
+        "name",
+        "version",
+        "runtime",
+        "model",
+        "model_fingerprint",
+        "local_files_only",
+    }
+    manifest_payload["backends"] = [
+        {key: value for key, value in backend.items() if key in legacy_identity_fields}
+        for backend in manifest_payload["backends"]
+    ]
+    payload = pretty_json_bytes(manifest_payload)
+    workspace.transcript_manifest_json.write_bytes(payload)
+    workspace.transcript_candidate_manifest_json.write_bytes(payload)
+
+
 def _legacy_blocked_video_parent(tmp_path: Path, job_id: str):
     workspace = _video_evidence_parent(tmp_path, job_id)
     authoring_request = prepare_authoring_job(workspace.root, "draft-video-report").request
@@ -206,8 +340,52 @@ def _legacy_blocked_video_parent(tmp_path: Path, job_id: str):
         job_id=job_id,
         category="content-integrity",
     )
+    _freeze_pre_46_transcription(workspace)
     frozen = _freeze_pre_35_evidence(workspace)
     return workspace, frozen
+
+
+def _legacy_asr_blocked_parent(tmp_path: Path, job_id: str):
+    repository = tmp_path / f"{job_id}-repository"
+    repository.mkdir()
+    shutil.copytree(Path(__file__).parents[1] / ".agents", repository / ".agents")
+    source = _synthetic_source(repository, audio=True, subtitle=False)
+    workspace, _job = initialize_job(
+        repository,
+        job_id=job_id,
+        source_kind=SourceKind.LOCAL_FILE,
+        source=str(source),
+        task_type="report",
+        language="en",
+        output_format="markdown",
+        requirements=["Preserve only synthetic ASR evidence."],
+    )
+    authorize_job(
+        workspace.root,
+        confirm=True,
+        basis="authorized synthetic legacy ASR fixture",
+        allow_local_processing=True,
+        allow_external_api=False,
+        confirmer_identity="pytest",
+    )
+    acquire_job(workspace.root)
+    normalize_job(workspace.root)
+    transcribe_job(workspace.root, backend_override=_FakeAsr())
+    request = prepare_evidence_job(workspace.root).request
+    evidence_path = tmp_path / f"{job_id}-evidence-response.json"
+    _write_evidence_response(
+        evidence_path,
+        _evidence_response(request, execution_mode=AnalyzerExecutionMode.TEST_FIXTURE),
+    )
+    _import_evidence_fixture(workspace.root, evidence_path)
+    authoring_request = prepare_authoring_job(workspace.root, "draft-video-report").request
+    authoring_path = tmp_path / f"{job_id}-authoring-response.json"
+    _write_model(authoring_path, _author_response(authoring_request))
+    _import_authoring_fixture(workspace.root, authoring_path)
+    _block_initial_draft(tmp_path, workspace, job_id=job_id, category="content-integrity")
+    _freeze_pre_46_transcription(workspace)
+    _freeze_pre_35_evidence(workspace)
+    return workspace
 
 
 def test_frozen_pre_35_bundle_validates_and_recovery_reuses_only_legacy_inputs(
@@ -217,6 +395,9 @@ def test_frozen_pre_35_bundle_validates_and_recovery_reuses_only_legacy_inputs(
         tmp_path, "legacy-v1-parent"
     )
     assert load_job_yaml(parent.job_yaml).primary_input is None
+    raw_transcript = json.loads(parent.transcript_manifest_json.read_text(encoding="utf-8"))
+    assert "asr_profile" not in raw_transcript["configuration"]
+    assert "model_revision" not in raw_transcript["backends"][0]
     assert (
         "atomic_proposition_contract"
         not in json.loads(parent.evidence_request_json.read_text(encoding="utf-8"))[
@@ -295,11 +476,28 @@ def test_frozen_pre_35_bundle_validates_and_recovery_reuses_only_legacy_inputs(
         raise AssertionError("deep validation must reject the frozen semantic fingerprint")
 
     parent_before = _file_bytes(parent.root)
+    parent_job = load_job_yaml(parent.job_yaml)
+    child_spec_job = parent_job.model_copy(
+        update={
+            "job_id": "legacy-v1-recovery-01",
+            "created_at": datetime.now(UTC),
+            "primary_input": PrimaryInputSpec(kind=PrimaryInputKind.VIDEO),
+            "assignment": AssignmentSpec(
+                task_type="short-report",
+                language="ja",
+                requirements=["changed legacy recovery assignment"],
+                length=CharacterLengthConstraint(min_chars=1, max_chars=300),
+            ),
+        }
+    )
+    child_spec = tmp_path / "legacy-v1-recovery-01.yaml"
+    child_spec.write_text(job_to_yaml(child_spec_job), encoding="utf-8")
     recovered = recover_job(
         parent.root,
         "legacy-v1-recovery-01",
         confirm=True,
         basis="restart semantic processing from frozen legacy v1 evidence",
+        child_spec_path=child_spec,
     )
     child = recovered.workspace
     assert validate_job(child.root)["state"] == JobState.TRANSCRIBED.value
@@ -307,8 +505,61 @@ def test_frozen_pre_35_bundle_validates_and_recovery_reuses_only_legacy_inputs(
     assert child_job.primary_input is not None
     assert child_job.primary_input.kind is PrimaryInputKind.VIDEO
     assert requires_transcript_refinement(child_job) is True
+    assert child_job.assignment == child_spec_job.assignment
     assert _file_bytes(parent.root) == parent_before
     assert not child.evidence_manifest_json.exists()
+    for directory in ("refinement", "evidence", "authoring", "human-review", "approval", "exports"):
+        assert not any(path.is_file() for path in (child.root / directory).rglob("*"))
+
+
+def test_pre_46_asr_blocked_parent_deep_validates_and_recovers_changed_assignment(
+    tmp_path: Path,
+) -> None:
+    parent = _legacy_asr_blocked_parent(tmp_path, "legacy-asr-parent")
+    raw_manifest = json.loads(parent.transcript_manifest_json.read_text(encoding="utf-8"))
+    assert raw_manifest["backends"][0]["source"] == "asr"
+    assert "asr_profile" not in raw_manifest["configuration"]
+    assert "selected_device" not in raw_manifest["backends"][0]
+    assert validate_job(parent.root)["state"] == JobState.BLOCKED.value
+    assert validate_job(parent.root, deep=True)["state"] == JobState.BLOCKED.value
+
+    parent_job = load_job_yaml(parent.job_yaml)
+    child_job = parent_job.model_copy(
+        update={
+            "job_id": "legacy-asr-child",
+            "created_at": datetime.now(UTC),
+            "primary_input": PrimaryInputSpec(kind=PrimaryInputKind.VIDEO),
+            "assignment": AssignmentSpec(
+                task_type="short-report",
+                language="ja",
+                requirements=["new ASR recovery assignment"],
+                length=CharacterLengthConstraint(min_chars=1, max_chars=300),
+            ),
+        }
+    )
+    child_spec = tmp_path / "legacy-asr-child.yaml"
+    child_spec.write_text(job_to_yaml(child_job), encoding="utf-8")
+    parent_before = _file_bytes(parent.root)
+    child = recover_job(
+        parent.root,
+        "legacy-asr-child",
+        confirm=True,
+        basis="recover frozen pre-46 ASR transcript under a changed assignment",
+        child_spec_path=child_spec,
+    ).workspace
+
+    assert _file_bytes(parent.root) == parent_before
+    assert load_job_yaml(child.job_yaml).assignment == child_job.assignment
+    assert validate_job(child.root)["state"] == JobState.TRANSCRIBED.value
+    assert validate_job(child.root, deep=True)["state"] == JobState.TRANSCRIBED.value
+    parent_transcript = TranscriptManifest.model_validate_json(
+        parent.transcript_manifest_json.read_bytes()
+    )
+    child_transcript = TranscriptManifest.model_validate_json(
+        child.transcript_manifest_json.read_bytes()
+    )
+    assert child_transcript.transcription_fingerprint == parent_transcript.transcription_fingerprint
+    assert child_transcript.segments_artifact == parent_transcript.segments_artifact
     for directory in ("refinement", "evidence", "authoring", "human-review", "approval", "exports"):
         assert not any(path.is_file() for path in (child.root / directory).rglob("*"))
 

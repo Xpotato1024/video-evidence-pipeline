@@ -1,5 +1,20 @@
 {
   "$defs": {
+    "DeviceSelectionReason": {
+      "enum": [
+        "explicit_cpu",
+        "no_gpu_visible",
+        "container_passthrough_unavailable",
+        "backend_cuda_unavailable",
+        "gpu_compute_type_unsupported",
+        "insufficient_free_vram",
+        "auto_gpu_selected",
+        "explicit_cuda_selected",
+        "gpu_resource_fallback"
+      ],
+      "title": "DeviceSelectionReason",
+      "type": "string"
+    },
     "TranscriptSource": {
       "enum": [
         "supplied",
@@ -13,7 +28,321 @@
   "$id": "https://schemas.video-evidence-pipeline.local/v1/transcription-backend-identity.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "model_repository": {
+            "type": "string"
+          },
+          "source": {
+            "const": "asr"
+          }
+        },
+        "required": [
+          "source",
+          "model_repository"
+        ]
+      },
+      "then": {
+        "properties": {
+          "compute_type": {
+            "not": {
+              "type": "null"
+            }
+          },
+          "configured_min_free_vram_mib": {
+            "not": {
+              "type": "null"
+            }
+          },
+          "container_image": {
+            "not": {
+              "type": "null"
+            }
+          },
+          "container_image_digest": {
+            "not": {
+              "type": "null"
+            }
+          },
+          "device_policy": {
+            "not": {
+              "type": "null"
+            }
+          },
+          "fallback": {
+            "not": {
+              "type": "null"
+            }
+          },
+          "model": {
+            "not": {
+              "type": "null"
+            }
+          },
+          "model_fingerprint": {
+            "not": {
+              "type": "null"
+            }
+          },
+          "model_repository": {
+            "not": {
+              "type": "null"
+            }
+          },
+          "model_revision": {
+            "not": {
+              "type": "null"
+            }
+          },
+          "model_storage_identity": {
+            "not": {
+              "type": "null"
+            }
+          },
+          "runtime": {
+            "not": {
+              "type": "null"
+            }
+          },
+          "runtime_version": {
+            "not": {
+              "type": "null"
+            }
+          },
+          "selected_device": {
+            "not": {
+              "type": "null"
+            }
+          },
+          "selection_reason": {
+            "not": {
+              "type": "null"
+            }
+          }
+        },
+        "required": [
+          "runtime",
+          "runtime_version",
+          "model",
+          "model_repository",
+          "model_revision",
+          "model_fingerprint",
+          "model_storage_identity",
+          "device_policy",
+          "selection_reason",
+          "selected_device",
+          "compute_type",
+          "container_image",
+          "container_image_digest",
+          "fallback",
+          "configured_min_free_vram_mib"
+        ]
+      }
+    }
+  ],
   "properties": {
+    "candidate_free_vram_mib": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Candidate Free Vram Mib"
+    },
+    "candidate_gpu_index": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Candidate Gpu Index"
+    },
+    "candidate_gpu_name": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Candidate Gpu Name"
+    },
+    "candidate_total_vram_mib": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Candidate Total Vram Mib"
+    },
+    "compute_type": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Compute Type"
+    },
+    "configured_min_free_vram_mib": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Configured Min Free Vram Mib"
+    },
+    "container_image": {
+      "anyOf": [
+        {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Container Image"
+    },
+    "container_image_digest": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Container Image Digest"
+    },
+    "device_policy": {
+      "anyOf": [
+        {
+          "pattern": "^(auto|cpu|cuda|cuda:[0-9]+)$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Device Policy"
+    },
+    "fallback": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Fallback"
+    },
+    "fallback_from": {
+      "anyOf": [
+        {
+          "const": "cuda",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Fallback From"
+    },
+    "fallback_reason": {
+      "anyOf": [
+        {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Fallback Reason"
+    },
+    "free_vram_at_selection_mib": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Free Vram At Selection Mib"
+    },
+    "gpu_index": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Gpu Index"
+    },
+    "gpu_name": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Gpu Name"
+    },
     "local_files_only": {
       "const": true,
       "default": true,
@@ -49,6 +378,48 @@
       "default": null,
       "title": "Model Fingerprint"
     },
+    "model_repository": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Model Repository"
+    },
+    "model_revision": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Model Revision"
+    },
+    "model_storage_identity": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Model Storage Identity"
+    },
     "name": {
       "maxLength": 128,
       "minLength": 1,
@@ -69,8 +440,62 @@
       "default": null,
       "title": "Runtime"
     },
+    "runtime_version": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Runtime Version"
+    },
+    "selected_device": {
+      "anyOf": [
+        {
+          "enum": [
+            "cpu",
+            "cuda"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Selected Device"
+    },
+    "selection_reason": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeviceSelectionReason"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "source": {
       "$ref": "#/$defs/TranscriptSource"
+    },
+    "total_vram_mib": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Total Vram Mib"
     },
     "version": {
       "maxLength": 128,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import stat
@@ -54,7 +55,7 @@ from video_evidence_pipeline.domain.transcription import (
     TranscriptSegment,
     TranscriptSource,
 )
-from video_evidence_pipeline.errors import integrity_error, state_error
+from video_evidence_pipeline.errors import configuration_error, integrity_error, state_error
 from video_evidence_pipeline.media.subtitles import verify_cue_jsonl
 from video_evidence_pipeline.storage.atomic import (
     atomic_copy_exclusive,
@@ -157,6 +158,136 @@ def media_bundle_fingerprint(manifest: MediaManifest) -> str:
     )
 
 
+_LEGACY_TRANSCRIPTION_CONFIG_FIELDS = (
+    "schema_version",
+    "preferred_languages",
+    "minimum_caption_coverage",
+    "gap_policy",
+    "overlap_policy",
+    "asr_language",
+    "asr_device",
+    "asr_compute_type",
+    "asr_beam_size",
+    "asr_temperature",
+    "asr_condition_on_previous_text",
+    "maximum_segments",
+    "maximum_total_text_chars",
+)
+_LEGACY_BACKEND_IDENTITY_FIELDS = (
+    "source",
+    "name",
+    "version",
+    "runtime",
+    "model",
+    "model_fingerprint",
+    "local_files_only",
+)
+_PR46_BACKEND_IDENTITY_FIELDS = (
+    "source",
+    "name",
+    "version",
+    "runtime",
+    "model",
+    "model_revision",
+    "model_fingerprint",
+    "model_storage_identity",
+    "device_policy",
+    "selected_device",
+    "gpu_index",
+    "gpu_name",
+    "total_vram_mib",
+    "free_vram_at_selection_mib",
+    "configured_min_free_vram_mib",
+    "compute_type",
+    "container_image",
+    "container_image_digest",
+    "fallback",
+    "fallback_from",
+    "fallback_reason",
+    "local_files_only",
+)
+_CURRENT_BACKEND_IDENTITY_FIELDS = frozenset(
+    {
+        "runtime_version",
+        "model_repository",
+        "selection_reason",
+        "candidate_gpu_index",
+        "candidate_gpu_name",
+        "candidate_total_vram_mib",
+        "candidate_free_vram_mib",
+    }
+)
+_PR46_PROFILE_PROVENANCE_FIELDS = tuple(
+    field for field in _PR46_BACKEND_IDENTITY_FIELDS if field not in _LEGACY_BACKEND_IDENTITY_FIELDS
+)
+
+
+def _backend_has_profile_provenance(identity: TranscriptionBackendIdentity) -> bool:
+    payload = identity.model_dump(mode="json")
+    return any(
+        payload.get(field) is not None
+        for field in payload
+        if field not in _LEGACY_BACKEND_IDENTITY_FIELDS
+    )
+
+
+def _transcription_contract_mode(
+    configuration: TranscriptionConfig,
+    backends: tuple[TranscriptionBackendIdentity, ...],
+) -> str:
+    """Select an explicit historical payload shape without changing global serialization."""
+    if configuration.asr_profile is None and not any(
+        _backend_has_profile_provenance(item) for item in backends
+    ):
+        return "pre_pr46"
+    if (
+        backends
+        and all(not (_CURRENT_BACKEND_IDENTITY_FIELDS & item.model_fields_set) for item in backends)
+        and any(set(_PR46_PROFILE_PROVENANCE_FIELDS) & item.model_fields_set for item in backends)
+    ):
+        return "pr46"
+    return "current"
+
+
+def canonical_transcription_config_payload(
+    configuration: TranscriptionConfig,
+    *,
+    contract_mode: str,
+) -> dict[str, object]:
+    payload = configuration.model_dump(mode="json")
+    if contract_mode != "pre_pr46":
+        return payload
+    return {field: payload[field] for field in _LEGACY_TRANSCRIPTION_CONFIG_FIELDS}
+
+
+def canonical_backend_identity_payload(
+    identity: TranscriptionBackendIdentity,
+    *,
+    contract_mode: str,
+) -> dict[str, object]:
+    payload = identity.model_dump(mode="json")
+    fields = {
+        "pre_pr46": _LEGACY_BACKEND_IDENTITY_FIELDS,
+        "pr46": _PR46_BACKEND_IDENTITY_FIELDS,
+    }.get(contract_mode)
+    return payload if fields is None else {field: payload[field] for field in fields}
+
+
+def backend_identity_fingerprint(
+    identity: TranscriptionBackendIdentity,
+    *,
+    contract_mode: str | None = None,
+) -> str:
+    if contract_mode is None:
+        if _CURRENT_BACKEND_IDENTITY_FIELDS & identity.model_fields_set:
+            contract_mode = "current"
+        elif set(_PR46_PROFILE_PROVENANCE_FIELDS) & identity.model_fields_set:
+            contract_mode = "pr46"
+        else:
+            contract_mode = "pre_pr46"
+    return fingerprint(canonical_backend_identity_payload(identity, contract_mode=contract_mode))
+
+
 def transcription_fingerprint(
     *,
     media_fingerprint: str,
@@ -164,12 +295,19 @@ def transcription_fingerprint(
     configuration: TranscriptionConfig,
     backends: tuple[TranscriptionBackendIdentity, ...],
 ) -> str:
+    contract_mode = _transcription_contract_mode(configuration, backends)
     return fingerprint(
         {
             "media_bundle_fingerprint": media_fingerprint,
             "selected_artifact_hashes": [item.content_sha256 for item in selected_artifacts],
-            "configuration": configuration.model_dump(mode="json"),
-            "backends": [item.model_dump(mode="json") for item in backends],
+            "configuration": canonical_transcription_config_payload(
+                configuration,
+                contract_mode=contract_mode,
+            ),
+            "backends": [
+                canonical_backend_identity_payload(item, contract_mode=contract_mode)
+                for item in backends
+            ],
             "implementation_version": TRANSCRIPTION_IMPLEMENTATION_VERSION,
         }
     )
@@ -345,8 +483,6 @@ def prepare_transcript(
         )
     started_at = datetime.now(UTC)
     preferred = list(config.preferred_languages)
-    if job.assignment.language.casefold() not in {item.casefold() for item in preferred}:
-        preferred.append(job.assignment.language)
     candidates = sorted(
         (
             item
@@ -400,7 +536,10 @@ def prepare_transcript(
             local_files_only=True,
         )
         backend_identities.append(caption_backend)
-        caption_backend_fingerprint = fingerprint(caption_backend)
+        caption_backend_fingerprint = backend_identity_fingerprint(
+            caption_backend,
+            contract_mode=_transcription_contract_mode(config, tuple(backend_identities)),
+        )
         for cue in selected_cues:
             raw.append(
                 (
@@ -444,25 +583,54 @@ def prepare_transcript(
             )
         if backend is None:
             from video_evidence_pipeline.transcription.faster_whisper import FasterWhisperBackend
-
-            backend = FasterWhisperBackend(
-                model_directory,
-                device=config.asr_device,
-                compute_type=config.asr_compute_type,
+            from video_evidence_pipeline.transcription.profiles import (
+                require_provisioned_model,
+                resolve_asr_profile,
             )
+
+            if config.asr_profile is not None:
+                repository_root = workspace.jobs_root.parent.parent
+                profile_id, profile = resolve_asr_profile(repository_root, config.asr_profile)
+                provisioned_directory, provision_manifest = require_provisioned_model(
+                    repository_root, profile_id, profile
+                )
+                container_image_digest = os.environ.get("VEP_ASR_CONTAINER_IMAGE_DIGEST") or None
+                if container_image_digest is None:
+                    raise configuration_error(
+                        "ASR_CONTAINER_IDENTITY_UNAVAILABLE",
+                        "profiled ASR requires a recorded container image identity",
+                    )
+                backend = FasterWhisperBackend(
+                    provisioned_directory,
+                    device=config.asr_device,
+                    compute_type="auto",
+                    profile=profile,
+                    provision_manifest=provision_manifest,
+                    container_image=profile.container_image,
+                    container_image_digest=container_image_digest,
+                )
+            else:
+                backend = FasterWhisperBackend(
+                    model_directory,
+                    device=config.asr_device,
+                    compute_type=config.asr_compute_type,
+                )
         selected_artifacts_list.append(media_manifest.speech_audio.artifact)
+        asr_segments: list[AsrSegment] = list(
+            backend.transcribe(
+                workspace.safe_path(media_manifest.speech_audio.artifact.relative_storage_path),
+                language=config.asr_language,
+                intervals=asr_intervals,
+                configuration=config,
+            )
+        )
         asr_backend = backend.identity()
         if asr_backend.source is not TranscriptSource.ASR:
             raise integrity_error("TRANSCRIPT_BACKEND_INVALID", "ASR backend identity is invalid")
         backend_identities.append(asr_backend)
-        asr_backend_fingerprint = fingerprint(asr_backend)
-        asr_segments: list[AsrSegment] = list(
-            backend.transcribe(
-                workspace.safe_path(media_manifest.speech_audio.artifact.relative_storage_path),
-                language=config.asr_language or job.assignment.language,
-                intervals=asr_intervals,
-                configuration=config,
-            )
+        asr_backend_fingerprint = backend_identity_fingerprint(
+            asr_backend,
+            contract_mode=_transcription_contract_mode(config, tuple(backend_identities)),
         )
         backend_segment_ids = [item.backend_segment_id for item in asr_segments]
         if len(set(backend_segment_ids)) != len(backend_segment_ids):
@@ -654,7 +822,10 @@ def prepare_supplied_transcript(
         model_fingerprint=raw_artifact.content_sha256,
         local_files_only=True,
     )
-    backend_fingerprint = fingerprint(backend)
+    backend_fingerprint = backend_identity_fingerprint(
+        backend,
+        contract_mode=_transcription_contract_mode(config, (backend,)),
+    )
     segments = tuple(
         TranscriptSegment(
             segment_id=f"T{index:06d}",
@@ -973,6 +1144,7 @@ def _verify_transcript_manifest(
         raise integrity_error(
             "TRANSCRIPT_MANIFEST_MISMATCH", "transcript manifest does not match the job"
         )
+    contract_mode = _transcription_contract_mode(manifest.configuration, tuple(manifest.backends))
     if TranscriptSource.SUPPLIED in {item.source for item in manifest.backends}:
         if (
             manifest.selected_source_artifacts != [media_manifest.raw_artifact]
@@ -997,7 +1169,7 @@ def _verify_transcript_manifest(
                 "TRANSCRIPT_MANIFEST_MISMATCH", "supplied transcript intervals are inconsistent"
             )
         backend = manifest.backends[0]
-        backend_fingerprint = fingerprint(backend)
+        backend_fingerprint = backend_identity_fingerprint(backend, contract_mode=contract_mode)
         if any(
             item.source is not TranscriptSource.SUPPLIED
             or item.lineage.source_artifact != media_manifest.raw_artifact
@@ -1032,7 +1204,10 @@ def _verify_transcript_manifest(
         raise integrity_error("TRANSCRIPT_MANIFEST_MISMATCH", "media transcript lacks a duration")
     segments = _read_segments(segments_path, manifest.configuration, manifest.duration_ms)
     gaps, overlaps = _intervals(segments, manifest.duration_ms)
-    backend_by_fingerprint = {fingerprint(item): item for item in manifest.backends}
+    backend_by_fingerprint = {
+        backend_identity_fingerprint(item, contract_mode=contract_mode): item
+        for item in manifest.backends
+    }
     if len(backend_by_fingerprint) != len(manifest.backends):
         raise integrity_error(
             "TRANSCRIPT_MANIFEST_MISMATCH", "transcript backend identities are ambiguous"
@@ -1048,8 +1223,6 @@ def _verify_transcript_manifest(
     cue_by_id: dict[str, SubtitleCue] = {}
     if manifest.selected_subtitle_stream_index is not None:
         preferred = list(manifest.configuration.preferred_languages)
-        if job.assignment.language.casefold() not in {item.casefold() for item in preferred}:
-            preferred.append(job.assignment.language)
         expected_candidates = sorted(
             (
                 item
@@ -1114,7 +1287,7 @@ def _verify_transcript_manifest(
             raise integrity_error(
                 "TRANSCRIPT_MANIFEST_MISMATCH", "segment source lacks a backend identity"
             )
-        backend_fingerprint = fingerprint(backend)
+        backend_fingerprint = backend_identity_fingerprint(backend, contract_mode=contract_mode)
         if any(
             item.lineage.backend_identity_fingerprint != backend_fingerprint
             for item in source_segments

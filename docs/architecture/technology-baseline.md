@@ -58,15 +58,21 @@ related_documents: ["VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS", "VEP-ARCH-TRUST",
 | media | pinned FFmpeg／ffprobe toolchain manifest、generic decoder-limit capability／executable SHA検証 | required／implemented |
 | scene candidate | FFmpeg `select` scene score + periodic + pure-Python pHash | required／implemented |
 | caption transcription | normalized subtitle、strict segment／lineage model | required／implemented |
-| local ASR | lazy faster-whisper adapter、explicit existing model directory、offline only | preferred／implemented adapter、runtime package optional |
+| local ASR | pinned faster-whisper／CTranslate2 container、repository model profile、offline inference | required／implemented |
 | semantic evidence exchange | fixed JSON request／strict provider-neutral JSON response | required／implemented |
 | cloud transcription | explicit permission only | optional／not implemented |
 | canonical draft | Markdown | required |
 | DOCX／Typst／Pandoc／HTML | export adapters | optional |
 
 network acquisition、media normalization、transcription、semantic evidence exchange、private search cacheは実装済みです。
-faster-whisperは新しいlock dependencyにせず、ASRが必要なjobだけでlazy importします。model size名を受け付けず、
-必要fileが揃った既存local directoryと`local_files_only`を必須にし、package／model不在をstructured errorとして返します。
+ASR Python dependencyはhost環境へ追加せず、digest固定CUDA 12.6.3／cuDNN 9 runtime base、
+`containers/asr/requirements.lock`とDockerfileでruntime／build dependencyをexact pinします。lockは
+`pyproject.toml`／`uv.lock`の`asr-container` groupから生成し、package installはbuild isolationを無効化します。
+build-contract labelへDockerfile／lock／VEP source／profileを束縛し、engine／runtime versionを
+実行時にprofileと照合します。model profileはrepository config、取得済みmodelは`.local/models`、inferenceは
+immutable image IDを`--pull never --network none`で起動するnarrow ASR workerを正本とします。pipelineとcanonical
+workspaceはhost processが所有します。
+通常CLIは任意model名／directory／compute typeを受け付けず、package／model不在をstructured errorとして返します。
 cloud ASR／vision routeは実装していません。具体dependency versionは
 `pyproject.toml`と`uv.lock`を正本とし、yt-dlpのruntime self-updateは許可しません。SSRF防御の接続先IP pinningは
 HTTPX/httpcoreのtransport contractへ依存するため、監査済みのexact versionをdirect dependencyとして固定します。
@@ -84,7 +90,7 @@ does not independently discover FFmpeg from `PATH`.
 - 全frame OCR: deferred
 - provider-fixed AI orchestration: deferred
 - Airflow／Prefect／Dagster: deferred
-- Docker-only runtime: rejected
+- pipeline全体のDocker-only runtime: rejected（ASR backendの再現可能containerはrequired）
 - single giant Skill: rejected
 - author and auditor same context: rejected
 - actual lecture media in CI: rejected

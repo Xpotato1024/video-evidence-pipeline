@@ -52,12 +52,15 @@ from video_evidence_pipeline.domain.evidence import (
     InterpretationLevel,
 )
 from video_evidence_pipeline.domain.job import (
+    AssignmentSpec,
     PrimaryInputKind,
     SourceKind,
     job_fingerprint,
+    job_to_yaml,
     load_job_yaml,
     requires_transcript_refinement,
 )
+from video_evidence_pipeline.domain.length import CharacterLengthConstraint
 from video_evidence_pipeline.domain.refinement import (
     RefinementExecutionMode,
     RefinementResponseManifest,
@@ -472,6 +475,60 @@ def test_recovery_accepts_a_blocked_parent_without_category_gate(tmp_path: Path)
     )
 
     assert validate_job(recovered.workspace.root)["state"] == JobState.TRANSCRIBED.value
+
+
+def test_recovery_changed_assignment_reuses_only_source_artifacts_and_starts_fresh_authoring(
+    tmp_path: Path,
+) -> None:
+    parent, _blocked = _blocked_parent(tmp_path, "assignment-a", category="content-integrity")
+    parent_job = load_job_yaml(parent.job_yaml)
+    child_job = parent_job.model_copy(
+        update={
+            "job_id": "assignment-b",
+            "created_at": datetime.now(UTC),
+            "assignment": AssignmentSpec(
+                task_type="short-report",
+                language="en",
+                requirements=["Bの要件だけを満たす"],
+                length=CharacterLengthConstraint(min_chars=1, max_chars=300),
+            ),
+        }
+    )
+    child_spec = tmp_path / "assignment-b.yaml"
+    child_spec.write_text(job_to_yaml(child_job), encoding="utf-8")
+
+    recovered = recover_job(
+        parent.root,
+        "assignment-b",
+        confirm=True,
+        basis="reuse immutable source transcript under a changed assignment",
+        child_spec_path=child_spec,
+    )
+    child = recovered.workspace
+    stored_child = load_job_yaml(child.job_yaml)
+    assert stored_child.assignment == child_job.assignment
+    assert stored_child.assignment != parent_job.assignment
+    assert validate_job(child.root)["state"] == JobState.TRANSCRIBED.value
+    assert not any(path.is_file() for path in (child.root / "evidence").rglob("*"))
+    assert not any(path.is_file() for path in (child.root / "authoring").rglob("*"))
+    assert not any(path.is_file() for path in (child.root / "human-review").rglob("*"))
+    assert not any(path.is_file() for path in (child.root / "approval").rglob("*"))
+    assert not any(path.is_file() for path in (child.root / "exports").rglob("*"))
+
+    _prepare_fresh_semantic_inputs(tmp_path, child, "assignment-b")
+    request = prepare_authoring_job(child.root, "draft-video-report").request
+    assert [item.text for item in request.output_constraints.requirements] == [
+        "Bの要件だけを満たす"
+    ]
+    assert request.output_constraints.length == child_job.assignment.length
+    assert request.output_constraints.effective_length is not None
+    response_path = tmp_path / "assignment-b-author.json"
+    _write_model(response_path, _author_response(request))
+    imported = _import_authoring_fixture(child.root, response_path)
+    assert imported.manifest.revision_count == 0
+    assert imported.manifest.semantic_revision_count == 0
+    assert imported.manifest.length_check is not None
+    assert imported.manifest.length_check.passed
 
 
 def test_recovery_copy_failure_removes_partial_child_and_allows_same_id_retry(

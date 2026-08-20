@@ -35,6 +35,10 @@ from video_evidence_pipeline.domain.delivery import (
 )
 from video_evidence_pipeline.domain.hashing import sha256_bytes, sha256_file
 from video_evidence_pipeline.domain.job import JobSpec, job_fingerprint
+from video_evidence_pipeline.domain.length import (
+    resolve_length_constraint,
+    validate_character_range,
+)
 from video_evidence_pipeline.domain.manifests import (
     StageManifest,
     StageStatus,
@@ -262,6 +266,16 @@ def ensure_approved_draft_marker_free(
     payload = _verified_draft_bytes(workspace, artifact, code="APPROVAL_STALE")
     _require_marker_free(payload)
     return payload
+
+
+def _require_job_character_range(job: JobSpec, payload: bytes, *, code: str) -> None:
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeError:
+        raise integrity_error(code, "approved draft is not valid UTF-8") from None
+    check = validate_character_range(text, resolve_length_constraint(job.assignment.length))
+    if check is not None and not check.passed:
+        raise integrity_error(code, "approved draft is outside its effective character range")
 
 
 def ensure_approval_confirmation_resolved(
@@ -514,6 +528,15 @@ def load_approval(
     _validate_record_upstream(record, job, draft, audit, human_review, deep=deep)
     try:
         ensure_approval_confirmation_resolved(workspace, draft, human_review)
+        _require_job_character_range(
+            job,
+            _verified_draft_bytes(
+                workspace,
+                draft.manifest.draft_artifact,
+                code="APPROVAL_STALE",
+            ),
+            code="APPROVAL_STALE",
+        )
     except VepError as exc:
         if exc.code != "APPROVAL_CONFIRMATION_UNRESOLVED":
             raise
@@ -551,6 +574,15 @@ def approve_or_recover(
     approved_at: datetime,
 ) -> ApprovalResult:
     ensure_approval_confirmation_resolved(workspace, draft, human_review)
+    _require_job_character_range(
+        job,
+        _verified_draft_bytes(
+            workspace,
+            draft.manifest.draft_artifact,
+            code="APPROVAL_STALE",
+        ),
+        code="APPROVAL_STALE",
+    )
     existed = workspace.approval_records_jsonl.exists()
     requested_intent = approval_intent_fingerprint(
         _approval_intent_values(
@@ -770,7 +802,8 @@ def load_export(
     *,
     deep: bool = False,
 ) -> ExportResult:
-    ensure_approved_draft_marker_free(workspace, approval.record.approved_draft_artifact)
+    approved = ensure_approved_draft_marker_free(workspace, approval.record.approved_draft_artifact)
+    _require_job_character_range(job, approved, code="EXPORT_BUNDLE_INVALID")
     manifest = _read_model(
         workspace.export_manifest_json,
         ExportManifest,
@@ -820,7 +853,8 @@ def export_or_recover(
     *,
     created_at: datetime,
 ) -> ExportResult:
-    ensure_approved_draft_marker_free(workspace, approval.record.approved_draft_artifact)
+    approved = ensure_approved_draft_marker_free(workspace, approval.record.approved_draft_artifact)
+    _require_job_character_range(job, approved, code="EXPORT_BUNDLE_INVALID")
     cleanup_stale_attempts(workspace)
     package_path = workspace.safe_path(_package_relative(approval.record))
     final_path = workspace.safe_path(_final_relative(approval.record))

@@ -1,0 +1,162 @@
+{
+  "$defs": {
+    "ArtifactRef": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "artifact_type": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Artifact Type",
+          "type": "string"
+        },
+        "content_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "relative_storage_path": {
+          "title": "Relative Storage Path",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "artifact_type",
+        "content_sha256",
+        "size_bytes",
+        "relative_storage_path"
+      ],
+      "title": "ArtifactRef",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/character-length-adjustment-request.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "actual_chars": {
+      "maximum": 4000000,
+      "minimum": 0,
+      "title": "Actual Chars",
+      "type": "integer"
+    },
+    "adjustment_number": {
+      "maximum": 10,
+      "minimum": 1,
+      "title": "Adjustment Number",
+      "type": "integer"
+    },
+    "adjustments_remaining_after_this": {
+      "maximum": 9,
+      "minimum": 0,
+      "title": "Adjustments Remaining After This",
+      "type": "integer"
+    },
+    "below_minimum_by": {
+      "maximum": 4000000,
+      "minimum": 0,
+      "title": "Below Minimum By",
+      "type": "integer"
+    },
+    "candidate_artifact": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "candidate_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Candidate Fingerprint",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "effective_max_chars": {
+      "anyOf": [
+        {
+          "maximum": 4000000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Effective Max Chars"
+    },
+    "effective_min_chars": {
+      "anyOf": [
+        {
+          "maximum": 4000000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Effective Min Chars"
+    },
+    "instruction": {
+      "const": "Revise only to fit the supplied character range; do not estimate or count characters.",
+      "default": "Revise only to fit the supplied character range; do not estimate or count characters.",
+      "title": "Instruction",
+      "type": "string"
+    },
+    "job_id": {
+      "maxLength": 63,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+      "title": "Job Id",
+      "type": "string"
+    },
+    "over_maximum_by": {
+      "maximum": 4000000,
+      "minimum": 0,
+      "title": "Over Maximum By",
+      "type": "integer"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "target_draft_version": {
+      "pattern": "^v[0-9]{3}$",
+      "title": "Target Draft Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "job_id",
+    "target_draft_version",
+    "actual_chars",
+    "below_minimum_by",
+    "over_maximum_by",
+    "adjustment_number",
+    "adjustments_remaining_after_this",
+    "candidate_fingerprint",
+    "candidate_artifact",
+    "created_at"
+  ],
+  "title": "CharacterLengthAdjustmentRequest",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

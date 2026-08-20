@@ -152,12 +152,14 @@ def _identities() -> tuple[ToolIdentity, ToolIdentity]:
 
 def test_v1_job_fingerprint_and_yaml_remain_legacy_shaped() -> None:
     job = _job()
+    legacy_assignment = job.assignment.model_dump(mode="json")
+    legacy_assignment.pop("length", None)
     legacy = {
         "schema_version": "1.0",
         "job_id": job.job_id,
         "created_at": job.model_dump(mode="json")["created_at"],
         "source": job.source.model_dump(mode="json"),
-        "assignment": job.assignment.model_dump(mode="json"),
+        "assignment": legacy_assignment,
         "output": job.output.model_dump(mode="json"),
     }
 
@@ -165,6 +167,7 @@ def test_v1_job_fingerprint_and_yaml_remain_legacy_shaped() -> None:
     yaml = job_to_yaml(job)
     assert "primary_input" not in yaml
     assert "supporting_inputs" not in yaml
+    assert "length:" not in yaml
     assert requires_transcript_refinement(job) is False
 
 

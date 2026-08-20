@@ -93,9 +93,13 @@ related_documents: ["VEP-ARCH-CONTEXT", "VEP-ARCH-PIPELINE", "VEP-ARCH-ARTIFACTS
 - raw media全体送信を別権限にする
 - local backendを標準経路にする
 
-local ASR adapterは明示された既存model directoryだけをofflineで開き、model名からのdownload、
-implicit token、telemetry、cloud fallbackを禁止します。caption coverageが十分な場合はASR package自体を
-loadしません。
+local ASRはrepository profileへpinしたmodel revisionだけを明示provisionし、build-contract labelを照合済みの
+immutable image IDでinference workerを`--pull never --network none`、exact audio／model／request read-only、
+`local_files_only`で実行します。canonical JobWorkspaceをcontainerへread-write mountせず、hostだけがprivate storage、
+lock、manifest、transitionを更新します。provision workerもOS temp stagingへdownloadし、hostがlink／payload identityを
+検証してからcanonical model storageへpublishします。
+implicit image pull、implicit token、telemetry、任意model download、
+package install、cloud fallbackを禁止します。caption coverageが十分な場合はDockerを起動せずmodelもloadしません。
 
 ### TB-3a: Semantic analyzer response → canonical evidence
 

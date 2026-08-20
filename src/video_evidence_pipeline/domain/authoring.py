@@ -18,6 +18,11 @@ from video_evidence_pipeline.domain.evidence import (
     SourceRef,
 )
 from video_evidence_pipeline.domain.identifiers import JobId, Sha256
+from video_evidence_pipeline.domain.length import (
+    CharacterLengthCheck,
+    CharacterLengthConstraint,
+    EffectiveCharacterLengthConstraint,
+)
 from video_evidence_pipeline.domain.serialization import fingerprint
 
 NonBlank128 = Annotated[
@@ -307,12 +312,16 @@ class OutputConstraints(StrictModel):
     language: NonBlank128
     task_type: NonBlank128
     requirements: list[AssignmentRequirement] = Field(max_length=100)
+    length: CharacterLengthConstraint | None = None
+    effective_length: EffectiveCharacterLengthConstraint | None = None
 
     @model_validator(mode="after")
     def requirements_are_contiguous(self) -> Self:
         identifiers = [item.requirement_id for item in self.requirements]
         if identifiers != [f"R{index:06d}" for index in range(1, len(identifiers) + 1)]:
             raise ValueError("output requirements must be contiguous")
+        if (self.length is None) != (self.effective_length is None):
+            raise ValueError("raw and effective length constraints must be recorded together")
         return self
 
 
@@ -383,6 +392,9 @@ class DraftManifest(StrictModel):
     job_id: JobId
     draft_version: DraftVersion
     revision_count: int = Field(ge=0, le=2)
+    semantic_revision_count: int | None = Field(default=None, ge=0, le=2)
+    length_adjustment_count: int = Field(default=0, ge=0, le=10)
+    length_check: CharacterLengthCheck | None = None
     predecessor_draft_sha256: Sha256 | None = None
     fixed_evidence_fingerprint: Sha256
     request_fingerprint: Sha256
@@ -401,6 +413,11 @@ class DraftManifest(StrictModel):
         expected = f"v{self.revision_count + 1:03d}"
         if self.draft_version != expected:
             raise ValueError("draft version and revision count are inconsistent")
+        if (
+            self.semantic_revision_count is not None
+            and self.semantic_revision_count != self.revision_count
+        ):
+            raise ValueError("semantic revision count is inconsistent")
         if self.revision_count == 0 and (
             self.predecessor_draft_sha256 is not None or self.resolution_artifact is not None
         ):
@@ -764,6 +781,9 @@ class HumanReviewBundle(StrictModel):
     replay_source_refs: list[SourceRef] = Field(default_factory=list, max_length=100_000)
     requirement_map: RequirementMap
     format_checks: list[FormatCheck] = Field(min_length=1, max_length=1000)
+    length_check: CharacterLengthCheck | None = None
+    semantic_revision_count: int | None = Field(default=None, ge=0, le=2)
+    length_adjustment_count: int | None = Field(default=None, ge=0, le=10)
     revision_history: list[RevisionHistoryEntry] = Field(min_length=1, max_length=3)
     approval_target_sha256: Sha256
     is_approval: Literal[False] = False

@@ -1,0 +1,16 @@
+schema_version: "1.0"
+default_profile: whisper-large-v3
+profiles:
+  whisper-large-v3:
+    engine: faster-whisper
+    engine_version: 1.2.1
+    runtime: CTranslate2
+    runtime_version: 4.8.1
+    model: large-v3
+    model_repository: Systran/faster-whisper-large-v3
+    model_revision: edaa852ec7e145841d8ffdb056a99866b5f0a478
+    gpu_compute_type: float16
+    cpu_compute_type: int8
+    min_free_vram_mib: 6144
+    default_device_policy: auto
+    container_image: vep-asr:1.0.0

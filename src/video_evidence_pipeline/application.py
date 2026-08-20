@@ -34,11 +34,13 @@ from video_evidence_pipeline.authoring.pipeline import (
     load_authoring_request,
     load_draft,
     load_human_review,
+    load_length_block,
     load_revision,
     load_revision_request,
     prepare_audit_request,
     prepare_authoring_request,
     prepare_revision_request,
+    publish_length_block,
     read_audit_response,
     read_authoring_response,
     read_revision_response,
@@ -93,6 +95,7 @@ from video_evidence_pipeline.domain.job import (
     primary_input_kind,
     requires_transcript_refinement,
 )
+from video_evidence_pipeline.domain.length import CharacterLengthConstraint
 from video_evidence_pipeline.domain.manifests import SourceManifest, StageManifest
 from video_evidence_pipeline.domain.media import NormalizationConfig
 from video_evidence_pipeline.domain.recovery import RecoveryManifest
@@ -207,6 +210,15 @@ def _load_context(path: Path) -> tuple[JobWorkspace, JobSpec, list[TransitionRec
     return workspace, job, transitions, state
 
 
+def _length_blocked_stage(transitions: list[TransitionRecord]) -> str | None:
+    if not transitions or transitions[-1].to_state is not JobState.BLOCKED:
+        return None
+    return {
+        "author.length-exhausted": "initial_authoring",
+        "revision.length-exhausted": "semantic_revision",
+    }.get(transitions[-1].trigger)
+
+
 def initialize_job(
     repository_root: Path,
     *,
@@ -219,6 +231,9 @@ def initialize_job(
     requirements: list[str] | None = None,
     primary_input: PrimaryInputKind | None = None,
     supporting_inputs: list[SupportingInputSpec] | None = None,
+    min_chars: int | None = None,
+    max_chars: int | None = None,
+    maximum_length_adjustments: int = 3,
 ) -> tuple[JobWorkspace, JobSpec]:
     raw_locator = (
         str(Path(source).expanduser().absolute())
@@ -251,6 +266,15 @@ def initialize_job(
             task_type=task_type,
             language=language,
             requirements=list(requirements or []),
+            length=(
+                CharacterLengthConstraint(
+                    min_chars=min_chars,
+                    max_chars=max_chars,
+                    maximum_adjustments=maximum_length_adjustments,
+                )
+                if min_chars is not None or max_chars is not None
+                else None
+            ),
         ),
         output=OutputSpec(format=output_format),
     )
@@ -312,6 +336,14 @@ def _load_recovery_manifest(workspace: JobWorkspace, job: JobSpec) -> RecoveryMa
     authorization = _authorization(workspace)
     if (
         manifest.parent_job_fingerprint != job_fingerprint(parent.job)
+        or (
+            manifest.parent_assignment_fingerprint is not None
+            and manifest.parent_assignment_fingerprint != fingerprint(parent.job.assignment)
+        )
+        or (
+            manifest.child_assignment_fingerprint is not None
+            and manifest.child_assignment_fingerprint != fingerprint(job.assignment)
+        )
         or manifest.recovery_basis != authorization.authorization_basis
         or manifest.created_at != authorization.confirmed_at
         or authorization.allow_local_processing != parent.authorization.allow_local_processing
@@ -438,6 +470,14 @@ def _recovery_parent(
     raw_artifact = verify_acquired_bundle(workspace, job)
     media = load_normalization_result(workspace, job, raw_artifact)
     transcript = load_transcription_result(workspace, job, media.media_manifest)
+    length_blocked_stage = _length_blocked_stage(transitions)
+    if length_blocked_stage is not None:
+        load_length_block(
+            workspace,
+            job,
+            deep=False,
+            expected_blocked_stage=length_blocked_stage,
+        )
     source_manifest = read_json_model(
         workspace.source_manifest_json,
         SourceManifest,
@@ -470,6 +510,7 @@ def recover_job(
     *,
     confirm: bool,
     basis: str,
+    child_spec_path: Path | None = None,
 ) -> RecoveryResult:
     """Fork only an eligible blocked job at its raw-transcript reuse boundary."""
 
@@ -484,22 +525,41 @@ def recover_job(
             "RECOVERY_CHILD_ID_INVALID",
             "recovery child job ID must differ from its parent",
         )
-    child_data = qualified.job.model_dump(mode="python")
-    child_data.update({"job_id": new_job_id, "created_at": datetime.now(UTC)})
-    if qualified.job.primary_input is None:
-        child_data["primary_input"] = PrimaryInputSpec(kind=PrimaryInputKind.VIDEO)
-    child_job = JobSpec.model_validate(child_data)
+    if child_spec_path is None:
+        child_data = qualified.job.model_dump(mode="python")
+        child_data.update({"job_id": new_job_id, "created_at": datetime.now(UTC)})
+        if qualified.job.primary_input is None:
+            child_data["primary_input"] = PrimaryInputSpec(kind=PrimaryInputKind.VIDEO)
+        child_job = JobSpec.model_validate(child_data)
+    else:
+        child_job = load_job_yaml(child_spec_path)
+        if child_job.job_id != new_job_id:
+            raise configuration_error(
+                "RECOVERY_CHILD_SPEC_INVALID",
+                "child job specification ID does not match the requested child",
+            )
+        if (
+            child_job.source != qualified.job.source
+            or primary_input_kind(child_job) is not primary_input_kind(qualified.job)
+            or child_job.supporting_inputs != qualified.job.supporting_inputs
+        ):
+            raise configuration_error(
+                "RECOVERY_SOURCE_IDENTITY_MISMATCH",
+                "changed-assignment recovery must keep source and supporting input identity",
+            )
     child_fingerprint = job_fingerprint(child_job)
     recorded_at = datetime.now(UTC)
     recovery = RecoveryManifest(
         parent_job_id=qualified.job.job_id,
         parent_job_fingerprint=job_fingerprint(qualified.job),
+        parent_assignment_fingerprint=fingerprint(qualified.job.assignment),
         parent_final_draft_sha256=qualified.final_draft_sha256,
         parent_audit_bundle_fingerprint=qualified.audit_bundle_fingerprint,
         parent_finding_ids=list(qualified.finding_ids),
         recovery_basis=basis,
         child_job_id=child_job.job_id,
         child_job_fingerprint=child_fingerprint,
+        child_assignment_fingerprint=fingerprint(child_job.assignment),
         created_at=recorded_at,
     )
     child_source = qualified.source.model_copy(
@@ -670,25 +730,29 @@ def _validate_job_unmapped(path: Path, *, deep: bool = False) -> dict[str, Any]:
         JobState.AUDITED,
         JobState.REVISION_REQUIRED,
         JobState.HUMAN_REVIEW_READY,
-        JobState.BLOCKED,
         JobState.HUMAN_APPROVED,
         JobState.EXPORTED,
     }
-    refinement_states = {JobState.TRANSCRIPT_REFINED, JobState.EVIDENCE_READY, *authoring_states}
+    post_evidence_states = {*authoring_states, JobState.BLOCKED}
+    refinement_states = {
+        JobState.TRANSCRIPT_REFINED,
+        JobState.EVIDENCE_READY,
+        *post_evidence_states,
+    }
     acquired_states = {
         JobState.ACQUIRED,
         JobState.NORMALIZED,
         JobState.TRANSCRIBED,
         JobState.TRANSCRIPT_REFINED,
         JobState.EVIDENCE_READY,
-        *authoring_states,
+        *post_evidence_states,
     }
     normalized_states = {
         JobState.NORMALIZED,
         JobState.TRANSCRIBED,
         JobState.TRANSCRIPT_REFINED,
         JobState.EVIDENCE_READY,
-        *authoring_states,
+        *post_evidence_states,
     }
     if state in acquired_states:
         raw_artifact = verify_acquired_bundle(workspace, job, deep=deep)
@@ -704,7 +768,7 @@ def _validate_job_unmapped(path: Path, *, deep: bool = False) -> dict[str, Any]:
                     evidence_manifest, evidence_segments = _evidence_transcript_inputs(
                         workspace, job, media_manifest, transcription, deep=deep
                     )
-                if state in {JobState.EVIDENCE_READY, *authoring_states}:
+                if state in {JobState.EVIDENCE_READY, *post_evidence_states}:
                     load_evidence_result(
                         workspace,
                         job,
@@ -713,7 +777,22 @@ def _validate_job_unmapped(path: Path, *, deep: bool = False) -> dict[str, Any]:
                         evidence_segments,
                         deep=deep,
                     )
-                    if state in authoring_states:
+                    length_blocked_stage = _length_blocked_stage(transitions)
+                    if state is JobState.BLOCKED and length_blocked_stage is not None:
+                        length_block = load_length_block(
+                            workspace,
+                            job,
+                            deep=deep,
+                            expected_blocked_stage=length_blocked_stage,
+                        )
+                        if length_block.blocked_stage == "semantic_revision":
+                            _load_authoring_state_integrity(
+                                workspace,
+                                job,
+                                JobState.REVISION_REQUIRED,
+                                deep=deep,
+                            )
+                    elif state in authoring_states or state is JobState.BLOCKED:
                         try:
                             fixed, history, human_review = _load_authoring_state_integrity(
                                 workspace, job, state, deep=deep
@@ -2014,6 +2093,11 @@ def prepare_authoring_job(path: Path, skill_id: str) -> AuthoringPrepareResult:
         exclusive_append_lock(workspace.transitions_jsonl),
     ):
         workspace, job, transitions, state = _load_context(path)
+        if state is JobState.BLOCKED and _length_blocked_stage(transitions) is not None:
+            raise state_error(
+                "LENGTH_EXHAUSTION_BLOCKED",
+                "job is already BLOCKED by length exhaustion; recovery is required",
+            )
         if state not in {
             JobState.EVIDENCE_READY,
             JobState.DRAFTED,
@@ -2060,6 +2144,11 @@ def _import_authoring_job_locked(
     workspace = JobWorkspace.open(path)
     with exclusive_append_lock(workspace.transitions_jsonl):
         workspace, job, transitions, state = _load_context(path)
+        if state is JobState.BLOCKED and _length_blocked_stage(transitions) is not None:
+            raise state_error(
+                "LENGTH_EXHAUSTION_BLOCKED",
+                "job is already BLOCKED by length exhaustion; recovery is required",
+            )
         if state not in {
             JobState.EVIDENCE_READY,
             JobState.DRAFTED,
@@ -2165,6 +2254,35 @@ def _import_authoring_job_locked(
                 trigger="author.import",
             )
             return staged
+    except VepError as exc:
+        operation_failed = True
+        if exc.code == "LENGTH_ADJUSTMENT_EXHAUSTED":
+            with exclusive_append_lock(workspace.transitions_jsonl):
+                workspace, current_job, transitions, current_state = _load_context(path)
+                current_authorization = _authorization(workspace)
+                if (
+                    current_state is not JobState.EVIDENCE_READY
+                    or transitions[-1].sequence != snapshot_sequence
+                    or current_job != snapshot_job
+                    or current_authorization != snapshot_authorization
+                ):
+                    raise state_error(
+                        "AUTHORING_SNAPSHOT_STALE", "job changed during authoring"
+                    ) from None
+                publish_length_block(
+                    workspace,
+                    current_job,
+                    version="v001",
+                    blocked_stage="initial_authoring",
+                )
+                _append_transition_locked(
+                    workspace,
+                    current_job,
+                    from_state=JobState.EVIDENCE_READY,
+                    to_state=JobState.BLOCKED,
+                    trigger="author.length-exhausted",
+                )
+        raise
     except Exception:
         operation_failed = True
         raise
@@ -2489,6 +2607,11 @@ def prepare_revision_job(path: Path, skill_id: str) -> RevisionPrepareResult:
         exclusive_append_lock(workspace.transitions_jsonl),
     ):
         workspace, job, transitions, state = _load_context(path)
+        if state is JobState.BLOCKED and _length_blocked_stage(transitions) is not None:
+            raise state_error(
+                "LENGTH_EXHAUSTION_BLOCKED",
+                "job is already BLOCKED by length exhaustion; recovery is required",
+            )
         if state is not JobState.REVISION_REQUIRED:
             raise state_error("STATE_GATE_FAILED", "job must be REVISION_REQUIRED")
         authorization = _authorization(workspace)
@@ -2537,6 +2660,11 @@ def _import_revision_job_locked(
     workspace = JobWorkspace.open(path)
     with exclusive_append_lock(workspace.transitions_jsonl):
         workspace, job, transitions, state = _load_context(path)
+        if state is JobState.BLOCKED and _length_blocked_stage(transitions) is not None:
+            raise state_error(
+                "LENGTH_EXHAUSTION_BLOCKED",
+                "job is already BLOCKED by length exhaustion; recovery is required",
+            )
         if state not in {JobState.REVISION_REQUIRED, JobState.DRAFTED}:
             raise state_error("STATE_GATE_FAILED", "job must be REVISION_REQUIRED")
         authorization = _authorization(workspace)
@@ -2719,6 +2847,35 @@ def _import_revision_job_locked(
                 trigger="revision.import",
             )
             return staged
+    except VepError as exc:
+        operation_failed = True
+        if exc.code == "LENGTH_ADJUSTMENT_EXHAUSTED":
+            with exclusive_append_lock(workspace.transitions_jsonl):
+                workspace, current_job, transitions, current_state = _load_context(path)
+                current_authorization = _authorization(workspace)
+                if (
+                    current_state is not JobState.REVISION_REQUIRED
+                    or transitions[-1].sequence != snapshot_sequence
+                    or current_job != snapshot_job
+                    or current_authorization != snapshot_authorization
+                ):
+                    raise state_error(
+                        "REVISION_SNAPSHOT_STALE", "job changed during revision"
+                    ) from None
+                publish_length_block(
+                    workspace,
+                    current_job,
+                    version=next_version,
+                    blocked_stage="semantic_revision",
+                )
+                _append_transition_locked(
+                    workspace,
+                    current_job,
+                    from_state=JobState.REVISION_REQUIRED,
+                    to_state=JobState.BLOCKED,
+                    trigger="revision.length-exhausted",
+                )
+        raise
     except Exception:
         operation_failed = True
         raise

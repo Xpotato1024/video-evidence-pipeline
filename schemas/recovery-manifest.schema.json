@@ -4,6 +4,21 @@
   "additionalProperties": false,
   "description": "Bind a fresh child job to the minimal eligible parent provenance.",
   "properties": {
+    "child_assignment_fingerprint": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Child Assignment Fingerprint"
+    },
     "child_job_fingerprint": {
       "maxLength": 64,
       "minLength": 64,
@@ -22,6 +37,21 @@
       "format": "date-time",
       "title": "Created At",
       "type": "string"
+    },
+    "parent_assignment_fingerprint": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Parent Assignment Fingerprint"
     },
     "parent_audit_bundle_fingerprint": {
       "anyOf": [

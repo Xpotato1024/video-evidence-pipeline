@@ -12,10 +12,13 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
+from test_media_normalization import _synthetic_source
 from typer.testing import CliRunner
 
 import video_evidence_pipeline.application as application_module
+import video_evidence_pipeline.transcription.container as container_module
 import video_evidence_pipeline.transcription.faster_whisper as faster_whisper_module
+import video_evidence_pipeline.transcription.provisioning as provisioning_module
 from video_evidence_pipeline.application import (
     _import_evidence_fixture,
     acquire_job,
@@ -90,6 +93,7 @@ from video_evidence_pipeline.domain.transcription import (
     SegmentLineage,
     TranscriptConfidence,
     TranscriptConfidenceKind,
+    TranscriptInterval,
     TranscriptionBackendIdentity,
     TranscriptionConfig,
     TranscriptManifest,
@@ -110,10 +114,15 @@ from video_evidence_pipeline.evidence.pipeline import (
 )
 from video_evidence_pipeline.storage.jsonl import exclusive_append_lock, read_jsonl
 from video_evidence_pipeline.storage.layout import JobWorkspace
+from video_evidence_pipeline.transcription.device import (
+    GpuDevice,
+    RuntimeCapabilities,
+)
 from video_evidence_pipeline.transcription.faster_whisper import FasterWhisperBackend
 from video_evidence_pipeline.transcription.pipeline import (
     TranscriptionResult,
     _intervals,
+    backend_identity_fingerprint,
     load_transcription_result,
     prepare_transcript,
     publish_transcript,
@@ -121,6 +130,11 @@ from video_evidence_pipeline.transcription.pipeline import (
 )
 from video_evidence_pipeline.transcription.pipeline import (
     create_attempt_directory as create_transcript_attempt,
+)
+from video_evidence_pipeline.transcription.profiles import (
+    DEFAULT_ASR_PROFILE,
+    AsrModelProvisionManifest,
+    resolve_asr_profile,
 )
 
 _NOW = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
@@ -223,7 +237,12 @@ def _synthetic_captioned_source(root: Path) -> Path:
 
 
 def _application_transcribed_job(
-    tmp_path: Path, job_id: str
+    tmp_path: Path,
+    job_id: str,
+    *,
+    min_chars: int | None = None,
+    max_chars: int | None = None,
+    maximum_length_adjustments: int = 3,
 ) -> tuple[JobWorkspace, TranscriptionResult]:
     repository = tmp_path / "r"
     repository.mkdir()
@@ -237,6 +256,9 @@ def _application_transcribed_job(
         language="en",
         output_format="markdown",
         requirements=["Identify the key event", "Preserve unresolved uncertainty"],
+        min_chars=min_chars,
+        max_chars=max_chars,
+        maximum_length_adjustments=maximum_length_adjustments,
     )
     authorize_job(
         workspace.root,
@@ -458,6 +480,7 @@ class _FakeAsr:
     def __init__(self, segments: list[AsrSegment] | None = None) -> None:
         self.segments = segments
         self.calls: list[tuple[tuple[int, int], ...]] = []
+        self.languages: list[str | None] = []
 
     def identity(self) -> TranscriptionBackendIdentity:
         return TranscriptionBackendIdentity(
@@ -471,7 +494,8 @@ class _FakeAsr:
         )
 
     def transcribe(self, audio_path: Path, *, language, intervals, configuration):
-        del audio_path, language, configuration
+        del audio_path, configuration
+        self.languages.append(language)
         self.calls.append(tuple((item.start_ms, item.end_ms) for item in intervals))
         if self.segments is not None:
             return list(self.segments)
@@ -485,6 +509,44 @@ class _FakeAsr:
             )
             for index, item in enumerate(intervals, start=1)
         ]
+
+
+class _InferenceFallbackAsr(_FakeAsr):
+    def __init__(self) -> None:
+        super().__init__()
+        self.fell_back = False
+
+    def identity(self) -> TranscriptionBackendIdentity:
+        return TranscriptionBackendIdentity(
+            source=TranscriptSource.ASR,
+            name="injected-fallback-asr",
+            version="1",
+            runtime=("test-runtime;device=cpu" if self.fell_back else "test-runtime;device=cuda"),
+            model="test-model",
+            model_fingerprint="d" * 64,
+            device_policy="auto",
+            selected_device="cpu" if self.fell_back else "cuda",
+            gpu_index=0,
+            gpu_name="synthetic-gpu",
+            total_vram_mib=8192,
+            free_vram_at_selection_mib=6144,
+            configured_min_free_vram_mib=6144,
+            compute_type="int8" if self.fell_back else "float16",
+            fallback=self.fell_back,
+            fallback_from="cuda" if self.fell_back else None,
+            fallback_reason="CUDA out of memory" if self.fell_back else None,
+            local_files_only=True,
+        )
+
+    def transcribe(self, audio_path: Path, *, language, intervals, configuration):
+        segments = super().transcribe(
+            audio_path,
+            language=language,
+            intervals=intervals,
+            configuration=configuration,
+        )
+        self.fell_back = True
+        return segments
 
 
 def _full_caption(text: str = _RAW_SPACED_TEXT) -> list[SubtitleCue]:
@@ -516,6 +578,84 @@ def test_subtitle_only_preserves_raw_and_needs_no_asr_or_model(tmp_path: Path) -
     assert prepared.caption_coverage == 1.0
     assert prepared.gaps == ()
     assert [item.source for item in prepared.backends] == [TranscriptSource.NORMALIZED_SUBTITLE]
+
+
+def test_public_transcribe_full_caption_does_not_probe_docker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = tmp_path / "caption-cli"
+    repository.mkdir()
+    source = _synthetic_captioned_source(repository)
+    workspace, _job_value = initialize_job(
+        repository,
+        job_id="caption-without-docker",
+        source_kind=SourceKind.LOCAL_FILE,
+        source=str(source),
+        task_type="report",
+        language="en",
+        output_format="markdown",
+    )
+    authorize_job(
+        workspace.root,
+        confirm=True,
+        basis="authorized synthetic caption-only fixture",
+        allow_local_processing=True,
+        allow_external_api=False,
+        confirmer_identity="pytest",
+    )
+    acquire_job(workspace.root)
+    normalize_job(workspace.root)
+    monkeypatch.setattr(
+        container_module,
+        "_docker",
+        lambda: pytest.fail("caption-only transcription must not probe Docker"),
+    )
+
+    result = CliRunner().invoke(app, ["transcribe", str(workspace.root), "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["state"] == JobState.TRANSCRIBED.value
+    assert not repository.joinpath(".local/models").exists()
+
+
+def test_public_transcribe_asr_required_reports_missing_docker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = tmp_path / "asr-cli"
+    repository.mkdir()
+    shutil.copytree(Path(__file__).parents[1] / "config", repository / "config")
+    source = _synthetic_source(repository, audio=True, subtitle=False)
+    workspace, _job_value = initialize_job(
+        repository,
+        job_id="asr-without-docker",
+        source_kind=SourceKind.LOCAL_FILE,
+        source=str(source),
+        task_type="report",
+        language="en",
+        output_format="markdown",
+    )
+    authorize_job(
+        workspace.root,
+        confirm=True,
+        basis="authorized synthetic ASR fixture",
+        allow_local_processing=True,
+        allow_external_api=False,
+        confirmer_identity="pytest",
+    )
+    acquire_job(workspace.root)
+    normalize_job(workspace.root)
+    original_which = container_module.shutil.which
+    monkeypatch.setattr(
+        container_module.shutil,
+        "which",
+        lambda executable: None if executable == "docker" else original_which(executable),
+    )
+
+    result = CliRunner().invoke(app, ["transcribe", str(workspace.root), "--json"])
+
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "ASR_CONTAINER_RUNTIME_UNAVAILABLE"
 
 
 def test_subtitle_selection_is_language_then_provenance_default_forced_and_index(
@@ -657,9 +797,71 @@ def test_zero_cue_subtitle_is_not_claimed_as_a_transcript_source(tmp_path: Path)
     )
 
     assert backend.calls == [((0, 4000),)]
+    assert backend.languages == [None]
     assert prepared.selected_subtitle_stream_index is None
     assert prepared.selected_subtitle_provenance is None
     assert [item.source for item in prepared.backends] == [TranscriptSource.ASR]
+
+
+def test_asr_language_is_explicit_source_config_not_assignment_output_language(
+    tmp_path: Path,
+) -> None:
+    job = _job()
+    workspace = _workspace(tmp_path, job)
+    media = _media_manifest(workspace, job, audio=True)
+    backend = _FakeAsr()
+
+    prepare_transcript(
+        workspace,
+        job,
+        media,
+        TranscriptionConfig(asr_language="en"),
+        backend,
+    )
+
+    assert job.assignment.language == "ja"
+    assert backend.languages == ["en"]
+
+
+def test_profiled_asr_manifest_rejects_legacy_incomplete_backend(tmp_path: Path) -> None:
+    job = _job()
+    workspace = _workspace(tmp_path, job)
+    media = _media_manifest(workspace, job, audio=True)
+    prepared = prepare_transcript(workspace, job, media, TranscriptionConfig(), _FakeAsr())
+    payload = _published_manifest_stub(job, prepared).model_dump(mode="json")
+    payload["configuration"]["asr_profile"] = DEFAULT_ASR_PROFILE
+
+    with pytest.raises(ValidationError):
+        TranscriptManifest.model_validate(payload)
+
+    pre_46 = json.loads(
+        (
+            Path(__file__).parent
+            / "fixtures"
+            / "legacy-transcription"
+            / "asr"
+            / "transcript-manifest.json"
+        ).read_bytes()
+    )
+    pre_46["configuration"]["asr_profile"] = DEFAULT_ASR_PROFILE
+    with pytest.raises(ValidationError):
+        TranscriptManifest.model_validate(pre_46)
+
+
+def test_pipeline_refreshes_backend_identity_after_inference_fallback(tmp_path: Path) -> None:
+    job = _job()
+    workspace = _workspace(tmp_path, job)
+    media = _media_manifest(workspace, job, audio=True)
+    backend = _InferenceFallbackAsr()
+
+    prepared = prepare_transcript(workspace, job, media, TranscriptionConfig(), backend)
+
+    assert prepared.backends[0].selected_device == "cpu"
+    assert prepared.backends[0].fallback is True
+    assert prepared.backends[0].fallback_reason == "CUDA out of memory"
+    assert prepared.segments[0].lineage.backend_identity_fingerprint == (
+        backend_identity_fingerprint(prepared.backends[0])
+    )
 
 
 def test_asr_duplicate_ids_and_gap_overlap_policies_fail_closed(tmp_path: Path) -> None:
@@ -819,6 +1021,7 @@ def test_faster_whisper_bounds_model_traversal_before_sorting(
     model.mkdir()
     (model / "config.json").write_text("{}", encoding="utf-8")
     (model / "model.bin").write_bytes(b"model")
+    (model / "preprocessor_config.json").write_text('{"feature_size": 128}', encoding="utf-8")
     (model / "tokenizer.json").write_text("{}", encoding="utf-8")
     monkeypatch.setattr(faster_whisper_module, "_MAXIMUM_MODEL_FILES", 2)
 
@@ -833,29 +1036,45 @@ def _install_fake_faster_whisper(
     *,
     cuda_count: int,
     supported: dict[str, set[str]],
+    cuda_supported_by_index: dict[int, set[str]] | None = None,
     fail_devices: set[str] | None = None,
+    transcribe_fail_devices: set[str] | None = None,
+    failure_message: str = "synthetic model construction failure",
+    engine_version: str = "test",
+    runtime_version: str = "test",
 ) -> list[dict[str, object]]:
     calls: list[dict[str, object]] = []
 
     class FakeWhisperModel:
         def __init__(self, _path: str, **kwargs: object) -> None:
             calls.append(kwargs)
+            self.device = str(kwargs["device"])
             if kwargs["device"] in (fail_devices or set()):
-                raise RuntimeError("synthetic model construction failure")
+                raise RuntimeError(failure_message)
 
         def transcribe(self, _path: str, **_kwargs: object):
+            if self.device in (transcribe_fail_devices or set()):
+                raise RuntimeError(failure_message)
             return iter(()), object()
 
     runtime = types.ModuleType("ctranslate2")
     runtime.get_cuda_device_count = lambda: cuda_count  # type: ignore[attr-defined]
     runtime.get_supported_compute_types = (  # type: ignore[attr-defined]
-        lambda device, _device_index=0: supported[device]
+        lambda device, device_index=0: (
+            (cuda_supported_by_index or {}).get(device_index, supported[device])
+            if device == "cuda"
+            else supported[device]
+        )
     )
     whisper = types.ModuleType("faster_whisper")
     whisper.WhisperModel = FakeWhisperModel  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "ctranslate2", runtime)
     monkeypatch.setitem(sys.modules, "faster_whisper", whisper)
-    monkeypatch.setattr(faster_whisper_module.importlib.metadata, "version", lambda _name: "test")
+    monkeypatch.setattr(
+        faster_whisper_module.importlib.metadata,
+        "version",
+        lambda name: engine_version if name == "faster-whisper" else runtime_version,
+    )
     return calls
 
 
@@ -864,6 +1083,7 @@ def _complete_model(path: Path) -> Path:
     model.mkdir()
     (model / "config.json").write_text("{}", encoding="utf-8")
     (model / "model.bin").write_bytes(b"model")
+    (model / "preprocessor_config.json").write_text('{"feature_size": 128}', encoding="utf-8")
     (model / "tokenizer.json").write_text("{}", encoding="utf-8")
     return model.resolve()
 
@@ -889,6 +1109,7 @@ def test_faster_whisper_auto_resolves_usable_cuda_and_records_runtime(
         }
     ]
     assert identity.runtime == ("ctranslate2-test;device=cuda;compute_type=float16;device_index=0")
+    assert identity.gpu_index == 0
 
 
 def test_faster_whisper_auto_falls_back_to_cpu_when_cuda_model_load_fails(
@@ -900,6 +1121,7 @@ def test_faster_whisper_auto_falls_back_to_cpu_when_cuda_model_load_fails(
         cuda_count=1,
         supported={"cuda": {"float16", "int8"}, "cpu": {"int8"}},
         fail_devices={"cuda"},
+        failure_message="CUDA out of memory",
     )
 
     identity = FasterWhisperBackend(_complete_model(tmp_path)).identity()
@@ -911,6 +1133,206 @@ def test_faster_whisper_auto_falls_back_to_cpu_when_cuda_model_load_fails(
         "local_files_only": True,
     }
     assert identity.runtime == "ctranslate2-test;device=cpu;compute_type=int8;device_index=none"
+    assert identity.fallback is True
+    assert identity.fallback_from == "cuda"
+
+
+def test_profiled_inference_gpu_oom_falls_back_once_and_records_provenance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    faster_whisper_module._MODEL_FINGERPRINT_CACHE.clear()
+    calls = _install_fake_faster_whisper(
+        monkeypatch,
+        cuda_count=1,
+        supported={"cuda": {"float16"}, "cpu": {"int8"}},
+        transcribe_fail_devices={"cuda"},
+        failure_message="CUDA out of memory",
+        engine_version="1.2.1",
+        runtime_version="4.8.1",
+    )
+    _profile_id, profile = resolve_asr_profile(Path.cwd(), DEFAULT_ASR_PROFILE)
+    backend = FasterWhisperBackend(
+        _complete_model(tmp_path),
+        profile=profile,
+        container_image=profile.container_image,
+        container_image_digest="vep-asr@sha256:" + "a" * 64,
+        capability_override=RuntimeCapabilities(
+            gpus=(GpuDevice(0, "synthetic-gpu", 8192, 6144),),
+            container_gpu_passthrough=True,
+            ctranslate2_cuda_available=True,
+            cuda_compute_types=frozenset({"float16"}),
+        ),
+    )
+
+    assert (
+        backend.transcribe(
+            tmp_path / "audio.wav",
+            language=None,
+            intervals=(TranscriptInterval(start_ms=0, end_ms=1000),),
+            configuration=TranscriptionConfig(),
+        )
+        == []
+    )
+    identity = backend.identity()
+    assert [call["device"] for call in calls] == ["cuda", "cpu"]
+    assert identity.model == profile.model_repository
+    assert identity.model_revision == profile.model_revision
+    assert identity.device_policy == "auto"
+    assert identity.selected_device == "cpu"
+    assert identity.gpu_index is None
+    assert identity.gpu_name is None
+    assert identity.candidate_gpu_index == 0
+    assert identity.candidate_gpu_name == "synthetic-gpu"
+    assert identity.free_vram_at_selection_mib is None
+    assert identity.candidate_free_vram_mib == 6144
+    assert identity.compute_type == "int8"
+    assert identity.container_image == profile.container_image
+    assert identity.fallback is True
+    assert identity.selection_reason == "gpu_resource_fallback"
+    assert identity.fallback_from == "cuda"
+    assert identity.fallback_reason == "CUDA out of memory"
+
+
+def test_profiled_runtime_filters_compute_support_per_gpu_before_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    faster_whisper_module._MODEL_FINGERPRINT_CACHE.clear()
+    calls = _install_fake_faster_whisper(
+        monkeypatch,
+        cuda_count=2,
+        supported={"cuda": {"float16"}, "cpu": {"int8"}},
+        cuda_supported_by_index={0: {"int8"}, 1: {"float16"}},
+        engine_version="1.2.1",
+        runtime_version="4.8.1",
+    )
+    monkeypatch.setattr(
+        faster_whisper_module,
+        "probe_nvidia_gpus",
+        lambda: (
+            GpuDevice(0, "unsupported-gpu", 16384, 12000),
+            GpuDevice(1, "supported-gpu", 8192, 7000),
+        ),
+    )
+    _profile_id, profile = resolve_asr_profile(Path.cwd(), DEFAULT_ASR_PROFILE)
+
+    identity = FasterWhisperBackend(_complete_model(tmp_path), profile=profile).identity()
+
+    assert calls[0]["device"] == "cuda"
+    assert calls[0]["device_index"] == 1
+    assert identity.gpu_index == 1
+
+
+def test_profiled_explicit_cpu_skips_gpu_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    faster_whisper_module._MODEL_FINGERPRINT_CACHE.clear()
+    _install_fake_faster_whisper(
+        monkeypatch,
+        cuda_count=1,
+        supported={"cuda": {"float16"}, "cpu": {"int8"}},
+        engine_version="1.2.1",
+        runtime_version="4.8.1",
+    )
+    probes = 0
+
+    def probe() -> tuple[GpuDevice, ...]:
+        nonlocal probes
+        probes += 1
+        return (GpuDevice(0, "gpu", 8192, 7000),)
+
+    monkeypatch.setattr(faster_whisper_module, "probe_nvidia_gpus", probe)
+    _profile_id, profile = resolve_asr_profile(Path.cwd(), DEFAULT_ASR_PROFILE)
+    identity = FasterWhisperBackend(
+        _complete_model(tmp_path),
+        device="cpu",
+        profile=profile,
+    ).identity()
+    assert probes == 0
+    assert identity.selected_device == "cpu"
+    assert identity.selection_reason == "explicit_cpu"
+    assert identity.gpu_name is None
+    assert identity.candidate_gpu_name is None
+
+
+def test_profiled_runtime_rejects_installed_version_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    faster_whisper_module._MODEL_FINGERPRINT_CACHE.clear()
+    _install_fake_faster_whisper(
+        monkeypatch,
+        cuda_count=0,
+        supported={"cuda": set(), "cpu": {"int8"}},
+        engine_version="9.9.9",
+        runtime_version="4.8.1",
+    )
+    _profile_id, profile = resolve_asr_profile(Path.cwd(), DEFAULT_ASR_PROFILE)
+
+    with pytest.raises(VepError) as mismatch:
+        FasterWhisperBackend(_complete_model(tmp_path), profile=profile).identity()
+
+    assert mismatch.value.code == "ASR_RUNTIME_VERSION_MISMATCH"
+
+
+def test_profiled_runtime_rejects_model_bytes_that_do_not_match_provision_manifest(
+    tmp_path: Path,
+) -> None:
+    faster_whisper_module._MODEL_FINGERPRINT_CACHE.clear()
+    _profile_id, profile = resolve_asr_profile(Path.cwd(), DEFAULT_ASR_PROFILE)
+    provision = AsrModelProvisionManifest(
+        profile=DEFAULT_ASR_PROFILE,
+        model_repository=profile.model_repository,
+        model_revision=profile.model_revision,
+        model_storage_identity="b" * 64,
+        file_count=3,
+        total_size_bytes=9,
+        provisioned_at=_NOW,
+    )
+
+    with pytest.raises(VepError) as mismatch:
+        FasterWhisperBackend(
+            _complete_model(tmp_path),
+            profile=profile,
+            provision_manifest=provision,
+        ).identity()
+
+    assert mismatch.value.code == "MODEL_INVALID"
+
+
+def test_profiled_inference_unrelated_failure_does_not_fall_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    faster_whisper_module._MODEL_FINGERPRINT_CACHE.clear()
+    calls = _install_fake_faster_whisper(
+        monkeypatch,
+        cuda_count=1,
+        supported={"cuda": {"float16"}, "cpu": {"int8"}},
+        transcribe_fail_devices={"cuda"},
+        failure_message="corrupted input",
+        engine_version="1.2.1",
+        runtime_version="4.8.1",
+    )
+    _profile_id, profile = resolve_asr_profile(Path.cwd(), DEFAULT_ASR_PROFILE)
+    backend = FasterWhisperBackend(
+        _complete_model(tmp_path),
+        profile=profile,
+        capability_override=RuntimeCapabilities(
+            gpus=(GpuDevice(0, "synthetic-gpu", 8192, 7000),),
+            container_gpu_passthrough=True,
+            ctranslate2_cuda_available=True,
+            cuda_compute_types=frozenset({"float16"}),
+        ),
+    )
+
+    with pytest.raises(VepError) as failure:
+        backend.transcribe(
+            tmp_path / "audio.wav",
+            language=None,
+            intervals=(TranscriptInterval(start_ms=0, end_ms=1000),),
+            configuration=TranscriptionConfig(),
+        )
+
+    assert failure.value.code == "TRANSCRIPTION_FAILED"
+    assert [call["device"] for call in calls] == ["cuda"]
 
 
 def test_faster_whisper_explicit_cuda_fails_closed(
@@ -948,7 +1370,7 @@ def test_faster_whisper_explicit_cuda_model_load_failure_does_not_fall_back(
     assert [call["device"] for call in calls] == ["cuda"]
 
 
-def test_faster_whisper_auto_reports_cpu_load_failure_as_model_invalid(
+def test_faster_whisper_auto_does_not_hide_unrelated_cuda_load_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     faster_whisper_module._MODEL_FINGERPRINT_CACHE.clear()
@@ -956,14 +1378,14 @@ def test_faster_whisper_auto_reports_cpu_load_failure_as_model_invalid(
         monkeypatch,
         cuda_count=1,
         supported={"cuda": {"float16"}, "cpu": {"int8"}},
-        fail_devices={"cuda", "cpu"},
+        fail_devices={"cuda"},
     )
 
     with pytest.raises(VepError) as invalid:
         FasterWhisperBackend(_complete_model(tmp_path)).identity()
 
-    assert invalid.value.code == "MODEL_INVALID"
-    assert [call["device"] for call in calls] == ["cuda", "cpu"]
+    assert invalid.value.code == "ASR_DEVICE_UNAVAILABLE"
+    assert [call["device"] for call in calls] == ["cuda"]
 
 
 def test_faster_whisper_explicit_cpu_ignores_available_cuda(
@@ -993,19 +1415,19 @@ def test_faster_whisper_model_hash_is_reused_within_process(
         supported={"cuda": set(), "cpu": {"int8"}},
     )
     model = _complete_model(tmp_path)
-    original = faster_whisper_module.sha256_file
+    original = provisioning_module.sha256_file
     hashed: list[Path] = []
 
     def counted(path: Path) -> str:
         hashed.append(path)
         return original(path)
 
-    monkeypatch.setattr(faster_whisper_module, "sha256_file", counted)
+    monkeypatch.setattr(provisioning_module, "sha256_file", counted)
 
     FasterWhisperBackend(model).identity()
     FasterWhisperBackend(model).identity()
 
-    assert len(hashed) == 3
+    assert len(hashed) == 4
 
 
 def test_artifact_fast_reuse_skips_hash_and_deep_verify_hashes(

@@ -41,6 +41,52 @@
       "title": "ArtifactRef",
       "type": "object"
     },
+    "CharacterLengthCheck": {
+      "additionalProperties": false,
+      "description": "Machine-produced result suitable for manifests and external requests.",
+      "properties": {
+        "actual_chars": {
+          "maximum": 4000000,
+          "minimum": 0,
+          "title": "Actual Chars",
+          "type": "integer"
+        },
+        "below_minimum_by": {
+          "default": 0,
+          "maximum": 4000000,
+          "minimum": 0,
+          "title": "Below Minimum By",
+          "type": "integer"
+        },
+        "counting_rule": {
+          "const": "strip-surrounding-whitespace-then-python-code-points-v1",
+          "default": "strip-surrounding-whitespace-then-python-code-points-v1",
+          "title": "Counting Rule",
+          "type": "string"
+        },
+        "effective": {
+          "$ref": "#/$defs/EffectiveCharacterLengthConstraint"
+        },
+        "over_maximum_by": {
+          "default": 0,
+          "maximum": 4000000,
+          "minimum": 0,
+          "title": "Over Maximum By",
+          "type": "integer"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "actual_chars",
+        "effective",
+        "passed"
+      ],
+      "title": "CharacterLengthCheck",
+      "type": "object"
+    },
     "DraftSpan": {
       "additionalProperties": false,
       "properties": {
@@ -69,6 +115,61 @@
         "text"
       ],
       "title": "DraftSpan",
+      "type": "object"
+    },
+    "EffectiveCharacterLengthConstraint": {
+      "additionalProperties": false,
+      "description": "Resolved range used by every deterministic length gate.",
+      "properties": {
+        "max_chars": {
+          "anyOf": [
+            {
+              "maximum": 4000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Chars"
+        },
+        "maximum_adjustments": {
+          "default": 3,
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Maximum Adjustments",
+          "type": "integer"
+        },
+        "min_chars": {
+          "anyOf": [
+            {
+              "maximum": 4000000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Chars"
+        },
+        "minimum_source": {
+          "enum": [
+            "unspecified",
+            "explicit",
+            "default_80_percent"
+          ],
+          "title": "Minimum Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "minimum_source"
+      ],
+      "title": "EffectiveCharacterLengthConstraint",
       "type": "object"
     },
     "FormatCheck": {
@@ -389,6 +490,31 @@
       "title": "Job Id",
       "type": "string"
     },
+    "length_adjustment_count": {
+      "anyOf": [
+        {
+          "maximum": 10,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Length Adjustment Count"
+    },
+    "length_check": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CharacterLengthCheck"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "p0_count": {
       "const": 0,
       "default": 0,
@@ -431,6 +557,20 @@
       "default": "1.0",
       "title": "Schema Version",
       "type": "string"
+    },
+    "semantic_revision_count": {
+      "anyOf": [
+        {
+          "maximum": 2,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Semantic Revision Count"
     },
     "unresolved_ambiguity_ids": {
       "items": {

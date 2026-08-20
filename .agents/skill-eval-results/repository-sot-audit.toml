@@ -1,14 +1,14 @@
 schema_version = "1.0"
 skill_id = "repository-sot-audit"
 skill_path = ".agents/skills/repository-sot-audit/SKILL.md"
-skill_content_sha256 = "c0832b2e52cc097cfba9c74ef25565685cbb0ff55bfa7a7682de19169fe2410b"
+skill_content_sha256 = "d94c1c4b9e0274c75df8aed9c4815271f805891521d3c7095cb1045ba90fefd6"
 eval_definition_path = ".agents/skill-evals/repository-sot-audit.toml"
 eval_definition_sha256 = "8da7e5956e3773cc52916204f20960754a0cef1a5ad7046b14814002e29f60bf"
-evaluated_commit_sha = "d8a2115b72a02944f452fbbb41d39e11419946bd"
-evaluated_at = "2026-08-10T04:12:41Z"
+evaluated_commit_sha = "b4e098b73b3a4d53f6e3d6e2ca3c4d9ec14c2442"
+evaluated_at = "2026-08-19T22:34:53Z"
 evaluator_identity = "OpenAI Codex GPT-5.6 Sol"
 evaluator_method = "binary criteria, synthetic validator fixture, and required repository gates"
-finding_summary = "P0=0; P1=0; repository audit contract and fail-closed secret fixture passed"
+finding_summary = "P0=0; P1=0; normal host sync excludes the ASR container group and the read-only audit contract remains valid"
 side_effect_policy = "read-only"
 total_score = 10
 maximum_score = 10
@@ -27,7 +27,7 @@ required_artifacts = [
 owner = "Xpotato1024"
 approved = true
 method = "explicit_task_authorization"
-reviewed_at = "2026-08-10T04:12:41Z"
+reviewed_at = "2026-08-19T22:34:53Z"
 
 [[case_results]]
 case_id = "valid-repository"
@@ -35,7 +35,7 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["required full suite: 345 passed, 10 platform skips", "repository validator, schema, lint, format, lock, and diff gates passed"]
+evidence = ["required full suite completed on the evaluated implementation", "repository validator, schema, lint, format, lock, and diff gates passed"]
 criteria = [
   { id = "canonical-sot-read", passed = true, evidence = "documents registry and applicable canonical documents were read" },
   { id = "validator-run", passed = true, evidence = "scripts/validate_repository.py exited successfully" },

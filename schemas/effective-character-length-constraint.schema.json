@@ -1,0 +1,58 @@
+{
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/effective-character-length-constraint.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Resolved range used by every deterministic length gate.",
+  "properties": {
+    "max_chars": {
+      "anyOf": [
+        {
+          "maximum": 4000000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Max Chars"
+    },
+    "maximum_adjustments": {
+      "default": 3,
+      "maximum": 10,
+      "minimum": 1,
+      "title": "Maximum Adjustments",
+      "type": "integer"
+    },
+    "min_chars": {
+      "anyOf": [
+        {
+          "maximum": 4000000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Min Chars"
+    },
+    "minimum_source": {
+      "enum": [
+        "unspecified",
+        "explicit",
+        "default_80_percent"
+      ],
+      "title": "Minimum Source",
+      "type": "string"
+    }
+  },
+  "required": [
+    "minimum_source"
+  ],
+  "title": "EffectiveCharacterLengthConstraint",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

@@ -55,6 +55,14 @@ from video_evidence_pipeline.domain.evidence import (
     SourceRef,
 )
 from video_evidence_pipeline.domain.job import JobSpec
+from video_evidence_pipeline.domain.length import (
+    CharacterLengthAdjustmentAttempt,
+    CharacterLengthAdjustmentRequest,
+    CharacterLengthCheck,
+    CharacterLengthConstraint,
+    EffectiveCharacterLengthConstraint,
+    LengthBlockManifest,
+)
 from video_evidence_pipeline.domain.manifests import SourceManifest, StageManifest
 from video_evidence_pipeline.domain.media import (
     FrameIndex,
@@ -82,6 +90,8 @@ from video_evidence_pipeline.domain.search import (
 from video_evidence_pipeline.domain.supporting import SupportingInputManifest
 from video_evidence_pipeline.domain.transcription import (
     AsrSegment,
+    AsrWorkerRequest,
+    AsrWorkerResponse,
     SegmentLineage,
     TranscriptConfidence,
     TranscriptInterval,
@@ -93,12 +103,22 @@ from video_evidence_pipeline.domain.transcription import (
 from video_evidence_pipeline.domain.transitions import TransitionRecord
 from video_evidence_pipeline.errors import configuration_error
 from video_evidence_pipeline.storage.atomic import atomic_write_bytes
+from video_evidence_pipeline.transcription.profiles import (
+    AsrModelProvisionManifest,
+    AsrProfileRegistry,
+)
 
 SCHEMA_VERSION = "1.0"
 SCHEMA_BASE_ID = "https://schemas.video-evidence-pipeline.local/v1"
 
 SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "job-spec.schema.json": JobSpec,
+    "character-length-constraint.schema.json": CharacterLengthConstraint,
+    "effective-character-length-constraint.schema.json": EffectiveCharacterLengthConstraint,
+    "character-length-check.schema.json": CharacterLengthCheck,
+    "character-length-adjustment-attempt.schema.json": CharacterLengthAdjustmentAttempt,
+    "character-length-adjustment-request.schema.json": CharacterLengthAdjustmentRequest,
+    "length-block-manifest.schema.json": LengthBlockManifest,
     "authorization-record.schema.json": AuthorizationRecord,
     "artifact-record.schema.json": ArtifactRecord,
     "evidence-ledger-artifact-ref.schema.json": EvidenceLedgerArtifactRef,
@@ -141,10 +161,14 @@ SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "frame-index.schema.json": FrameIndex,
     "normalization-config.schema.json": NormalizationConfig,
     "transcription-config.schema.json": TranscriptionConfig,
+    "asr-profile-registry.schema.json": AsrProfileRegistry,
+    "asr-model-provision-manifest.schema.json": AsrModelProvisionManifest,
     "transcription-backend-identity.schema.json": TranscriptionBackendIdentity,
     "transcript-confidence.schema.json": TranscriptConfidence,
     "segment-lineage.schema.json": SegmentLineage,
     "asr-segment.schema.json": AsrSegment,
+    "asr-worker-request.schema.json": AsrWorkerRequest,
+    "asr-worker-response.schema.json": AsrWorkerResponse,
     "transcript-segment.schema.json": TranscriptSegment,
     "transcript-interval.schema.json": TranscriptInterval,
     "transcript-manifest.schema.json": TranscriptManifest,
