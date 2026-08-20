@@ -89,12 +89,13 @@ vep job init demo-report \
   --output-format markdown
 ```
 
-## Bounded BLOCKED recovery
+## Transcript-boundary recovery fork
 
 `vep job recover PARENT NEW-JOB-ID --confirm --basis TEXT [--child-spec PATH]` is a narrow fork, not an
-in-place repair. It accepts a readable `BLOCKED` parent whose pre-semantic source,
-normalization, raw-transcript, and supporting-input artifacts are present. Finding
-categories, old semantic fingerprints, and draft/audit history are not recovery gates.
+in-place repair. It accepts a readable parent with a verified raw transcript, including
+`TRANSCRIBED`, `TRANSCRIPT_REFINED`, `EVIDENCE_READY`, authoring／human-review／approval／export
+states, and `BLOCKED` jobs that previously reached the transcript boundary. Pre-transcript
+parents are rejected. Finding categories, old semantic fingerprints, and draft/audit history are not recovery gates.
 It leaves the parent bytes, state, and transition log unchanged.
 
 `--child-spec`は新job IDを持つ完全なjob YAMLです。source locator identity、primary input、supporting inputは
@@ -108,6 +109,11 @@ and declared supporting-input artifacts, writes `manifests/recovery-manifest.jso
 records fresh transitions through `TRANSCRIBED`. Refinement, evidence, authoring, audit,
 human review, approval, and export are not copied. Network source bundles, including Box,
 are rebound to the child and are never acquired again by recovery.
+
+Creation eligibility is checked only when the child is created. Existing child provenance is
+subsequently validated against the immutable parent job/spec and pre-semantic artifact identities,
+not the parent's current lifecycle state. A parent that later advances from `HUMAN_REVIEW_READY`
+to another valid state therefore does not invalidate the child.
 
 ## Authorization flow
 

@@ -103,18 +103,19 @@ synthetic fixture実行は内部test routeだけです。
 `vep approve`はAI／Skill実行ではなく、対象SHA、reviewer、basis、`--confirm`を明示する人間操作です。
 reviewer identityはlocal CLIの自己申告lineageであり、暗号学的な本人確認ではありません。
 
-## Blocked-job recovery
+## Transcript-boundary recovery
 
-`vep job recover` is deliberately limited to a readable `BLOCKED` parent with
-the pre-semantic source, normalization, raw-transcript, and supporting-input
-artifacts still present. Recovery does not require a finding category, an old
-draft/audit fingerprint, or any other semantic history to match.
+`vep job recover` accepts a readable parent with verified source, normalization,
+raw-transcript, and supporting-input artifacts. This includes successful jobs from
+`TRANSCRIBED` through `EXPORTED`, plus `BLOCKED` jobs that previously reached the
+transcript boundary. Pre-transcript parents are rejected. Recovery does not require a
+finding category, an old draft/audit fingerprint, or any other semantic history to match.
 
 ```bash
-uv run vep job recover .local/jobs/blocked-report repaired-report \
+uv run vep job recover .local/jobs/completed-report changed-assignment-report \
   --child-spec /path/to/repaired-job.yaml \
   --confirm \
-  --basis "restart semantic processing from the blocked parent"
+  --basis "rerun the verified transcript under a changed assignment"
 ```
 
 The parent workspace remains untouched. The child has a new job-bound authorization
