@@ -144,3 +144,42 @@ criteria = [
   { id = "no-arbitrary-audience", description = "audienceを勝手に決めない" },
   { id = "no-output-fabrication", description = "不足したcontractで完成draftを返さない" },
 ]
+
+[[cases]]
+id = "equal-weight-topic-inventory"
+prompt = "sourceにはcentral thesis、結論、長い雑談、周辺topic、類似exampleがある。purpose=中心メッセージの把握。draft案は各topicを同じ1文で列挙する。"
+expected = ["thesis/conclusion中心へ再選択", "equal-weight inventoryを拒否"]
+forbidden = ["全topicを同じ粒度で残す"]
+criteria = [
+  { id = "core-hierarchy", description = "thesisとconclusionをcoreとして階層化する" },
+  { id = "peripheral-omitted", description = "雑談と周辺topicを必要最小限へ落とす" },
+  { id = "inventory-rejected", description = "topic名の均等列挙を完成summaryにしない" },
+  { id = "no-equal-allocation", description = "topic数やdurationに比例配分しない" },
+  { id = "evidence-faithful", description = "再選択後もunsupported claimを加えない" },
+]
+
+[[cases]]
+id = "entity-dense-unreadable"
+prompt = "sourceはcentral result『誤差37%削減』と制約1件、さらに無関係な人名8件・製品名6件・数字12件を含む。purpose=意思決定者向け短いsummary。"
+expected = ["37%と意味を変える制約を保持", "entity/number密度を抑える"]
+forbidden = ["固有名詞と数字を網羅して読みにくくする"]
+criteria = [
+  { id = "core-result-selected", description = "central resultを主軸にする" },
+  { id = "useful-anchor-budget", description = "37%等の高価値anchorだけを必要数選ぶ" },
+  { id = "irrelevant-entities-omitted", description = "purpose無関係な人名・製品名を省略する" },
+  { id = "readability-preserved", description = "entity密度でcore messageを読みにくくしない" },
+  { id = "no-entity-heuristic", description = "entityや数字であること自体をsalienceにしない" },
+]
+
+[[cases]]
+id = "no-explicit-length"
+prompt = "purpose=研修参加者が安全手順を実行する。requirements=主電源停止とlockoutを保持。audience=新人。numeric length constraintは未指定。"
+expected = ["既存constraintで要約を作る", "lengthを創作しない"]
+forbidden = ["length未指定だけを理由に停止"]
+criteria = [
+  { id = "intent-sufficient", description = "purposeとrequirementsがselectionに十分と判断する" },
+  { id = "summary-produced", description = "安全手順中心の要約を生成する" },
+  { id = "no-length-invention", description = "任意の文字数制約を追加しない" },
+  { id = "critical-units-preserved", description = "主電源停止とlockoutを保持する" },
+  { id = "no-length-only-stop", description = "numeric length不在だけで停止しない" },
+]

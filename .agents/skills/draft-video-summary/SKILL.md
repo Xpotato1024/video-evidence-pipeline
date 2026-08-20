@@ -61,7 +61,8 @@ acceptance criterion、representative exampleである。数字や固有名詞�
 9. 結論先行、論理関係、箇条書き、meeting sectionsなど目的に適したstructureを決める。
 10. 各material claimをevidence IDへ束縛し、ambiguityやunknownを保って文章化する。
 11. 重複、同種exampleの列挙、topic inventory、coreを薄めるdetailを除く。
-12. deterministic length constraintに収まる候補を返す。機械的な文字数検証はexecutorへ委ねる。
+12. deterministic length constraintがあれば収まる候補を返す。未指定なら数字を創作せず、
+    purpose、requirements、format等の既存constraintで要約する。機械的な文字数検証はexecutorへ委ねる。
 
 ## Meeting/minutes profile
 
@@ -72,7 +73,7 @@ meeting assignmentでは、sourceにある範囲で`Decisions`、`Action items`�
 
 ## Stop conditions
 
-- purposeまたはlength constraintが未定義で、requestから一意に回復できない
+- purpose、requirements、task typeのすべてが不十分で、何を選ぶべきか一意に判断できない
 - assignment-criticalな要求に対応するevidenceがなく、unresolvedとしてもcontractを満たせない
 - source-bound claimを作れない、またはfrozen Skill identityが一致しない
 

@@ -47,11 +47,10 @@ required_capabilities = ["validated-evidence-read"]
 id = "draft-video-summary"
 path = ".agents/skills/draft-video-summary/SKILL.md"
 resources = []
-lifecycle = "active"
+lifecycle = "draft"
 automatic_trigger = false
 side_effect_policy = "instruction-only"
 eval_path = ".agents/skill-evals/draft-video-summary.toml"
-eval_result_path = ".agents/skill-eval-results/draft-video-summary.toml"
 owner = "Xpotato1024"
 required_capabilities = ["validated-evidence-read"]
 
@@ -59,11 +58,10 @@ required_capabilities = ["validated-evidence-read"]
 id = "independent-content-audit"
 path = ".agents/skills/independent-content-audit/SKILL.md"
 resources = []
-lifecycle = "active"
+lifecycle = "draft"
 automatic_trigger = false
 side_effect_policy = "instruction-only"
 eval_path = ".agents/skill-evals/independent-content-audit.toml"
-eval_result_path = ".agents/skill-eval-results/independent-content-audit.toml"
 owner = "Xpotato1024"
 required_capabilities = ["fresh-context", "audit-bundle-read"]
 

@@ -36,11 +36,11 @@ related_documents: ["VEP-AGENT-POLICY", "VEP-AGENT-GOV", "VEP-ARCH-AGENTS"]
 ## Current Skill state
 
 `repository-sot-audit`、`refine-video-transcript`、`analyze-video-evidence`、
-`draft-video-report`、`draft-video-summary`、`independent-content-audit`、
-`revise-from-audit`、`run-video-evidence-job`はactiveです。すべて明示選択専用
+`draft-video-report`、`revise-from-audit`、`run-video-evidence-job`はactiveです。すべて明示選択専用
 （`automatic_trigger = false`）で、Skill invocationは権限を追加しません。
 各SkillにはSkill本文SHA、resource bundle fingerprint、eval定義SHA、評価対象commit、
 case別fresh-context結果、P0/P1=0、owner reviewを含むcurrent result evidenceがあります。
+`draft-video-summary`と`independent-content-audit`はadversarial eval追加後の再評価中、
 `prepare-human-review`は再評価前のdraftです。
 
 ## Adapter

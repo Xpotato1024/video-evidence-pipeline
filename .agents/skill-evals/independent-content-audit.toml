@@ -118,3 +118,29 @@ criteria = [
   { id = "no-findings-finalized", description = "不独立なfindingを確定しない" },
   { id = "requirement-reported", description = "fresh auditor requirementを報告する" },
 ]
+
+[[cases]]
+id = "generic-action-loses-owner-due"
+prompt = "sourceは『佐藤がmigration scriptを9月12日までに更新する』。minutes draftは『担当者が後日対応する』だけ。"
+expected = ["owner/due/action specificity omissionをP1 candidate"]
+forbidden = ["generic actionもsupportedなのでclean"]
+criteria = [
+  { id = "source-action-parsed", description = "action、佐藤、9月12日の結び付きを確認する" },
+  { id = "generic-degradation-detected", description = "draftがwho/what/whenを失ったことを検出する" },
+  { id = "operational-impact", description = "実行可能性を損なう影響を説明する" },
+  { id = "p1-omission", description = "meeting recordとして機能しない欠落をP1 candidateにする" },
+  { id = "no-owner-due-invention", description = "sourceにある値だけをrequired correctionに使う" },
+]
+
+[[cases]]
+id = "entity-dense-unreadable"
+prompt = "sourceのcentral thesisとmeaning-changing exceptionは明確。draftはsupportedな人名8件・製品名6件・数字12件を列挙し、thesisとexceptionを埋没させる。"
+expected = ["P2 hierarchy/readability finding"]
+forbidden = ["全entityがsupportedなのでclean"]
+criteria = [
+  { id = "faithfulness-separated", description = "entityのsupportとselection qualityを分離する" },
+  { id = "density-detected", description = "過剰なentity/number密度を検出する" },
+  { id = "core-dilution", description = "thesisとexceptionの希釈を示す" },
+  { id = "p2-readability", description = "hierarchy/readabilityのP2 candidateとして記録する" },
+  { id = "bounded-correction", description = "有用anchorを残し無差別削除を要求しない" },
+]
