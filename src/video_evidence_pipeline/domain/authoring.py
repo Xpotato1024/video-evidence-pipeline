@@ -23,6 +23,7 @@ from video_evidence_pipeline.domain.length import (
     CharacterLengthConstraint,
     EffectiveCharacterLengthConstraint,
 )
+from video_evidence_pipeline.domain.semantic import SkillSnapshot
 from video_evidence_pipeline.domain.serialization import fingerprint
 
 NonBlank128 = Annotated[
@@ -104,18 +105,6 @@ class ResolutionDecision(StrEnum):
     ACCEPT = "accept"
     REJECT = "reject"
     DEFER = "defer"
-
-
-class SkillSnapshot(StrictModel):
-    skill_id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,127}$")
-    relative_path: str = Field(pattern=r"^\.agents/skills/[a-z0-9-]+/SKILL\.md$")
-    content_sha256: Sha256
-    eval_sha256: Sha256
-    lifecycle: Literal["draft", "active"]
-    automatic_trigger: Literal[False] = False
-    side_effect_policy: Literal["instruction-only"] = "instruction-only"
-    explicit_selection: Literal[True] = True
-    owner: NonBlank128
 
 
 class AgentIdentity(StrictModel):
@@ -314,6 +303,18 @@ class OutputConstraints(StrictModel):
     requirements: list[AssignmentRequirement] = Field(max_length=100)
     length: CharacterLengthConstraint | None = None
     effective_length: EffectiveCharacterLengthConstraint | None = None
+    purpose: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=512,
+        exclude_if=lambda value: value is None,
+    )
+    audience: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=512,
+        exclude_if=lambda value: value is None,
+    )
 
     @model_validator(mode="after")
     def requirements_are_contiguous(self) -> Self:

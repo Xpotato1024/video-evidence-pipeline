@@ -558,11 +558,39 @@
     "EvidenceAssignmentContext": {
       "additionalProperties": false,
       "properties": {
+        "audience": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Audience"
+        },
         "language": {
           "maxLength": 32,
           "minLength": 2,
           "title": "Language",
           "type": "string"
+        },
+        "purpose": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Purpose"
         },
         "requirements": {
           "items": {
@@ -901,6 +929,17 @@
           "title": "Schema Version",
           "type": "string"
         },
+        "skill": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SkillSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "transcript_bundle_fingerprint": {
           "maxLength": 64,
           "minLength": 64,
@@ -1079,6 +1118,20 @@
     "OutputConstraints": {
       "additionalProperties": false,
       "properties": {
+        "audience": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Audience"
+        },
         "effective_length": {
           "anyOf": [
             {
@@ -1114,6 +1167,20 @@
             }
           ],
           "default": null
+        },
+        "purpose": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Purpose"
         },
         "requirements": {
           "items": {
@@ -1285,8 +1352,44 @@
       "title": "SegmentLineage",
       "type": "object"
     },
+    "SkillResourceSnapshot": {
+      "additionalProperties": false,
+      "description": "One explicitly managed file whose bytes affect semantic execution.",
+      "properties": {
+        "relative_path": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Relative Path",
+          "type": "string"
+        },
+        "sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "reference",
+            "script",
+            "asset"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "relative_path",
+        "sha256",
+        "type"
+      ],
+      "title": "SkillResourceSnapshot",
+      "type": "object"
+    },
     "SkillSnapshot": {
       "additionalProperties": false,
+      "description": "Frozen semantic contract shared by refinement, evidence, and authoring.",
       "properties": {
         "automatic_trigger": {
           "const": false,
@@ -1301,12 +1404,40 @@
           "title": "Content Sha256",
           "type": "string"
         },
+        "eval_result_sha256": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Eval Result Sha256"
+        },
         "eval_sha256": {
           "maxLength": 64,
           "minLength": 64,
           "pattern": "^[0-9a-f]{64}$",
           "title": "Eval Sha256",
           "type": "string"
+        },
+        "evaluated_commit_sha": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evaluated Commit Sha"
         },
         "explicit_selection": {
           "const": true,
@@ -1333,6 +1464,37 @@
           "pattern": "^\\.agents/skills/[a-z0-9-]+/SKILL\\.md$",
           "title": "Relative Path",
           "type": "string"
+        },
+        "resource_bundle_fingerprint": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resource Bundle Fingerprint"
+        },
+        "resources": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/SkillResourceSnapshot"
+              },
+              "maxItems": 128,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resources"
         },
         "side_effect_policy": {
           "const": "instruction-only",

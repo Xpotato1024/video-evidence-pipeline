@@ -47,6 +47,7 @@ from video_evidence_pipeline.domain.manifests import (
     stage_manifest_matches,
 )
 from video_evidence_pipeline.domain.media import FrameRecord, MediaManifest
+from video_evidence_pipeline.domain.semantic import SkillSnapshot
 from video_evidence_pipeline.domain.serialization import (
     canonical_json_bytes,
     fingerprint,
@@ -56,6 +57,11 @@ from video_evidence_pipeline.domain.state import JobState
 from video_evidence_pipeline.domain.supporting import SupportingInputManifest
 from video_evidence_pipeline.domain.transcription import TranscriptManifest, TranscriptSegment
 from video_evidence_pipeline.errors import integrity_error, state_error
+from video_evidence_pipeline.semantic.skills import (
+    load_skill_snapshot,
+    same_skill_snapshot_except_lifecycle,
+    validate_import_skill,
+)
 from video_evidence_pipeline.storage.atomic import (
     atomic_copy_exclusive,
     atomic_write_bytes,
@@ -77,6 +83,7 @@ from video_evidence_pipeline.transcription.refinement import (
 )
 
 EVIDENCE_IMPLEMENTATION_VERSION = "evidence-v1"
+EVIDENCE_SKILLS = frozenset({"analyze-video-evidence"})
 _ATTEMPT_NAME = re.compile(r"^[0-9a-f]{32}$")
 _MAXIMUM_REQUEST_BYTES = 512 * 1024 * 1024
 _MAXIMUM_RESPONSE_BYTES = 128 * 1024 * 1024
@@ -346,27 +353,27 @@ def evidence_request_fingerprint(
     approved_artifacts: tuple[ArtifactRef, ...],
     approved_artifact_refs: tuple[SourceRef, ...],
     ambiguities: tuple[AmbiguityRecord, ...],
+    skill: SkillSnapshot | None = None,
 ) -> str:
-    return fingerprint(
-        {
-            "job_id": job_id,
-            "transcript_bundle_fingerprint": transcript_fingerprint,
-            "media_bundle_fingerprint": media_fingerprint,
-            "duration_ms": duration_ms,
-            "assignment": assignment.model_dump(mode="json"),
-            "analyzer_contract": contract.model_dump(mode="json", exclude_none=True),
-            "transcript_segments": [item.model_dump(mode="json") for item in segments],
-            "transcript_refs": [item.model_dump(mode="json") for item in transcript_refs],
-            "frame_records": [item.model_dump(mode="json") for item in frame_records],
-            "frame_refs": [item.model_dump(mode="json") for item in frame_refs],
-            "approved_artifacts": [item.model_dump(mode="json") for item in approved_artifacts],
-            "approved_artifact_refs": [
-                item.model_dump(mode="json") for item in approved_artifact_refs
-            ],
-            "unresolved_ambiguities": [item.model_dump(mode="json") for item in ambiguities],
-            "implementation_version": EVIDENCE_IMPLEMENTATION_VERSION,
-        }
-    )
+    payload = {
+        "job_id": job_id,
+        "transcript_bundle_fingerprint": transcript_fingerprint,
+        "media_bundle_fingerprint": media_fingerprint,
+        "duration_ms": duration_ms,
+        "assignment": assignment.model_dump(mode="json"),
+        "analyzer_contract": contract.model_dump(mode="json", exclude_none=True),
+        "transcript_segments": [item.model_dump(mode="json") for item in segments],
+        "transcript_refs": [item.model_dump(mode="json") for item in transcript_refs],
+        "frame_records": [item.model_dump(mode="json") for item in frame_records],
+        "frame_refs": [item.model_dump(mode="json") for item in frame_refs],
+        "approved_artifacts": [item.model_dump(mode="json") for item in approved_artifacts],
+        "approved_artifact_refs": [item.model_dump(mode="json") for item in approved_artifact_refs],
+        "unresolved_ambiguities": [item.model_dump(mode="json") for item in ambiguities],
+        "implementation_version": EVIDENCE_IMPLEMENTATION_VERSION,
+    }
+    if skill is not None:
+        payload["skill"] = skill.model_dump(mode="json")
+    return fingerprint(payload)
 
 
 def _expected_request(
@@ -378,6 +385,8 @@ def _expected_request(
     *,
     created_at: datetime,
     deep: bool = False,
+    bind_skill: bool = True,
+    frozen_skill: SkillSnapshot | None = None,
 ) -> EvidenceRequestManifest:
     contract = AnalyzerContract(
         atomic_proposition_contract=(
@@ -391,7 +400,20 @@ def _expected_request(
             AssignmentRequirement(requirement_id=f"R{index:06d}", text=text)
             for index, text in enumerate(job.assignment.requirements, start=1)
         ],
+        purpose=job.assignment.purpose,
+        audience=job.assignment.audience,
     )
+    skill = (
+        load_skill_snapshot(workspace, "analyze-video-evidence", allowed=EVIDENCE_SKILLS)
+        if bind_skill
+        else None
+    )
+    if (
+        skill is not None
+        and frozen_skill is not None
+        and same_skill_snapshot_except_lifecycle(frozen_skill, skill)
+    ):
+        skill = frozen_skill
     transcript_refs = tuple(_transcript_ref(item) for item in segments)
     frame_records = tuple(
         media_manifest.frame_index.records if media_manifest.frame_index is not None else ()
@@ -428,6 +450,7 @@ def _expected_request(
         approved_artifacts=approved_artifacts,
         approved_artifact_refs=approved_artifact_refs,
         ambiguities=ambiguities,
+        skill=skill,
     )
     return EvidenceRequestManifest(
         job_id=job.job_id,
@@ -444,6 +467,7 @@ def _expected_request(
         approved_artifacts=list(approved_artifacts),
         approved_artifact_refs=list(approved_artifact_refs),
         unresolved_ambiguities=list(ambiguities),
+        skill=skill,
         created_at=created_at,
     )
 
@@ -472,6 +496,8 @@ def prepare_evidence_request(
             segments,
             created_at=stored.created_at,
             deep=deep,
+            bind_skill=stored.skill is not None,
+            frozen_skill=stored.skill,
         )
         stored_values = stored.model_dump(mode="json", exclude={"request_fingerprint"})
         expected_values = expected.model_dump(mode="json", exclude={"request_fingerprint"})
@@ -534,6 +560,8 @@ def load_evidence_request(
         segments,
         created_at=stored.created_at,
         deep=deep,
+        bind_skill=stored.skill is not None,
+        frozen_skill=stored.skill,
     )
     if deep:
         request_matches = stored == expected
@@ -562,6 +590,25 @@ def _fixture_identity(identity: AnalyzerIdentity) -> bool:
     return identity.execution_mode is AnalyzerExecutionMode.TEST_FIXTURE or bool(
         tokens & _FIXTURE_MARKERS
     )
+
+
+def validate_evidence_import_skill(
+    workspace: JobWorkspace,
+    request: EvidenceRequestManifest,
+    response: EvidenceResponseManifest,
+    *,
+    allow_fixture: bool,
+) -> None:
+    """Gate a new external import against its frozen current active Skill."""
+
+    if allow_fixture and _fixture_identity(response.analyzer):
+        return
+    if request.skill is None:
+        raise state_error(
+            "EVIDENCE_SKILL_REQUIRED",
+            "legacy evidence requests cannot be used for a new production import",
+        )
+    validate_import_skill(workspace, request.skill, allowed=EVIDENCE_SKILLS)
 
 
 def _validate_response(

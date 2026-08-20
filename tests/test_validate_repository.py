@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -101,6 +103,7 @@ side_effect_policy = "read-only"
 eval_path = ".agents/skill-evals/audit.toml"
 eval_result_path = ".agents/skill-eval-results/audit.toml"
 owner = "Test"
+resources = []
 """,
     )
     write(
@@ -168,6 +171,7 @@ skill_path = ".agents/skills/audit/SKILL.md"
 skill_content_sha256 = "{skill_sha}"
 eval_definition_path = ".agents/skill-evals/audit.toml"
 eval_definition_sha256 = "{eval_sha}"
+resource_bundle_fingerprint = "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
 evaluated_commit_sha = "{evaluated_commit_sha}"
 evaluated_at = "2026-08-10T00:00:00Z"
 evaluator_identity = "Synthetic evaluator"
@@ -369,6 +373,65 @@ def test_active_skill_rejects_stale_eval_definition(tmp_path: Path) -> None:
         eval_path.read_text(encoding="utf-8") + "\n# changed after evaluation\n",
         encoding="utf-8",
     )
+    assert "SKILL_EVAL_RESULT_STALE" in finding_codes(tmp_path, tracked)
+
+
+def test_skill_resource_must_be_explicitly_declared(tmp_path: Path) -> None:
+    tracked = make_valid_repo(tmp_path)
+    relative = ".agents/skills/audit/references/rules.md"
+    write(tmp_path, relative, "# Rules\n")
+    tracked.add(relative)
+
+    assert "SKILL_RESOURCE_UNDECLARED" in finding_codes(tmp_path, tracked)
+
+
+def test_active_skill_result_becomes_stale_when_resource_changes(tmp_path: Path) -> None:
+    tracked = make_valid_repo(tmp_path)
+    relative = ".agents/skills/audit/references/rules.md"
+    resource = tmp_path / relative
+    resource.parent.mkdir(parents=True, exist_ok=True)
+    resource.write_bytes(b"# Rules\noriginal\n")
+    tracked.add(relative)
+    registry = tmp_path / ".agents/skill-system.toml"
+    registry.write_text(
+        registry.read_text(encoding="utf-8").replace(
+            "resources = []",
+            'resources = [{ path = "references/rules.md", type = "reference" }]',
+        ),
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", ".agents/skill-system.toml", relative], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "add resource"], cwd=tmp_path, check=True)
+    evaluated_commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    raw_sha = hashlib.sha256((tmp_path / relative).read_bytes()).hexdigest()
+    bundle = hashlib.sha256(
+        json.dumps(
+            [{"relative_path": "references/rules.md", "sha256": raw_sha, "type": "reference"}],
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    result = tmp_path / ".agents/skill-eval-results/audit.toml"
+    result_text = result.read_text(encoding="utf-8")
+    old_commit = next(
+        line for line in result_text.splitlines() if line.startswith("evaluated_commit_sha = ")
+    )
+    result.write_text(
+        result_text.replace(
+            'resource_bundle_fingerprint = "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"',
+            f'resource_bundle_fingerprint = "{bundle}"',
+        ).replace(old_commit, f'evaluated_commit_sha = "{evaluated_commit}"'),
+        encoding="utf-8",
+    )
+    assert RepositoryValidator(tmp_path, tracked).validate() == []
+
+    resource.write_bytes(b"# Rules\nchanged\n")
     assert "SKILL_EVAL_RESULT_STALE" in finding_codes(tmp_path, tracked)
 
 
