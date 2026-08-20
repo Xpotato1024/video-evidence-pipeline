@@ -52,10 +52,18 @@ def _created_workspace(tmp_path: Path, *, task_type: str = "report", transcript:
     ],
 )
 def test_guide_maps_major_states_to_public_operations(
-    tmp_path: Path, state: JobState, expected: str
+    tmp_path: Path,
+    state: JobState,
+    expected: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     workspace, job = _created_workspace(tmp_path)
     status = {"authoring_integrity": {"draft_version": "v003"}}
+    monkeypatch.setattr(
+        application,
+        "load_skill_snapshot",
+        lambda *_args, **_kwargs: SimpleNamespace(lifecycle="active"),
+    )
 
     result = _guide_operation(workspace, job, [], state, status)
 
@@ -128,6 +136,90 @@ def test_supplied_transcript_guidance_declares_no_ffmpeg_or_asr(tmp_path: Path) 
     assert normalization["side_effects"]["ffmpeg"] is False
     assert transcription["side_effects"]["asr"] is False
     assert transcription["side_effects"]["model_provision"] is False
+
+
+def test_video_transcription_guidance_does_not_claim_model_provision(tmp_path: Path) -> None:
+    workspace, job = _created_workspace(tmp_path)
+
+    transcription = _guide_operation(workspace, job, [], JobState.NORMALIZED, {})
+
+    assert transcription["side_effects"]["asr"] is True
+    assert transcription["side_effects"]["model_provision"] is False
+
+
+def test_guide_blocks_mapped_draft_skill_without_a_prepare_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, job = _created_workspace(tmp_path)
+
+    def draft_skill(
+        actual_workspace: object,
+        skill_id: str,
+        *,
+        allowed: frozenset[str],
+    ) -> SimpleNamespace:
+        assert actual_workspace is workspace
+        assert skill_id == "draft-video-report"
+        assert allowed == frozenset({"draft-video-report", "draft-video-summary"})
+        return SimpleNamespace(lifecycle="draft")
+
+    monkeypatch.setattr(application, "load_skill_snapshot", draft_skill)
+
+    result = _guide_operation(workspace, job, [], JobState.EVIDENCE_READY, {})
+
+    assert result["status"] == "blocked"
+    assert result["next_operation"] is None
+    assert result["command"] is None
+    assert result["reason"].startswith("DRAFT_SKILL_FORBIDDEN")
+    assert result["side_effects"]["workspace_write"] is False
+
+
+def test_guide_reports_stale_mapped_skill_without_a_prepare_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, job = _created_workspace(tmp_path)
+
+    def stale_skill(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        raise application.integrity_error("SKILL_EVAL_RESULT_INVALID", "synthetic stale Skill")
+
+    monkeypatch.setattr(application, "load_skill_snapshot", stale_skill)
+
+    result = _guide_operation(workspace, job, [], JobState.EVIDENCE_READY, {})
+
+    assert result["status"] == "integrity-error"
+    assert result["next_operation"] is None
+    assert result["command"] is None
+    assert result["reason"].startswith("SKILL_SNAPSHOT_STALE")
+    assert result["side_effects"]["workspace_write"] is False
+
+
+def test_semantic_guidance_only_declares_an_authorized_external_api(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, job = _created_workspace(tmp_path)
+    monkeypatch.setattr(
+        application,
+        "load_skill_snapshot",
+        lambda *_args, **_kwargs: SimpleNamespace(lifecycle="active"),
+    )
+
+    denied = _guide_operation(
+        workspace,
+        job,
+        [],
+        JobState.EVIDENCE_READY,
+        {"authorization": {"allow_external_api": False}},
+    )
+    authorized = _guide_operation(
+        workspace,
+        job,
+        [],
+        JobState.EVIDENCE_READY,
+        {"authorization": {"allow_external_api": True}},
+    )
+
+    assert denied["side_effects"]["external_api_possible"] is False
+    assert authorized["side_effects"]["external_api_possible"] is True
 
 
 def test_integrity_error_does_not_invent_a_repair(

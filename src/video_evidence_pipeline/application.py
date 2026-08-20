@@ -157,6 +157,7 @@ from video_evidence_pipeline.search import (
     build_index,
     search_index,
 )
+from video_evidence_pipeline.semantic.skills import load_skill_snapshot
 from video_evidence_pipeline.storage.atomic import (
     atomic_copy_exclusive,
     atomic_write_json,
@@ -3097,8 +3098,54 @@ _GUIDE_SIDE_EFFECT_KEYS = (
 )
 
 
+_GUIDE_ALLOWED_SKILLS_BY_OPERATION = {
+    "refine_prepare": frozenset({"refine-video-transcript"}),
+    "evidence_prepare": frozenset({"analyze-video-evidence"}),
+    "author_prepare": frozenset({"draft-video-report", "draft-video-summary"}),
+    "audit_prepare": frozenset({"independent-content-audit"}),
+    "revision_prepare": frozenset({"revise-from-audit"}),
+}
+
+
 def _guide_side_effects(**enabled: bool) -> dict[str, bool]:
     return {key: bool(enabled.get(key, False)) for key in _GUIDE_SIDE_EFFECT_KEYS}
+
+
+def _guide_semantic_skill_block(
+    workspace: JobWorkspace,
+    *,
+    operation: str,
+    skill_id: str,
+) -> dict[str, Any] | None:
+    """Return a fail-closed guide result when the current Skill is not import-eligible."""
+
+    try:
+        skill = load_skill_snapshot(
+            workspace,
+            skill_id,
+            allowed=_GUIDE_ALLOWED_SKILLS_BY_OPERATION[operation],
+        )
+    except VepError as exc:
+        code = "SKILL_SNAPSHOT_STALE" if exc.code == "SKILL_EVAL_RESULT_INVALID" else exc.code
+        return {
+            "status": "integrity-error",
+            "next_operation": None,
+            "reason": f"{code}: current Skill eligibility could not be verified",
+            "command": None,
+            "side_effects": _guide_side_effects(),
+        }
+    if skill.lifecycle != "active":
+        return {
+            "status": "blocked",
+            "next_operation": None,
+            "reason": (
+                "DRAFT_SKILL_FORBIDDEN: current Skill "
+                f"{skill_id!r} is not active for production semantic preparation"
+            ),
+            "command": None,
+            "side_effects": _guide_side_effects(),
+        }
+    return None
 
 
 def _effective_status_state(status: dict[str, Any], stored: JobState) -> JobState:
@@ -3233,7 +3280,6 @@ def _guide_operation(
             "command": f"vep transcribe {quoted}",
             "side_effects": _guide_side_effects(
                 asr=primary is not PrimaryInputKind.TRANSCRIPT,
-                model_provision=primary is not PrimaryInputKind.TRANSCRIPT,
                 workspace_write=True,
             ),
         }
@@ -3259,13 +3305,22 @@ def _guide_operation(
         semantic = ("revision_prepare", "revise-from-audit", "vep revision prepare")
     if semantic is not None:
         operation, skill_id, command = semantic
+        blocked = _guide_semantic_skill_block(
+            workspace,
+            operation=operation,
+            skill_id=skill_id,
+        )
+        if blocked is not None:
+            return blocked
         return {
             "status": "ready",
             "next_operation": operation,
             "reason": "prepare the frozen semantic request before an independent AI exchange",
             "command": f"{command} {quoted}",
             "side_effects": _guide_side_effects(
-                external_api_possible=True,
+                external_api_possible=(
+                    status.get("authorization", {}).get("allow_external_api") is True
+                ),
                 workspace_write=True,
             ),
             **_guide_semantic_paths(
