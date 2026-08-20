@@ -50,11 +50,13 @@ VEPは実データをGitへ追加しません。workspaceはprivate local state�
 - 運用通知: action、期限、禁止事項、条件、例外を優先するnotice
 - 調査・レビュー: transcriptを一度取得し、assignmentを変えたchild jobで別のsummary／reportを作る
 
-## Minimal end-to-end quickstart
+## Minimal path to HUMAN_REVIEW_READY
 
 最短の確認経路は、認可済みのsupplied transcriptをprimary inputにする方法です。これならFFmpegやASRを先に用意せず、request → Skill → response schemaのsemantic exchangeから`HUMAN_REVIEW_READY`までを確認できます。
 
-以下のresponseファイルは、各`prepare`が表示するrequest、Skill、response schemaを読んだ認可済みのsemantic runnerが作成するものです。実動画やresponseをrepositoryへ置く必要はありません。
+ここでsemantic runnerとは、利用者が認可してVEPの外で動かすAI agentまたはlocal modelです。各`prepare --json`が返す`request_path`（固定入力）、`skill_path`（repository-owned手順）、`response_schema_path`（返却JSONの形）をそのrunnerへ渡し、得たJSONをrepository外の一時pathへ保存して`import`します。VEPは特定providerを暗黙起動しません。frozen Skillはprepare時の手順bytesとresource hashを固定したsnapshot、fingerprintはrequestとresponseの取り違えを検出するhashです。
+
+監査severityのP0は承認・exportを禁止する致命的finding、P1は解消が必要な重大findingです。以下は両方が0になって`HUMAN_REVIEW_READY`へ到達するまでの例であり、人間承認とexportはその後の別段階です。実動画やresponseをrepositoryへ置く必要はありません。
 
 ```bash
 # 1. Assignmentとsourceを固定する（sourceは認可済みのUTF-8 transcript）
@@ -114,6 +116,8 @@ uv run vep job guide "$WORKSPACE"
 uv run vep job status "$WORKSPACE"
 ```
 
+このcode blockはPOSIX shell表記です。PowerShellでは`$WORKSPACE = ".local/jobs/transcript-summary"`とし、行継続の`\\`をbacktickへ置き換えるか、各commandを1行で実行してください。後続の`"$WORKSPACE"`はそのまま使えます。
+
 `prepare`はsemantic runnerの入力を固定します。`import`は対応するrequest fingerprint、frozen Skill、response schema、evidence refs、要件対応、length gateをdeterministic executorが検証してからcanonical artifactを公開します。AIはresponseを提案するだけで、workspaceへ直接書きません。承認は別段階で、人間がreview packageのtarget SHAを確認して`vep approve`を実行します。
 
 別のAI agentへ「この動画を300字で」「このjobの続きを処理して」のように短く依頼する場合は、repository-owned [`run-video-evidence-job`](.agents/skills/run-video-evidence-job/SKILL.md) Skillを明示的に渡します。このOperator Skillは`vep job guide`から次のpublic operationを選び、semantic内容の規則はrefinement／evidence／author／audit／revisionの各frozen Skillへ委譲します。manifestやtransitionを直接編集する権限は与えません。
@@ -170,7 +174,14 @@ flowchart LR
 - supplied transcript primaryはFFmpegを起動せず、timestampがないsegmentへ時刻を補いません。
 - captionの不足区間だけをrepository-owned ASR workerへ渡します。未provision modelを暗黙downloadせず停止します。
 - transcriptの修正が必要なら、raw transcriptをimmutableにしたまま`vep refine prepare` → `vep refine import --response PATH`でrefined transcriptを別artifactとして作ります。
-- 同じsource／transcriptを別assignmentで使う場合は、親workspaceを変更せず`vep job recover PARENT CHILD --child-spec PATH --confirm ...`でchildを`TRANSCRIBED`から開始します。
+- 同じsource／transcriptを別assignmentで使う場合は、親workspaceを変更せず次のpublic operationでchildを`TRANSCRIBED`から開始します。child specは新job IDを持つ完全なjob YAMLです。
+
+  ```bash
+  uv run vep job recover .local/jobs/parent changed-assignment \
+    --child-spec /absolute/path/to/changed-assignment.yaml \
+    --confirm \
+    --basis "reuse the verified transcript under a changed assignment"
+  ```
 - どのstateで何をすべきかは、read-onlyの`vep job guide WORKSPACE`で確認できます。guideはartifactやrequestを生成しません。
 
 詳しいASR／model provisioningは[`ASR runtime operations`](docs/operations/asr-runtime.md)、recoveryとworkspace保護は[`CLI and local workspace operations`](docs/operations/cli-and-local-workspace.md)を参照してください。
