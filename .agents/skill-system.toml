@@ -10,6 +10,7 @@ allowed_side_effect_policies = ["read-only", "workspace-write", "repository-writ
 [[skills]]
 id = "repository-sot-audit"
 path = ".agents/skills/repository-sot-audit/SKILL.md"
+resources = []
 lifecycle = "active"
 automatic_trigger = false
 side_effect_policy = "read-only"
@@ -21,6 +22,7 @@ required_capabilities = ["filesystem-read", "command-execution"]
 [[skills]]
 id = "analyze-video-evidence"
 path = ".agents/skills/analyze-video-evidence/SKILL.md"
+resources = []
 lifecycle = "draft"
 automatic_trigger = false
 side_effect_policy = "instruction-only"
@@ -31,53 +33,76 @@ required_capabilities = ["evidence-bundle-read", "supporting-evidence-read"]
 [[skills]]
 id = "draft-video-report"
 path = ".agents/skills/draft-video-report/SKILL.md"
-lifecycle = "active"
+resources = []
+lifecycle = "draft"
 automatic_trigger = false
 side_effect_policy = "instruction-only"
 eval_path = ".agents/skill-evals/draft-video-report.toml"
-eval_result_path = ".agents/skill-eval-results/draft-video-report.toml"
 owner = "Xpotato1024"
 required_capabilities = ["validated-evidence-read"]
 
 [[skills]]
 id = "draft-video-summary"
 path = ".agents/skills/draft-video-summary/SKILL.md"
-lifecycle = "active"
+resources = []
+lifecycle = "draft"
 automatic_trigger = false
 side_effect_policy = "instruction-only"
 eval_path = ".agents/skill-evals/draft-video-summary.toml"
-eval_result_path = ".agents/skill-eval-results/draft-video-summary.toml"
 owner = "Xpotato1024"
 required_capabilities = ["validated-evidence-read"]
 
 [[skills]]
 id = "independent-content-audit"
 path = ".agents/skills/independent-content-audit/SKILL.md"
-lifecycle = "active"
+resources = []
+lifecycle = "draft"
 automatic_trigger = false
 side_effect_policy = "instruction-only"
 eval_path = ".agents/skill-evals/independent-content-audit.toml"
-eval_result_path = ".agents/skill-eval-results/independent-content-audit.toml"
 owner = "Xpotato1024"
 required_capabilities = ["fresh-context", "audit-bundle-read"]
 
 [[skills]]
 id = "revise-from-audit"
 path = ".agents/skills/revise-from-audit/SKILL.md"
-lifecycle = "active"
+resources = []
+lifecycle = "draft"
 automatic_trigger = false
 side_effect_policy = "instruction-only"
 eval_path = ".agents/skill-evals/revise-from-audit.toml"
-eval_result_path = ".agents/skill-eval-results/revise-from-audit.toml"
 owner = "Xpotato1024"
 required_capabilities = ["validated-evidence-read", "audit-findings-read"]
 
 [[skills]]
 id = "prepare-human-review"
 path = ".agents/skills/prepare-human-review/SKILL.md"
+resources = []
 lifecycle = "draft"
 automatic_trigger = false
 side_effect_policy = "instruction-only"
 eval_path = ".agents/skill-evals/prepare-human-review.toml"
 owner = "Xpotato1024"
 required_capabilities = ["draft-read", "audit-read"]
+
+[[skills]]
+id = "refine-video-transcript"
+path = ".agents/skills/refine-video-transcript/SKILL.md"
+resources = []
+lifecycle = "draft"
+automatic_trigger = false
+side_effect_policy = "instruction-only"
+eval_path = ".agents/skill-evals/refine-video-transcript.toml"
+owner = "Xpotato1024"
+required_capabilities = ["transcript-read", "supporting-evidence-read"]
+
+[[skills]]
+id = "run-video-evidence-job"
+path = ".agents/skills/run-video-evidence-job/SKILL.md"
+resources = []
+lifecycle = "draft"
+automatic_trigger = false
+side_effect_policy = "instruction-only"
+eval_path = ".agents/skill-evals/run-video-evidence-job.toml"
+owner = "Xpotato1024"
+required_capabilities = ["filesystem-read", "command-execution"]

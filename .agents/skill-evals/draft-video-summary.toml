@@ -3,27 +3,144 @@ skill_id = "draft-video-summary"
 minimum_score = 9
 
 [[cases]]
-id = "purpose-summary"
-prompt = "専門外読者向け500字要約を作る。"
-expected = ["目的に応じたcoverage"]
-forbidden = ["新しい評価を追加"]
+id = "central-thesis-after-chat"
+prompt = "300字一般向け。sourceは長い挨拶・雑談の後、一度だけ『学習成果を左右するのは復習間隔の設計だ』と述べる。"
+expected = ["短いcentral thesisを主軸", "雑談をomit"]
+forbidden = ["発言時間比例のcoverage"]
 criteria = [
-  { id = "purpose-bounded-summary", description = "目的、長さ、読者へ要約を合わせる" },
-  { id = "claim-evidence-binding", description = "要約のclaimをevidenceへ束縛する" },
-  { id = "coverage-map", description = "requirementまたはtopic coverageを示す" },
-  { id = "exceptions-preserved", description = "重要な例外、条件、結論を保持する" },
-  { id = "no-new-evaluation", description = "evidence外の評価を加えない" },
+  { id = "thesis-preserved", description = "central thesisを要約の主軸として保持する" },
+  { id = "chat-omitted", description = "長い雑談を省略する" },
+  { id = "assignment-fit", description = "一般向け300字へ適合する" },
+  { id = "evidence-bound", description = "material claimをsource evidenceへ束縛する" },
+  { id = "not-chronological", description = "transcript順の逐次圧縮をしない" },
+]
+
+[[cases]]
+id = "safety-after-examples"
+prompt = "研修要約。長い成功例の後、一度だけ『装置停止前に必ず主電源を切る』と指示される。"
+expected = ["safety instruction保持", "examplesを圧縮"]
+forbidden = ["例だけで文字数を使う"]
+criteria = [
+  { id = "safety-preserved", description = "一度だけのsafety instructionを保持する" },
+  { id = "examples-downweighted", description = "長いexamplesを必要最小限にする" },
+  { id = "imperative-preserved", description = "必須性を弱めない" },
+  { id = "no-new-safety", description = "sourceにない安全要件を追加しない" },
+  { id = "operational-salience", description = "研修利用の行動salienceへ合わせる" },
+]
+
+[[cases]]
+id = "deduplicate-five-examples"
+prompt = "同じ原則を示す類似exampleが5件ある。200字で全体要約する。"
+expected = ["原則を優先", "代表例は最大限必要な分だけ"]
+forbidden = ["5例を列挙"]
+criteria = [
+  { id = "principle-selected", description = "examples共通のsource-backed principleを選ぶ" },
+  { id = "no-example-list", description = "同種5件を列挙しない" },
+  { id = "representative-only-if-useful", description = "理解に役立つ場合だけ代表例を残す" },
+  { id = "no-generalization-overreach", description = "例の範囲を越えた一般化をしない" },
+  { id = "nonredundant", description = "内容重複を除く" },
+]
+
+[[cases]]
+id = "assignment-general-focus"
+prompt = "同一evidence: central principle、3 examples、翌週の演習action。purpose=内容全体の要点把握。300字。"
+expected = ["central principle中心", "examples/actionは従属"]
+forbidden = ["全unit均等coverage"]
+criteria = [
+  { id = "purpose-read", description = "全体把握purposeをselectionへ反映する" },
+  { id = "core-selected", description = "central principleをcore unitとして選ぶ" },
+  { id = "supporting-bounded", description = "exampleとactionを必要な範囲へ限定する" },
+  { id = "omission-rationale", description = "省略理由をpurposeへ結び付ける" },
+  { id = "evidence-faithful", description = "unsupported claimを加えない" },
+]
+
+[[cases]]
+id = "assignment-example-focus"
+prompt = "同一evidence: central principle、3 examples、翌週の演習action。purpose=授業で使える具体例を比較。300字。"
+expected = ["examplesの相違を中心", "principleは理解に必要な範囲"]
+forbidden = ["一般要約と同じselection"]
+criteria = [
+  { id = "purpose-changes-selection", description = "example-focused purposeに応じてselectionを変える" },
+  { id = "examples-compared", description = "source-backed examplesの有用な相違を保持する" },
+  { id = "principle-contextual", description = "principleを比較理解に必要な範囲で残す" },
+  { id = "action-not-dominant", description = "非中心のactionで文字数を消費しない" },
+  { id = "no-example-invention", description = "sourceにない例を作らない" },
+]
+
+[[cases]]
+id = "operational-notice"
+prompt = "管理notice。長い背景説明の後、『9月12日までに申請』『個人端末へ保存禁止』『責任者へ連絡』。purpose=対象者が行動する。"
+expected = ["action/deadline/prohibition保持", "背景を圧縮"]
+forbidden = ["背景中心のtopic inventory"]
+criteria = [
+  { id = "action-preserved", description = "必要なactionを保持する" },
+  { id = "deadline-preserved", description = "exact deadlineを保持する" },
+  { id = "prohibition-preserved", description = "prohibitionを弱めず保持する" },
+  { id = "background-compressed", description = "長い背景をcoreより低く扱う" },
+  { id = "contact-preserved-if-actionable", description = "行動に必要なcontact directionを保持する" },
+]
+
+[[cases]]
+id = "late-conclusion"
+prompt = "講義末尾の一文だけが『したがって評価は速さでなく再現性を基準にすべきだ』と結論づける。前半は長い歴史。"
+expected = ["late conclusion保持", "歴史をsupportingへ"]
+forbidden = ["duration比例で結論を落とす"]
+criteria = [
+  { id = "conclusion-selected", description = "短く最後に述べられたcentral conclusionを選ぶ" },
+  { id = "rationale-selected", description = "結論理解に必要なcentral rationaleを残す" },
+  { id = "history-bounded", description = "長い歴史を必要以上に紹介しない" },
+  { id = "hierarchy-clear", description = "結論とsupporting contextの階層を明確にする" },
+  { id = "no-position-shift", description = "評価基準の意味を変えない" },
+]
+
+[[cases]]
+id = "useful-concrete-anchor"
+prompt = "技術説明。central resultは『誤差を37%削減』、多数のmethod detailがある。purpose=意思決定者向け短文。"
+expected = ["37%を保持", "resultとconstraintを優先"]
+forbidden = ["genericな改善だけにする"]
+criteria = [
+  { id = "useful-number-preserved", description = "core resultを識別するexact 37%を保持する" },
+  { id = "number-evidence-bound", description = "37%をsource evidenceへ束縛する" },
+  { id = "result-first", description = "decision purposeに合わせresultを優先する" },
+  { id = "method-detail-bounded", description = "多数のmethod detailを絞る" },
+  { id = "no-extra-precision", description = "sourceにない数字や精度を追加しない" },
+]
+
+[[cases]]
+id = "irrelevant-number-stuffing"
+prompt = "sourceに部屋番号12、例題番号47、雑談の年齢31、中心原則、deadline 9月12日がある。purpose=申請action案内。"
+expected = ["deadlineを保持", "無関係な数字をomit"]
+forbidden = ["数字を具体性として列挙"]
+criteria = [
+  { id = "deadline-selected", description = "purposeに有用なdeadlineだけをanchorとして選ぶ" },
+  { id = "room-number-omitted", description = "無関係な部屋番号を省略する" },
+  { id = "exercise-number-omitted", description = "無関係な例題番号を省略する" },
+  { id = "age-omitted", description = "雑談の年齢を省略する" },
+  { id = "no-number-heuristic", description = "数字であること自体をsalienceにしない" },
+]
+
+[[cases]]
+id = "meeting-specificity"
+prompt = "会議: Option B採用を決定。佐藤がmigration scriptを9月12日までに更新。理由はrollback可能性。監視閾値は5%。owner不明の文書更新は未解決。議事録を作る。"
+expected = ["decision/action/owner/due/open question/rationale", "5%を必要な文脈で保持"]
+forbidden = ["未解決文書のownerを捏造"]
+criteria = [
+  { id = "decision-specific", description = "Option Bのdecisionを具体的に保持する" },
+  { id = "action-owner-due", description = "migration action、佐藤、9月12日を結び付ける" },
+  { id = "rationale-preserved", description = "rollback可能性というkey rationaleを保持する" },
+  { id = "open-question-preserved", description = "owner不明の文書更新をunresolvedとして残す" },
+  { id = "no-missing-value-invention", description = "sourceにないownerやdeadlineを補完しない" },
 ]
 
 [[cases]]
 id = "undefined-purpose"
-prompt = "読者と長さが未定義。"
-expected = ["停止または要件不足を報告"]
-forbidden = ["任意仕様を創作"]
+prompt = "長さも目的もない依頼『いい感じにまとめて』にfrozen requestが作られている。"
+expected = ["不足を報告して停止"]
+forbidden = ["任意の目的や長さを創作"]
 criteria = [
-  { id = "missing-purpose-detected", description = "目的または読者不足を検出する" },
-  { id = "missing-length-detected", description = "長さ不足を検出する" },
-  { id = "stop-or-report", description = "停止または要件不足として報告する" },
-  { id = "no-arbitrary-specification", description = "任意の読者、長さ、目的を作らない" },
-  { id = "no-invented-opinion", description = "ユーザー意見を生成しない" },
+  { id = "missing-purpose", description = "purpose不足を検出する" },
+  { id = "missing-length", description = "length不足を検出する" },
+  { id = "stop", description = "summary生成を停止する" },
+  { id = "no-arbitrary-audience", description = "audienceを勝手に決めない" },
+  { id = "no-output-fabrication", description = "不足したcontractで完成draftを返さない" },
 ]

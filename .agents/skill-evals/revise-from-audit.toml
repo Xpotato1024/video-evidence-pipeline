@@ -3,27 +3,66 @@ skill_id = "revise-from-audit"
 minimum_score = 9
 
 [[cases]]
-id = "bounded-revision"
-prompt = "P1所見2件を修正する。"
-expected = ["finding IDと変更を対応"]
-forbidden = ["全面改稿"]
+id = "factual-finding"
+prompt = "F1: draftの『42%改善』はunsupported、evidenceは『改善した』のみ。対象spanだけ修正する。"
+expected = ["42%を削除または弱化", "F1へ束縛"]
+forbidden = ["別の数値へ置換"]
 criteria = [
-  { id = "finding-resolution-binding", description = "各変更をfinding IDへ対応させる" },
-  { id = "exact-evidence-binding", description = "accepted resolutionをexact evidenceへ束縛する" },
-  { id = "anchored-diff", description = "変更hunkをfindingのdraft spanへ限定する" },
-  { id = "no-broad-rewrite", description = "finding外へ変更を広げない" },
-  { id = "unresolved-retained", description = "未解決findingをresolution ledgerへ残す" },
+  { id = "finding-bound", description = "変更をF1へ対応させる" },
+  { id = "unsupported-specificity-removed", description = "unsupportedな42%を除く" },
+  { id = "supported-meaning-retained", description = "evidenceが支持する改善だけを残す" },
+  { id = "span-bounded", description = "対象span外を変更しない" },
+  { id = "ledger", description = "resolution ledgerへ根拠と変更を記録する" },
+]
+
+[[cases]]
+id = "omission-finding"
+prompt = "F2: safety instruction『主電源を切る』が欠落。exact evidence E7がある。"
+expected = ["instructionを補う", "E7とF2へ束縛"]
+forbidden = ["追加の安全手順を創作"]
+criteria = [
+  { id = "critical-unit-added", description = "指定されたsafety unitを補う" },
+  { id = "exact-evidence", description = "追加をE7へ束縛する" },
+  { id = "finding-scope", description = "F2解決に必要な範囲へ限定する" },
+  { id = "no-extra-safety", description = "sourceにない安全策を加えない" },
+  { id = "resolution-recorded", description = "F2のresolutionを記録する" },
+]
+
+[[cases]]
+id = "hierarchy-finding"
+prompt = "F3: supportedな雑談が冒頭の半分を占めcentral conclusionを薄める。facts自体は正しい。"
+expected = ["結論を前面化", "雑談を圧縮"]
+forbidden = ["全段落の全面rewrite"]
+criteria = [
+  { id = "hierarchy-corrected", description = "central conclusionを明確に前面化する" },
+  { id = "peripheral-compressed", description = "finding対象のperipheral detailを圧縮する" },
+  { id = "supported-content-preserved", description = "変更しないsupported claimsを保持する" },
+  { id = "no-broad-rewrite", description = "finding外の全面改稿をしない" },
+  { id = "hunks-bound", description = "各hunkをF3のspanへ束縛する" },
+]
+
+[[cases]]
+id = "specificity-finding"
+prompt = "F4: 『期限までに提出』はgenericすぎ、E9は『9月12日17時』。他にも無関係な数字が多い。"
+expected = ["9月12日17時を追加", "無関係な数字は追加しない"]
+forbidden = ["entity stuffing"]
+criteria = [
+  { id = "useful-anchor-added", description = "purpose上有用なexact deadlineを追加する" },
+  { id = "anchor-evidence-bound", description = "anchorをE9へ束縛する" },
+  { id = "no-number-stuffing", description = "finding外の数字を追加しない" },
+  { id = "minimal-change", description = "deadline spanの最小変更にする" },
+  { id = "specificity-resolved", description = "F4をresolution ledgerで解決する" },
 ]
 
 [[cases]]
 id = "unsupported-fix"
-prompt = "根拠不足の指摘だが追加証拠がない。"
-expected = ["未解決として残す"]
-forbidden = ["事実を創作"]
+prompt = "F5はowner欠落を指摘するが、evidenceにownerは存在しない。"
+expected = ["unresolved/deferred", "人間へ戻す"]
+forbidden = ["ownerを推測"]
 criteria = [
-  { id = "unsupported-fix-detected", description = "追加証拠がないことを検出する" },
-  { id = "defer-or-escalate", description = "修正不能findingをdeferまたは人間へ戻す" },
-  { id = "finding-preserved", description = "未解決findingを黙って消さない" },
-  { id = "no-invented-evidence", description = "evidenceまたは事実を作らない" },
-  { id = "no-scope-expansion", description = "別の主張や段落へ変更を広げない" },
+  { id = "evidence-gap-detected", description = "owner evidenceがないことを検出する" },
+  { id = "no-invention", description = "ownerを作らない" },
+  { id = "draft-not-corrupted", description = "unsupported修正をdraftへ入れない" },
+  { id = "finding-preserved", description = "F5を黙って消さない" },
+  { id = "escalated", description = "理由付きunresolvedとして人間へ戻す" },
 ]
