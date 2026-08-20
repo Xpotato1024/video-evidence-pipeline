@@ -12,7 +12,7 @@ from typing import Any, Protocol
 from video_evidence_pipeline.domain.hashing import sha256_bytes
 from video_evidence_pipeline.domain.semantic import SkillResourceSnapshot, SkillSnapshot
 from video_evidence_pipeline.domain.serialization import fingerprint
-from video_evidence_pipeline.errors import integrity_error, state_error
+from video_evidence_pipeline.errors import VepError, integrity_error, state_error
 
 MAXIMUM_SKILL_FILE_BYTES = 1024 * 1024
 MAXIMUM_RESOURCE_FILE_BYTES = 4 * 1024 * 1024
@@ -319,7 +319,15 @@ def validate_import_skill(
 ) -> None:
     """Require a frozen request Skill to remain the current active Skill."""
 
-    current = load_skill_snapshot(workspace, skill.skill_id, allowed=allowed)
+    try:
+        current = load_skill_snapshot(workspace, skill.skill_id, allowed=allowed)
+    except VepError as exc:
+        if exc.code != "SKILL_EVAL_RESULT_INVALID":
+            raise
+        raise integrity_error(
+            "SKILL_SNAPSHOT_STALE",
+            "current Skill content, resources, evaluation, or identity differs from the request snapshot",
+        ) from exc
     if not same_skill_snapshot_except_lifecycle(skill, current):
         raise integrity_error(
             "SKILL_SNAPSHOT_STALE",
