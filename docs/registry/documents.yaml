@@ -191,6 +191,15 @@ documents:
   owners:
   - Xpotato1024
   metadata_mode: registry-only
+- document_id: VEP-CONCEPT-SEMANTIC-QUALITY
+  path: docs/concepts/semantic-quality.md
+  document_type: concept
+  status: active
+  canonical: true
+  canonical_for: semantic-quality-principles
+  owners:
+  - Xpotato1024
+  metadata_mode: front-matter
 - document_id: VEP-DOC-REGISTRY
   path: docs/registry/documents.yaml
   document_type: document-registry
@@ -254,12 +263,30 @@ documents:
   owners:
   - Xpotato1024
   metadata_mode: front-matter
+- document_id: VEP-GUIDE-GETTING-STARTED
+  path: docs/getting-started.md
+  document_type: guide
+  status: active
+  canonical: true
+  canonical_for: getting-started
+  owners:
+  - Xpotato1024
+  metadata_mode: front-matter
 - document_id: VEP-OPS-ASR
   path: docs/operations/asr-runtime.md
   document_type: operations
   status: active
   canonical: true
   canonical_for: asr-runtime-operations
+  owners:
+  - Xpotato1024
+  metadata_mode: front-matter
+- document_id: VEP-OPS-AI-EXCHANGE
+  path: docs/operations/ai-exchange.md
+  document_type: operations
+  status: active
+  canonical: true
+  canonical_for: ai-exchange-operations
   owners:
   - Xpotato1024
   metadata_mode: front-matter

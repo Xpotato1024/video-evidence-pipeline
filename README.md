@@ -1,201 +1,216 @@
 # Video Evidence Pipeline
 
-認可済み動画を取得・正規化し、検証可能な証拠層を構築したうえで、レポート・要約等の生成、
-独立監査、修正、人間承認、最終出力までを扱うローカル中心のパイプラインです。
+認可済みの動画・音声・文字起こしを、根拠と監査結果が結び付いた成果物へ変換する、local-firstの証拠パイプラインです。
 
-> [!IMPORTANT]
-> 現在実装済みなのは、core domain contracts、local workspace、`vep` CLI、明示authorization、
-> `local_file`／`direct_http`／`generic_ytdlp`／`panopto`／`box`による
-> acquisition、video／audio／supplied transcript input、system FFmpeg／ffprobeによるmedia normalization、caption-first transcription、
-> provider-neutralなevidence／authoring／independent-audit／revision prepare／import、private SQLite FTS5
-> search、人間確認package、明示的人間approval、byte-exact Markdown exportです。直線経路は
-> `CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → TRANSCRIPT_REFINED → EVIDENCE_READY → DRAFTED → AUDITED → HUMAN_REVIEW_READY → HUMAN_APPROVED → EXPORTED`、
-> material findingがある経路は最大2回の`REVISION_REQUIRED → DRAFTED → AUDITED`を経て、未解消なら
-> `BLOCKED`です。既存v1 video jobは`TRANSCRIBED → EVIDENCE_READY`を維持します。DOCX／PDF／HTML exportは未実装です。
+VEPの出力は「AIが書いた文章」だけではありません。source、transcript、evidence、要件、監査、承認の関係を保存したprivate workspaceから、human reviewへ渡せるMarkdownを生成します。
 
-## Quickstart
+## What can I do?
 
-### Pinned FFmpeg/ffprobe (Windows)
+- 認可済みのlocal／network sourceを取得し、raw sourceをimmutableに保つ
+- video、audio、supplied transcriptからraw transcriptを作る
+- captionを優先し、不足区間だけをboundedなASRへ渡す
+- timestamp・frame・supporting inputに結び付いたatomic evidenceとambiguity ledgerを作る
+- purpose／audience／requirementsに合わせてsummary、report、meeting-style outputを作る
+- authorとは別のfresh contextで監査し、findingに限定したrevisionを最大2回行う
+- 人間がreview packageを確認し、明示的にapprovalしたMarkdownをexportする
 
-Media normalization requires both `ffmpeg` and `ffprobe`. Install the pinned
-Windows build and verify its archive and executable SHA-256 values with:
+## Inputs, outputs, and boundaries
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_ffmpeg.ps1
-```
+### Inputs
 
-The version, download URL, archive hash, executable hashes, and the
-`VEP_FFMPEG_BIN_DIR` selection are maintained in
-[`tools/ffmpeg-toolchain.json`](tools/ffmpeg-toolchain.json). Use
-`-VerifyOnly` to re-check an existing installation without downloading or
-changing user environment variables. The installer sets
-`VEP_FFMPEG_BIN_DIR` by default; pass `-AddToUserPath` only when command-line
-`ffmpeg`／`ffprobe` access through User PATH is required.
+| 種類 | 例 | 契約 |
+| --- | --- | --- |
+| Primary input | `video`、`audio`、`transcript` | 1ジョブにつき1つ。supplied transcriptならmedia decodeを省略できる |
+| Supporting input | local `pdf`、`image`、`notes` | assignmentの根拠として明示されたものだけ |
+| Assignment | task type、language、requirements、`--purpose`、`--audience`、length | semantic selectionのsource。promptだけを正本にしない |
+| Authorization | local processing、network acquisition、external APIの明示許可 | 未確認の権限やcredentialを推測しない |
 
-Python 3.12と`uv`を用意し、認可済みのlocal sourceに対して次を実行します。
+### Outputs
+
+- immutable source／media／transcript manifests
+- source refsに結び付いたevidence、ambiguity、private search cache
+- draft、独立audit、bounded revision、human-review package
+- 人間承認後のbyte-exact Markdown export
+
+VEPは実データをGitへ追加しません。workspaceはprivate local stateであり、Cookie、token、署名付きURL、実動画、音声、字幕、transcript、evidence response、ユーザー成果物をcommitしないでください。
+
+### Non-goals and unsupported boundaries
+
+- 利用権限のないsourceの取得、provider制限・DRM・access controlの回避
+- playlist／folderの一括取得や任意のyt-dlp引数による契約外操作
+- AI／Skillによるcanonical workspace、manifest、transition、approval recordの直接編集
+- sourceにないowner、deadline、number、引用、事実の推測
+- AIによるhuman approvalの代行、またはP0／P1 findingの隠蔽
+- 現時点のDOCX／PDF／HTML export
+
+## Typical use cases
+
+- 講義・研修: 要件に沿った短いsummaryや根拠付きreport
+- 会議: decision、action item、owner、deadline、unresolved questionをsourceにある範囲で整理
+- 運用通知: action、期限、禁止事項、条件、例外を優先するnotice
+- 調査・レビュー: transcriptを一度取得し、assignmentを変えたchild jobで別のsummary／reportを作る
+
+## Minimal end-to-end quickstart
+
+最短の確認経路は、認可済みのsupplied transcriptをprimary inputにする方法です。これならFFmpegやASRを先に用意せず、request → Skill → response schemaのsemantic exchangeから`HUMAN_REVIEW_READY`までを確認できます。
+
+以下のresponseファイルは、各`prepare`が表示するrequest、Skill、response schemaを読んだ認可済みのsemantic runnerが作成するものです。実動画やresponseをrepositoryへ置く必要はありません。
 
 ```bash
-uv sync --locked
-uv run vep job init demo-report \
+# 1. Assignmentとsourceを固定する（sourceは認可済みのUTF-8 transcript）
+uv run vep job init transcript-summary \
   --source-kind local_file \
-  --source /path/to/authorized-source.mp4 \
-  --primary-input video \
-  --task-type report \
+  --source /absolute/path/to/authorized-transcript.txt \
+  --primary-input transcript \
+  --task-type summary \
   --language ja \
-  --requirement "cite two concrete observations" \
-  --requirement "separate facts from inference" \
+  --purpose "講義の中心命題と受講者が復習すべき条件を確認する" \
+  --audience "初学者" \
+  --requirement "中心命題を保持する" \
+  --requirement "sourceにある具体的な条件を必要な範囲で示す" \
   --max-chars 300 \
   --output-format markdown
-uv run vep job validate .local/jobs/demo-report
-uv run vep job authorize .local/jobs/demo-report \
+
+WORKSPACE=.local/jobs/transcript-summary
+
+# 2. 認可とtranscript boundaryまで進める
+uv run vep job authorize "$WORKSPACE" \
   --confirm \
-  --basis "authorized course material" \
+  --basis "authorized local transcript" \
   --allow-local-processing \
   --deny-external-api
-uv run vep acquire .local/jobs/demo-report
-uv run vep normalize .local/jobs/demo-report
-# ASRが必要な場合: build contract変更時はimageを再buildし、同じmodel revisionは再利用する
-uv run vep asr image-build --profile whisper-large-v3
-uv run vep asr model-provision --profile whisper-large-v3
-uv run vep transcribe .local/jobs/demo-report --preferred-language ja \
-  --asr-profile whisper-large-v3 --asr-device auto
-uv run vep refine prepare .local/jobs/demo-report
-# refinement/request.jsonを固定入力として、認可済みresponse.jsonを別途用意する
-uv run vep refine import .local/jobs/demo-report --response /path/to/refinement-response.json
-uv run vep evidence prepare .local/jobs/demo-report
-# evidence/request.jsonを固定入力として、認可済みのprovider-neutralなresponse.jsonを別途用意する
-uv run vep evidence import .local/jobs/demo-report --response /path/to/response.json
-uv run vep index build .local/jobs/demo-report
-uv run vep search .local/jobs/demo-report "検索語" --limit 20
-# byte-level integrity investigationが必要な場合だけ大容量artifactも再hashする
-uv run vep job validate .local/jobs/demo-report --deep
-# author／audit（必要ならrevision）のvalidated exchange後、表示されたtarget SHAを人間が確認する
-uv run vep approve .local/jobs/demo-report \
-  --approval-target-sha256 <reviewed-draft-sha256> \
-  --reviewer "local-reviewer" \
-  --basis "reviewed the human-review package" \
-  --confirm
-uv run vep export .local/jobs/demo-report
-uv run vep job status .local/jobs/demo-report
+uv run vep acquire "$WORKSPACE"
+uv run vep normalize "$WORKSPACE"       # transcript primary: FFmpegなし
+uv run vep transcribe "$WORKSPACE"      # supplied transcript: ASRなし
+
+# 3. Transcript refinement exchange: raw transcriptを保持したままsemantic correctionを分離する
+uv run vep refine prepare "$WORKSPACE" --json
+# 表示されたrequest_path + skill_path + response_schema_pathをsemantic runnerへ渡す
+uv run vep refine import "$WORKSPACE" \
+  --response /absolute/path/to/refinement-response.json
+
+# 4. Evidence exchange: 同じ3-path contractでatomic evidenceを作る
+uv run vep evidence prepare "$WORKSPACE" --json
+# 表示された3つのpathをsemantic runnerへ渡す
+uv run vep evidence import "$WORKSPACE" \
+  --response /absolute/path/to/evidence-response.json
+uv run vep index build "$WORKSPACE"
+
+# 5. Author exchange: request_path + skill_path + response_schema_pathを渡してimportする
+uv run vep author prepare "$WORKSPACE" \
+  --skill draft-video-summary --json
+# 3つのpathをsemantic runnerへ渡し、schemaに適合するresponseを受け取る
+uv run vep author import "$WORKSPACE" \
+  --response /absolute/path/to/author-response.json
+
+# 6. Fresh audit exchange: authorと異なるcontextで同じ3つのpathを渡す
+uv run vep audit prepare "$WORKSPACE" \
+  --skill independent-content-audit --json
+uv run vep audit import "$WORKSPACE" \
+  --response /absolute/path/to/audit-response.json
+
+# P0/P1が0件なら次状態は HUMAN_REVIEW_READY
+uv run vep job guide "$WORKSPACE"
+uv run vep job status "$WORKSPACE"
 ```
 
-`job init`だけでは未認可です。`job authorize --confirm`が成功するまでsourceを取得しません。
-`--requirement`は順序を保持するrepeatable optionで、指定順を含めてjob fingerprintへ拘束されます。
-`--min-chars`／`--max-chars`はmachine-readableなassignment constraintです。maxだけなら
-`ceil(max × 0.8)`をeffective minにし、Pythonのcanonical counterが各draft／revision／review／export境界で検証します。
-raw sourceは`.local/`配下へcontent-addressedに保存され、上書きされません。
-ASR engine／runtime／model／revision／device policyは[`config/asr-profiles.yaml`](config/asr-profiles.yaml)が正本です。
-host pipelineがcaption selectionとgap計算を所有し、不足区間だけをtyped ASR worker containerへ渡します。
-containerへcanonical job workspaceはmountせず、exact audioと`.local/models`のprovision済みmodelだけをread-onlyで
-渡し、`--network none`で実行します。captionが十分ならDockerもmodelも不要です。不足区間でmodelが未provisionなら
-暗黙downloadせず停止します。外部APIを使った
-evidence responseのimportにはjobの`allow_external_api`認可が必要です。
-新規CLI jobは`--primary-input`を省略してもmodern videoとして作成されます。
-`--primary-input video|audio|transcript`と、必要な場合だけrepeatableな
-`--supporting-input pdf:PATH|image:PATH|notes:PATH`を指定できます。新input宣言を持つjobはtranscribe後に
-`vep refine prepare`／`vep refine import`を実行し、raw transcriptとrefined transcriptを分離します。
-authoring／audit／revisionの`external_exchange` public production importは、対応するrepository-local Skillが
-`active`になっている場合だけ利用できます。現行のactive Skillは`draft-video-report`、`draft-video-summary`、
-`independent-content-audit`、`revise-from-audit`で、いずれも明示選択専用（`automatic_trigger = false`）かつ
-`instruction-only`です。`analyze-video-evidence`と`prepare-human-review`はdraftのままで、このproduction
-routeには使用しません。allowlist内のSkillがdraftならimportは`DRAFT_SKILL_FORBIDDEN`でfail closedします。
-synthetic fixture実行は内部test routeだけです。
-`vep approve`はAI／Skill実行ではなく、対象SHA、reviewer、basis、`--confirm`を明示する人間操作です。
-reviewer identityはlocal CLIの自己申告lineageであり、暗号学的な本人確認ではありません。
+`prepare`はsemantic runnerの入力を固定します。`import`は対応するrequest fingerprint、frozen Skill、response schema、evidence refs、要件対応、length gateをdeterministic executorが検証してからcanonical artifactを公開します。AIはresponseを提案するだけで、workspaceへ直接書きません。承認は別段階で、人間がreview packageのtarget SHAを確認して`vep approve`を実行します。
 
-## Transcript-boundary recovery
+## How it works
 
-`vep job recover` accepts a readable parent with verified source, normalization,
-raw-transcript, and supporting-input artifacts. This includes successful jobs from
-`TRANSCRIBED` through `EXPORTED`, plus `BLOCKED` jobs that previously reached the
-transcript boundary. Pre-transcript parents are rejected. Recovery does not require a
-finding category, an old draft/audit fingerprint, or any other semantic history to match.
-
-```bash
-uv run vep job recover .local/jobs/completed-report changed-assignment-report \
-  --child-spec /path/to/repaired-job.yaml \
-  --confirm \
-  --basis "rerun the verified transcript under a changed assignment"
+```mermaid
+flowchart LR
+    A[Explicit authorization] --> B[Acquire immutable source]
+    B --> C[Normalize media or accept supplied transcript]
+    C --> D[Caption-first transcript / gap-bounded ASR]
+    D --> E[Bounded transcript refinement]
+    E --> F[Evidence + ambiguity ledger]
+    F --> G[Salience selection + draft]
+    G --> H[Independent audit]
+    H -->|P0/P1 found| I[Bounded revision]
+    I --> H
+    H -->|P0=0 and P1=0| J[HUMAN_REVIEW_READY]
+    J --> K[Human approval]
+    K --> L[Markdown export]
 ```
 
-The parent workspace remains untouched. The child has a new job-bound authorization
-record with the same permission flags. `--child-spec` may replace assignment and output
-constraints while source／primary／supporting input identity must match. Recovery reuses only
-source/normalization/transcript and declared supporting-input artifacts, starts at `TRANSCRIBED`,
-and records both assignment fingerprints. Run refinement,
-evidence, authoring, and audit again as fresh child work. Existing network acquisition
-evidence (including Box) is rebound and verified locally; recovery never re-acquires it.
-See [CLI and local workspace operations](docs/operations/cli-and-local-workspace.md) and
-[ASR runtime operations](docs/operations/asr-runtime.md).
+主な状態は次の順序で進みます。
 
-## Supported sources
+`CREATED → AUTHORIZED → ACQUIRED → NORMALIZED → TRANSCRIBED → TRANSCRIPT_REFINED → EVIDENCE_READY → DRAFTED → AUDITED → HUMAN_REVIEW_READY → HUMAN_APPROVED → EXPORTED`
 
-The matrix below describes the current VEP source contract. `Supported` means
-the source has a bounded VEP adapter; `Partial/site-dependent` means that
-provider or extractor behavior can still limit acquisition.
+material findingが残る場合は`REVISION_REQUIRED → DRAFTED → AUDITED`を最大2回行い、解消しなければ`BLOCKED`で停止します。既存v1 video jobは互換性のため`TRANSCRIBED → EVIDENCE_READY`を維持します。
 
-| Source | source-kind | Input form | Status | Authentication | Backend | Limitations |
-|---|---|---|---|---|---|---|
-| Local file | `local_file` | Local filesystem path | Supported | Local processing authorization | Local immutable copy | The caller must have access to the local file. |
-| Direct HTTPS media | `direct_http` | HTTPS direct media URL | Supported | Local processing and network acquisition authorization | Pinned HTTPX transport | HTTPS direct media only. |
-| YouTube | `generic_ytdlp` | YouTube URL | Partial/site-dependent | Optional explicit browser cookies | Hardened yt-dlp | Current yt-dlp behavior applies. PO Token and other cases outside the VEP contract are not guaranteed. |
-| Other yt-dlp-supported services | `generic_ytdlp` | One service URL | Partial/site-dependent | Explicit browser cookies only where the existing policy allows them | Hardened yt-dlp | No playlists or arbitrary arguments; the contract is one progressive A/V source. |
-| Panopto | `panopto` | Viewer URL or canonical session locator | Supported | Official REST token first; explicit browser-cookie yt-dlp fallback only under the existing policy | Panopto REST with constrained yt-dlp fallback | Tenant policy, download prohibition, and DRM remain fail-closed. |
-| Box file ID/file URL | `box` | Numeric ID, `box://file/<id>`, `https://app.box.com/files/<id>`, or `https://app.box.com/file/<id>` | Supported | Official Box API token via `--box-token-env` | Box Files metadata/content API | File-level acquisition only. |
-| Box shared link | `box` | `https://app.box.com/s/<token>` or `https://www.box.com/s/<token>` | Supported | Official Box API token via `--box-token-env` | Box `shared_items` plus Files API | The shared item must resolve to a file; shared-link passwords are unsupported. |
-| Box Enterprise shared link | `box` | `https://<enterprise>.ent.box.com/s/<token>` | Supported | Official Box API token via `--box-token-env` | Box `shared_items` plus Files API | Uses official shared-item resolution; no EntBox adapter/source kind is introduced. |
-| Box folder shared link | `box` | Box folder shared link | Unsupported | — | — | Folder download is not a video acquisition contract. |
-| DRM/access-control bypass | — | — | Unsupported | — | — | VEP does not bypass provider restrictions. |
+### Trust boundary: deterministic executor vs semantic AI
 
-Box shared links are capability-like private inputs. When a job needs one, the
-full link is kept only in the private local job input; manifests, acquisition
-evidence, stage manifests, and logs use redacted identity such as a locator
-fingerprint. A browser login alone does not satisfy the official Box REST token
-route; without an access token, shared-link acquisition is blocked.
+```mermaid
+flowchart LR
+    subgraph Semantic[Semantic exchange]
+        R[Fixed request]
+        S[Frozen Skill snapshot]
+        X[Response schema]
+        AI[Semantic AI runner]
+        R --> AI
+        S --> AI
+        X --> AI
+    end
+    AI -->|provider-neutral response only| V[Deterministic executor]
+    V -->|strict schema, refs, fingerprints, length checks| W[(Canonical workspace)]
+    W --> A[Independent audit]
+    H[Human] -->|review target SHA + explicit approval| W
+    AI -.->|no direct canonical write| W
+```
 
-## Pipeline
+この境界により、semantic qualityの判断と、path・hash・schema・state transition・atomic writeの決定論的検証を分離します。AI exchangeの入力・出力・停止条件は[`AI exchange operations`](docs/operations/ai-exchange.md)、研究に基づくselection方針は[`Semantic quality`](docs/concepts/semantic-quality.md)を参照してください。
 
-1. authorization／requirements
-2. acquisition
-3. media normalization
-4. caption／ASR／supplied transcriptからのraw transcript
-5. transcript refinement（新規CLI job。保存済みv1 jobはlegacy routeを維持）
-6. evidence construction／ambiguity preservation
-7. private rebuildable search cache
-8. deliverable authoring＋deterministic length gate
-9. independent audit
-10. bounded revision
-11. human approval
-12. export
+## Transcript reuse and ASR
 
-## SoT
+- caption coverageが十分なら、Dockerやmodelを起動せずtranscriptを確定します。
+- supplied transcript primaryはFFmpegを起動せず、timestampがないsegmentへ時刻を補いません。
+- captionの不足区間だけをrepository-owned ASR workerへ渡します。未provision modelを暗黙downloadせず停止します。
+- transcriptの修正が必要なら、raw transcriptをimmutableにしたまま`vep refine prepare` → `vep refine import --response PATH`でrefined transcriptを別artifactとして作ります。
+- 同じsource／transcriptを別assignmentで使う場合は、親workspaceを変更せず`vep job recover PARENT CHILD --child-spec PATH --confirm ...`でchildを`TRANSCRIBED`から開始します。
+- どのstateで何をすべきかは、read-onlyの`vep job guide WORKSPACE`で確認できます。guideはartifactやrequestを生成しません。
 
-設計索引は[`docs/README.md`](docs/README.md)、文書台帳は
-[`docs/registry/documents.yaml`](docs/registry/documents.yaml)です。
+詳しいASR／model provisioningは[`ASR runtime operations`](docs/operations/asr-runtime.md)、recoveryとworkspace保護は[`CLI and local workspace operations`](docs/operations/cli-and-local-workspace.md)を参照してください。
 
-- 共通AIポリシー: [`.agents/policy.md`](.agents/policy.md)
-- Skillガバナンス: [`.agents/governance.md`](.agents/governance.md)
-- Skill台帳: [`.agents/skill-system.toml`](.agents/skill-system.toml)
-- 文書メタデータ: [`docs/governance/metadata-schema.md`](docs/governance/metadata-schema.md)
-- CI品質ゲート: [`docs/operations/ci-quality-gates.md`](docs/operations/ci-quality-gates.md)
-- CLI／workspace運用: [`docs/operations/cli-and-local-workspace.md`](docs/operations/cli-and-local-workspace.md)
-- Network取得運用: [`docs/operations/network-acquisition.md`](docs/operations/network-acquisition.md)
-- contribution: [`CONTRIBUTING.md`](CONTRIBUTING.md)
-- security: [`SECURITY.md`](SECURITY.md)
+## Sources
 
-READMEやAI入口文書の識別情報は文書台帳だけで管理し、本文先頭へ汎用YAML front matterを
-重複させません。
+| Source | `source-kind` | Status | Boundary |
+| --- | --- | --- | --- |
+| Local file | `local_file` | Supported | callerがlocal accessとprocessing authorizationを持つ |
+| Direct HTTPS media | `direct_http` | Supported | direct media URLのみ |
+| YouTube／他のyt-dlp service | `generic_ytdlp` | Partial/site-dependent | pinned parserとVEPのA/V契約の範囲 |
+| Panopto | `panopto` | Supported | official REST tokenを優先し、既存policyの範囲だけfallback |
+| Box file／shared link | `box` | Supported | official Box API token、file-level acquisitionのみ |
 
-## AI entrypoints
+provider identity、locator、credentialの扱いは[`Network acquisition operations`](docs/operations/network-acquisition.md)が正本です。対応表の`Supported`はadapterの存在を示すだけで、provider側のdownload許可やDRM解除を意味しません。
 
-各AIの自動検出位置は維持し、共通正本へ接続します。
+## Advanced links
 
-- `AGENTS.md`
-- `CLAUDE.md`
-- `GEMINI.md`
-- `.github/copilot-instructions.md`
+- [Getting started](docs/getting-started.md): transcript最短経路とmedia経路の手順
+- [AI exchange operations](docs/operations/ai-exchange.md): request／Skill／response schema、import、停止条件
+- [Semantic quality](docs/concepts/semantic-quality.md): source-backed selection／faithfulness／concreteness方針
+- [Pipeline architecture](docs/architecture/pipeline-architecture.md): 層とartifactの設計
+- [Trust boundaries](docs/architecture/trust-boundaries.md): authority、AI、workspaceの境界
+- [State machine](docs/architecture/state-machine.md): state transitionとfail-closed条件
+- [ASR runtime operations](docs/operations/asr-runtime.md): image、model、device policy
+- [CLI and local workspace operations](docs/operations/cli-and-local-workspace.md): workspace、recovery、validation
+- [CI quality gates](docs/operations/ci-quality-gates.md): repository validation
 
-## Validation
+## Source of Truth
+
+- 文書索引: [`docs/README.md`](docs/README.md)
+- 文書台帳: [`docs/registry/documents.yaml`](docs/registry/documents.yaml)
+- AI共通policy: [`.agents/policy.md`](.agents/policy.md)
+- Skill governance: [`.agents/governance.md`](.agents/governance.md)
+- Skill registry: [`.agents/skill-system.toml`](.agents/skill-system.toml)
+- Security boundary: [`SECURITY.md`](SECURITY.md)
+
+READMEとAI entrypointのmetadataはregistry-onlyです。READMEは利用者向けの入口であり、詳細な設計・運用の正本を複製しません。
+
+## Local validation
+
+変更後の標準検証は次のとおりです。実データや実credentialは使用しません。
 
 ```bash
 uv sync --locked
@@ -205,15 +220,3 @@ uv run pytest -q
 uv run vep schema check
 uv run python scripts/validate_repository.py --root .
 ```
-
-## Data boundary
-
-実講義動画、音声、字幕、Cookie、token、署名付きURL、文字起こし、evidence response／ledger、
-SQLite index、ユーザー成果物はGit管理しません。runtime artifactとindexはprivate workspace内だけに置き、
-CIは実データや実credentialを使用しません。
-
-## Status
-
-- Implemented: core contracts、generated Schema、CLI、local workspace、local／network acquisition、video／audio／transcript input、transcript refinement、PDF／image／notes supporting input、evidence ledger、private FTS5 cache、bounded authoring／independent audit／revision、人間確認package、hash-bound human approval、byte-exact Markdown export
-- Current state path: `… → EVIDENCE_READY → DRAFTED → AUDITED → HUMAN_REVIEW_READY → HUMAN_APPROVED → EXPORTED`、または最大2回のrevision後に`BLOCKED`
-- Next: ownerによるstacked Draft PRの監査とrootから順のmerge
