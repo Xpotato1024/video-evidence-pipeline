@@ -24,6 +24,7 @@ from video_evidence_pipeline.application import (
     approve_job,
     authorize_job,
     build_search_index_job,
+    default_authoring_skill,
     export_job,
     import_audit_job,
     import_authoring_job,
@@ -31,6 +32,7 @@ from video_evidence_pipeline.application import (
     import_revision_job,
     import_transcript_refinement_job,
     initialize_job,
+    job_guide,
     job_status,
     normalize_job,
     prepare_audit_job,
@@ -48,6 +50,7 @@ from video_evidence_pipeline.domain.job import (
     SourceKind,
     SupportingInputKind,
     SupportingInputSpec,
+    load_job_yaml,
 )
 from video_evidence_pipeline.domain.transcription import (
     MAXIMUM_ASR_WORKER_REQUEST_BYTES,
@@ -219,6 +222,41 @@ def _run[T](action: Callable[[], T], *, json_output: bool) -> T:
     return result
 
 
+def _semantic_exchange_paths(
+    workspace_path: Path,
+    *,
+    request_path: str,
+    skill_id: str,
+    response_schema: str,
+) -> dict[str, str]:
+    from video_evidence_pipeline.storage.layout import JobWorkspace
+
+    workspace = JobWorkspace.open(workspace_path)
+    repository_root = workspace.jobs_root.parent.parent
+    return {
+        "request_path": str(workspace.safe_path(request_path).resolve()),
+        "skill_path": str(
+            (repository_root / ".agents" / "skills" / skill_id / "SKILL.md").resolve()
+        ),
+        "response_schema_path": str((repository_root / "schemas" / response_schema).resolve()),
+    }
+
+
+def _select_authoring_skill(workspace_path: Path, requested: str | None) -> str:
+    if requested is not None:
+        return requested
+    from video_evidence_pipeline.storage.layout import JobWorkspace
+
+    workspace = JobWorkspace.open(workspace_path)
+    selected = default_authoring_skill(load_job_yaml(workspace.job_yaml).assignment.task_type)
+    if selected is None:
+        raise configuration_error(
+            "SKILL_SELECTION_REQUIRED",
+            "authoring task_type has no exact default Skill; pass --skill explicitly",
+        )
+    return selected
+
+
 def _version_callback(value: bool) -> None:
     if value:
         typer.echo(__version__)
@@ -272,6 +310,14 @@ def job_init(
         list[str] | None,
         typer.Option("--requirement", help="Repeat for each ordered assignment requirement."),
     ] = None,
+    purpose: Annotated[
+        str | None,
+        typer.Option("--purpose", help="Intended use that should guide semantic selection."),
+    ] = None,
+    audience: Annotated[
+        str | None,
+        typer.Option("--audience", help="Intended reader or viewer of the output."),
+    ] = None,
     primary_input: Annotated[
         PrimaryInputKind | None,
         typer.Option("--primary-input", help="Primary input kind; defaults to video."),
@@ -297,6 +343,8 @@ def job_init(
             language=language,
             output_format=output_format,
             requirements=requirement,
+            purpose=purpose,
+            audience=audience,
             primary_input=(primary_input if primary_input is not None else PrimaryInputKind.VIDEO),
             supporting_inputs=_supporting_inputs(supporting_input),
             min_chars=min_chars,
@@ -408,6 +456,17 @@ def status(
     _emit({"ok": exit_code == 0, **result}, json_output=json_output)
     if exit_code:
         raise typer.Exit(code=exit_code)
+
+
+@job_app.command("guide")
+def guide(
+    workspace: Path,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Show the next safe public operation without changing the workspace."""
+
+    result = _run(lambda: job_guide(workspace), json_output=json_output)
+    _emit({"ok": result["status"] != "integrity-error", **result}, json_output=json_output)
 
 
 @app.command("approve")
@@ -781,6 +840,14 @@ def refine_prepare(
 ) -> None:
     result = _run(lambda: prepare_transcript_refinement_job(workspace), json_output=json_output)
     request = result.request
+    paths = _semantic_exchange_paths(
+        workspace,
+        request_path="refinement/request.json",
+        skill_id=(
+            request.skill.skill_id if request.skill is not None else "refine-video-transcript"
+        ),
+        response_schema="refinement-response-manifest.schema.json",
+    )
     _emit(
         {
             "ok": True,
@@ -789,6 +856,7 @@ def refine_prepare(
             "transcript_segment_count": len(request.transcript_segments),
             "support_ref_count": len(request.available_source_refs),
             "reused": result.reused,
+            **paths,
         },
         json_output=json_output,
     )
@@ -826,6 +894,14 @@ def evidence_prepare(
 ) -> None:
     result = _run(lambda: prepare_evidence_job(workspace), json_output=json_output)
     request = result.request
+    paths = _semantic_exchange_paths(
+        workspace,
+        request_path="evidence/request.json",
+        skill_id=(
+            request.skill.skill_id if request.skill is not None else "analyze-video-evidence"
+        ),
+        response_schema="evidence-response-manifest.schema.json",
+    )
     _emit(
         {
             "ok": True,
@@ -836,6 +912,7 @@ def evidence_prepare(
             "frame_ref_count": len(request.frame_refs),
             "unresolved_ambiguity_count": len(request.unresolved_ambiguities),
             "reused": result.reused,
+            **paths,
         },
         json_output=json_output,
     )
@@ -869,14 +946,24 @@ def evidence_import(
 @author_app.command("prepare")
 def author_prepare(
     workspace: Path,
-    skill: Annotated[str, typer.Option("--skill")],
+    skill: Annotated[str | None, typer.Option("--skill")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
+    selected_skill = _run(
+        lambda: _select_authoring_skill(workspace, skill),
+        json_output=json_output,
+    )
     result = _run(
-        lambda: prepare_authoring_job(workspace, skill),
+        lambda: prepare_authoring_job(workspace, selected_skill),
         json_output=json_output,
     )
     request = result.request
+    paths = _semantic_exchange_paths(
+        workspace,
+        request_path="authoring/requests/author-v001.json",
+        skill_id=request.skill.skill_id,
+        response_schema="authoring-response-manifest.schema.json",
+    )
     _emit(
         {
             "ok": True,
@@ -885,6 +972,7 @@ def author_prepare(
             "request_fingerprint": request.request_fingerprint,
             "skill_id": request.skill.skill_id,
             "reused": result.reused,
+            **paths,
         },
         json_output=json_output,
     )
@@ -926,7 +1014,7 @@ def author_import(
 @audit_app.command("prepare")
 def audit_prepare(
     workspace: Path,
-    skill: Annotated[str, typer.Option("--skill")],
+    skill: Annotated[str, typer.Option("--skill")] = "independent-content-audit",
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     result = _run(
@@ -934,6 +1022,12 @@ def audit_prepare(
         json_output=json_output,
     )
     request = result.request
+    paths = _semantic_exchange_paths(
+        workspace,
+        request_path=f"authoring/requests/audit-{request.target_draft_version}.json",
+        skill_id=request.skill.skill_id,
+        response_schema="audit-response-manifest.schema.json",
+    )
     _emit(
         {
             "ok": True,
@@ -942,6 +1036,7 @@ def audit_prepare(
             "request_fingerprint": request.request_fingerprint,
             "skill_id": request.skill.skill_id,
             "reused": result.reused,
+            **paths,
         },
         json_output=json_output,
     )
@@ -983,7 +1078,7 @@ def audit_import(
 @revision_app.command("prepare")
 def revision_prepare(
     workspace: Path,
-    skill: Annotated[str, typer.Option("--skill")],
+    skill: Annotated[str, typer.Option("--skill")] = "revise-from-audit",
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     result = _run(
@@ -991,6 +1086,12 @@ def revision_prepare(
         json_output=json_output,
     )
     request = result.request
+    paths = _semantic_exchange_paths(
+        workspace,
+        request_path=f"authoring/requests/revision-{request.next_draft_version}.json",
+        skill_id=request.skill.skill_id,
+        response_schema="revision-response-manifest.schema.json",
+    )
     _emit(
         {
             "ok": True,
@@ -1000,6 +1101,7 @@ def revision_prepare(
             "request_fingerprint": request.request_fingerprint,
             "skill_id": request.skill.skill_id,
             "reused": result.reused,
+            **paths,
         },
         json_output=json_output,
     )

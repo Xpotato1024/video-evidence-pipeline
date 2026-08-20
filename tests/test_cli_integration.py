@@ -28,6 +28,64 @@ def run_vep(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _workspace_snapshot(root: Path) -> dict[str, tuple[bytes, int]]:
+    return {
+        path.relative_to(root).as_posix(): (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+
+
+def test_cli_assignment_intent_and_job_guide_are_read_only(tmp_path: Path) -> None:
+    source = tmp_path / "synthetic.txt"
+    source.write_text("synthetic transcript", encoding="utf-8")
+    initialized = run_vep(
+        tmp_path,
+        "job",
+        "init",
+        "guided-summary",
+        "--source-kind",
+        "local_file",
+        "--source",
+        str(source),
+        "--primary-input",
+        "transcript",
+        "--task-type",
+        "summary",
+        "--language",
+        "ja",
+        "--output-format",
+        "markdown",
+        "--purpose",
+        "研修後に実行する重要事項を把握する",
+        "--audience",
+        "初めて参加する一般利用者",
+        "--json",
+    )
+    assert initialized.returncode == 0, initialized.stderr
+    workspace = tmp_path / ".local" / "jobs" / "guided-summary"
+    job = load_job_yaml(workspace / "job.yaml")
+    assert job.assignment.purpose == "研修後に実行する重要事項を把握する"
+    assert job.assignment.audience == "初めて参加する一般利用者"
+
+    before = _workspace_snapshot(workspace)
+    json_result = run_vep(tmp_path, "job", "guide", str(workspace), "--json")
+    human_result = run_vep(tmp_path, "job", "guide", str(workspace))
+    after = _workspace_snapshot(workspace)
+
+    assert json_result.returncode == 0, json_result.stderr
+    payload = json.loads(json_result.stdout)
+    assert payload["stored_state"] == "CREATED"
+    assert payload["effective_state"] == "CREATED"
+    assert payload["next_operation"] == "authorize"
+    assert payload["guide_read_only"] is True
+    assert payload["side_effects"]["workspace_write"] is True
+    assert "next_operation: authorize" in human_result.stdout
+    assert before == after
+    assert not (workspace / "refinement/request.json").exists()
+    assert not (workspace / "evidence/request.json").exists()
+
+
 def test_cli_created_authorized_acquired_e2e(tmp_path: Path) -> None:
     source = tmp_path / "synthetic.bin"
     content = b"small synthetic source"
