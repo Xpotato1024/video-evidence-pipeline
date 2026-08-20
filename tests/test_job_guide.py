@@ -143,8 +143,40 @@ def test_network_source_guide_requires_an_explicit_one_time_authorization_choice
     assert result["command"] is None
     assert "one-time human decision" in result["reason"]
     choices = result["authorization_choices"]
-    assert choices["allow_network_acquisition"].endswith("--allow-network-acquisition")
-    assert choices["deny_network_acquisition"].endswith("--deny-network-acquisition")
+    assert set(choices) == {
+        "allow_network_local_semantics",
+        "allow_network_external_semantics",
+        "deny_network_local_semantics",
+        "deny_network_external_semantics",
+    }
+    assert choices["allow_network_local_semantics"].endswith(
+        "--allow-network-acquisition --deny-external-api"
+    )
+    assert choices["allow_network_external_semantics"].endswith(
+        "--allow-network-acquisition --allow-external-api"
+    )
+    assert choices["deny_network_local_semantics"].endswith(
+        "--deny-network-acquisition --deny-external-api"
+    )
+    assert choices["deny_network_external_semantics"].endswith(
+        "--deny-network-acquisition --allow-external-api"
+    )
+
+
+def test_local_source_guide_requires_explicit_external_api_authorization_choice(
+    tmp_path: Path,
+) -> None:
+    workspace, job = _created_workspace(tmp_path)
+
+    result = _guide_operation(workspace, job, [], JobState.CREATED, {})
+
+    assert result["status"] == "human-action-required"
+    assert result["next_operation"] == "authorize"
+    assert result["command"] is None
+    assert "one-time human decision" in result["reason"]
+    choices = result["authorization_choices"]
+    assert choices["local_semantic_runner"].endswith("--deny-external-api")
+    assert choices["external_semantic_runner"].endswith("--allow-external-api")
 
 
 def test_network_acquisition_denial_blocks_acquire_but_local_source_stays_ready(

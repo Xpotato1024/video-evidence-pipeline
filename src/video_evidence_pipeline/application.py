@@ -3242,29 +3242,46 @@ def _guide_operation(
     authoring = status.get("authoring_integrity", {})
     draft_version = authoring.get("draft_version")
     if state is JobState.CREATED:
+        authorize_base = (
+            f"vep job authorize {quoted} --confirm --basis <basis> --allow-local-processing"
+        )
         if job.source.kind is not SourceKind.LOCAL_FILE:
-            authorize_base = (
-                f"vep job authorize {quoted} --confirm --basis <basis> --allow-local-processing"
-            )
             return {
                 "status": "human-action-required",
                 "next_operation": "authorize",
                 "reason": (
-                    "network acquisition authorization is a one-time human decision; choose exactly "
-                    "one explicit permission before the job can advance"
+                    "network acquisition and external API authorization are one-time human decisions; "
+                    "choose exactly one explicit permission combination before the job can advance"
                 ),
                 "command": None,
                 "authorization_choices": {
-                    "allow_network_acquisition": (f"{authorize_base} --allow-network-acquisition"),
-                    "deny_network_acquisition": (f"{authorize_base} --deny-network-acquisition"),
+                    "allow_network_local_semantics": (
+                        f"{authorize_base} --allow-network-acquisition --deny-external-api"
+                    ),
+                    "allow_network_external_semantics": (
+                        f"{authorize_base} --allow-network-acquisition --allow-external-api"
+                    ),
+                    "deny_network_local_semantics": (
+                        f"{authorize_base} --deny-network-acquisition --deny-external-api"
+                    ),
+                    "deny_network_external_semantics": (
+                        f"{authorize_base} --deny-network-acquisition --allow-external-api"
+                    ),
                 },
                 "side_effects": _guide_side_effects(workspace_write=True),
             }
         return {
-            "status": "ready",
+            "status": "human-action-required",
             "next_operation": "authorize",
-            "reason": "human authorization and processing boundaries are not recorded yet",
-            "command": f"vep job authorize {quoted} --confirm --basis <basis> --allow-local-processing",
+            "reason": (
+                "external API authorization is a one-time human decision; choose local-only or "
+                "explicitly authorized external semantics before the job can advance"
+            ),
+            "command": None,
+            "authorization_choices": {
+                "local_semantic_runner": f"{authorize_base} --deny-external-api",
+                "external_semantic_runner": f"{authorize_base} --allow-external-api",
+            },
             "side_effects": _guide_side_effects(workspace_write=True),
         }
     if state is JobState.AUTHORIZED:
