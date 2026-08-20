@@ -63,6 +63,8 @@ from video_evidence_pipeline.domain.authoring import (
     ClaimType,
     DraftSpan,
     FixedEvidenceBundle,
+    HumanReviewBundle,
+    HumanReviewManifest,
     RequirementCoverage,
     RequirementMap,
     RequirementMapEntry,
@@ -71,6 +73,7 @@ from video_evidence_pipeline.domain.authoring import (
     RevisionResponseManifest,
 )
 from video_evidence_pipeline.domain.evidence import AnalyzerExecutionMode
+from video_evidence_pipeline.domain.hashing import sha256_bytes
 from video_evidence_pipeline.domain.job import (
     AssignmentSpec,
     JobSpec,
@@ -929,6 +932,195 @@ def _publish_revision(
     response_path = tmp_path / f"{request.next_draft_version}-{context_id}.json"
     _write_model(response_path, _revision_response(request, context_id=context_id))
     return _import_revision_fixture(workspace.root, response_path)
+
+
+def _human_review_ready_job(tmp_path: Path, job_id: str) -> JobWorkspace:
+    workspace, _draft = _publish_initial_draft(tmp_path, job_id)
+    clean = _publish_audit(
+        tmp_path,
+        workspace,
+        context_id=f"{job_id}-clean-audit",
+        material=False,
+    )
+    assert clean.human_review is not None
+    return workspace
+
+
+def _replace_human_review_artifact(workspace: JobWorkspace, payload: bytes) -> None:
+    manifest_path = workspace.human_review_manifest_json
+    manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    bundle_path = workspace.safe_path(manifest_payload["bundle_artifact"]["relative_storage_path"])
+    bundle_version = json.loads(bundle_path.read_text(encoding="utf-8"))["current_draft_version"]
+    digest = sha256_bytes(payload)
+    artifact = {
+        **manifest_payload["bundle_artifact"],
+        "artifact_id": f"human_review_bundle-{digest[:16]}",
+        "content_sha256": digest,
+        "size_bytes": len(payload),
+    }
+    manifest_payload["bundle_artifact"] = artifact
+    provisional = HumanReviewManifest.model_validate(manifest_payload)
+    manifest_payload["bundle_fingerprint"] = (
+        authoring_pipeline_module._human_review_manifest_fingerprint(provisional)
+    )
+    stage_path = workspace.safe_path(f"manifests/stages/human-review-{bundle_version}.json")
+    stage_payload = json.loads(stage_path.read_text(encoding="utf-8"))
+    stage_payload["configuration_sha256"] = manifest_payload["bundle_fingerprint"]
+    stage_payload["output_artifacts"] = [artifact]
+    bundle_path.write_bytes(payload)
+    _write_model(manifest_path, manifest_payload)
+    _write_model(stage_path, stage_payload)
+
+
+def _project_draft_manifest_to_pre_pr46(workspace: JobWorkspace) -> None:
+    draft_path = workspace.safe_path("manifests/authoring/draft-v001.json")
+    draft_payload = json.loads(draft_path.read_text(encoding="utf-8"))
+    for field in (
+        "length_check",
+        "semantic_revision_count",
+        "length_adjustment_count",
+    ):
+        draft_payload.pop(field)
+    draft_model = authoring_pipeline_module.DraftManifest.model_validate(draft_payload)
+    draft_payload["bundle_fingerprint"] = authoring_pipeline_module._draft_fingerprint(draft_model)
+    draft_stage_path = workspace.safe_path("manifests/stages/authoring-v001.json")
+    draft_stage = json.loads(draft_stage_path.read_text(encoding="utf-8"))
+    draft_stage["configuration_sha256"] = draft_payload["bundle_fingerprint"]
+    human_manifest = json.loads(workspace.human_review_manifest_json.read_text(encoding="utf-8"))
+    human_manifest["draft_bundle_fingerprint"] = draft_payload["bundle_fingerprint"]
+    _write_model(draft_path, draft_payload)
+    _write_model(draft_stage_path, draft_stage)
+    _write_model(workspace.human_review_manifest_json, human_manifest)
+
+
+def test_pre_pr46_human_review_historical_projection_deep_validates(tmp_path: Path) -> None:
+    workspace = _human_review_ready_job(tmp_path, "issue47-human-review-legacy")
+    _project_draft_manifest_to_pre_pr46(workspace)
+    manifest = json.loads(workspace.human_review_manifest_json.read_text(encoding="utf-8"))
+    bundle_path = workspace.safe_path(manifest["bundle_artifact"]["relative_storage_path"])
+    payload = json.loads(bundle_path.read_text(encoding="utf-8"))
+    historical_fields = {
+        "length_check",
+        "semantic_revision_count",
+        "length_adjustment_count",
+    }
+    for field in historical_fields:
+        payload.pop(field)
+    legacy_bytes = pretty_json_bytes(payload)
+    _replace_human_review_artifact(workspace, legacy_bytes)
+
+    stored = HumanReviewBundle.model_validate_json(legacy_bytes, strict=True)
+    assert not historical_fields & stored.model_fields_set
+    assert authoring_pipeline_module.canonical_human_review_bundle_bytes(stored) == legacy_bytes
+    assert validate_job(workspace.root, deep=True)["state"] == JobState.HUMAN_REVIEW_READY
+
+
+def test_current_human_review_canonical_bytes_deep_validate(tmp_path: Path) -> None:
+    workspace = _human_review_ready_job(tmp_path, "issue47-human-review-current")
+    manifest = json.loads(workspace.human_review_manifest_json.read_text(encoding="utf-8"))
+    bundle_path = workspace.safe_path(manifest["bundle_artifact"]["relative_storage_path"])
+    current_bytes = bundle_path.read_bytes()
+    stored = HumanReviewBundle.model_validate_json(current_bytes, strict=True)
+
+    assert {
+        "length_check",
+        "semantic_revision_count",
+        "length_adjustment_count",
+    } <= stored.model_fields_set
+    assert authoring_pipeline_module.canonical_human_review_bundle_bytes(stored) == current_bytes
+    assert validate_job(workspace.root, deep=True)["state"] == JobState.HUMAN_REVIEW_READY
+
+
+def test_human_review_legacy_projection_does_not_alias_current_null_bytes(
+    tmp_path: Path,
+) -> None:
+    workspace = _human_review_ready_job(tmp_path, "issue47-human-review-shape")
+    manifest = json.loads(workspace.human_review_manifest_json.read_text(encoding="utf-8"))
+    bundle_path = workspace.safe_path(manifest["bundle_artifact"]["relative_storage_path"])
+    current_payload = json.loads(bundle_path.read_text(encoding="utf-8"))
+    current_payload.update(
+        {
+            "length_check": None,
+            "semantic_revision_count": None,
+            "length_adjustment_count": None,
+        }
+    )
+    current_bytes = pretty_json_bytes(current_payload)
+    legacy_payload = dict(current_payload)
+    for field in (
+        "length_check",
+        "semantic_revision_count",
+        "length_adjustment_count",
+    ):
+        legacy_payload.pop(field)
+    legacy_bytes = pretty_json_bytes(legacy_payload)
+    current = HumanReviewBundle.model_validate_json(current_bytes, strict=True)
+    legacy = HumanReviewBundle.model_validate_json(legacy_bytes, strict=True)
+
+    assert authoring_pipeline_module.canonical_human_review_bundle_bytes(current) == current_bytes
+    assert authoring_pipeline_module.canonical_human_review_bundle_bytes(legacy) == legacy_bytes
+    assert sha256_bytes(current_bytes) != sha256_bytes(legacy_bytes)
+
+
+def test_human_review_partial_historical_shape_fails_closed(tmp_path: Path) -> None:
+    workspace = _human_review_ready_job(tmp_path, "issue47-human-review-partial")
+    manifest = json.loads(workspace.human_review_manifest_json.read_text(encoding="utf-8"))
+    bundle_path = workspace.safe_path(manifest["bundle_artifact"]["relative_storage_path"])
+    payload = json.loads(bundle_path.read_text(encoding="utf-8"))
+    payload.pop("semantic_revision_count")
+    payload.pop("length_adjustment_count")
+    _replace_human_review_artifact(workspace, pretty_json_bytes(payload))
+
+    with pytest.raises(VepError) as error:
+        validate_job(workspace.root, deep=True)
+    assert error.value.code == "HUMAN_REVIEW_BUNDLE_INVALID"
+
+
+def test_human_review_content_tamper_and_noncanonical_bytes_fail_deep(
+    tmp_path: Path,
+) -> None:
+    tamper_root = tmp_path / "tamper"
+    tamper_root.mkdir()
+    tampered = _human_review_ready_job(tamper_root, "issue47-human-review-tamper")
+    manifest = json.loads(tampered.human_review_manifest_json.read_text(encoding="utf-8"))
+    bundle_path = tampered.safe_path(manifest["bundle_artifact"]["relative_storage_path"])
+    payload = json.loads(bundle_path.read_text(encoding="utf-8"))
+    payload["p2_count"] += 1
+    bundle_path.write_bytes(pretty_json_bytes(payload))
+    with pytest.raises(VepError) as tamper_error:
+        validate_job(tampered.root, deep=True)
+    assert tamper_error.value.code == "AUTHORING_BUNDLE_TAMPERED"
+
+    noncanonical_root = tmp_path / "noncanonical"
+    noncanonical_root.mkdir()
+    noncanonical = _human_review_ready_job(
+        noncanonical_root,
+        "issue47-human-review-noncanonical",
+    )
+    manifest = json.loads(noncanonical.human_review_manifest_json.read_text(encoding="utf-8"))
+    bundle_path = noncanonical.safe_path(manifest["bundle_artifact"]["relative_storage_path"])
+    payload = json.loads(bundle_path.read_text(encoding="utf-8"))
+    compact_bytes = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    _replace_human_review_artifact(noncanonical, compact_bytes)
+    with pytest.raises(VepError) as noncanonical_error:
+        validate_job(noncanonical.root, deep=True)
+    assert noncanonical_error.value.code == "HUMAN_REVIEW_BUNDLE_INVALID"
+
+
+def test_human_review_wrong_artifact_sha_fails_deep(tmp_path: Path) -> None:
+    workspace = _human_review_ready_job(tmp_path, "issue47-human-review-wrong-sha")
+    manifest = json.loads(workspace.human_review_manifest_json.read_text(encoding="utf-8"))
+    manifest["bundle_artifact"]["content_sha256"] = "0" * 64
+    _write_model(workspace.human_review_manifest_json, manifest)
+
+    with pytest.raises(VepError) as error:
+        validate_job(workspace.root, deep=True)
+    assert error.value.code == "AUTHORING_BUNDLE_TAMPERED"
 
 
 def test_one_revision_then_clean_audit_reaches_human_review(tmp_path: Path) -> None:

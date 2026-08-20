@@ -264,6 +264,11 @@ human-review bundleはcanonical length check、`semantic_revision_count`、`leng
 range外responseは`authoring/length/vNNN-attempts.jsonl`へ実測値と差分を記録します。recovery manifestは
 parent／child assignment fingerprintを保持し、assignment-dependent artifactをcopyしません。
 
+pre-PR46 HumanReviewBundleでは上記3 fieldが存在しないため、3 fieldが全てraw JSONに存在しない場合だけ
+historical canonical projectionとして3 fieldを除外した当時のbytesを検証します。3 fieldが全て存在するcurrent
+bundleは現行Schemaどおりserializationし、一部だけが存在するshapeはambiguousとして拒否します。このprojectionは
+HumanReviewBundle artifact専用であり、global serializerや`exclude_none`契約を変更しません。
+
 ASR transcript manifestのbackend identityはengine／runtime、pinned model revision／storage identity、device policy、
 selected GPU／VRAM、compute type、container image／digest、resource-only fallbackを保持します。取得不能なhardware値は
 nullableで、provision manifestは`.local/models/asr/<profile>/<revision>/manifest.json`へ分離します。

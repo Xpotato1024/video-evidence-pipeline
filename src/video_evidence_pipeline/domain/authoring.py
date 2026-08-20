@@ -791,6 +791,16 @@ class HumanReviewBundle(StrictModel):
 
     @model_validator(mode="after")
     def bundle_is_review_only(self) -> Self:
+        historical_fields = {
+            "length_check",
+            "semantic_revision_count",
+            "length_adjustment_count",
+        }
+        present_historical_fields = historical_fields & self.model_fields_set
+        if present_historical_fields and present_historical_fields != historical_fields:
+            raise ValueError(
+                "human review length metadata fields must be all present or all absent"
+            )
         if not (
             self.current_draft_artifact.content_sha256
             == self.current_draft_sha256

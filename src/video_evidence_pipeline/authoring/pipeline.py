@@ -3758,6 +3758,37 @@ def _human_review_manifest_fingerprint(manifest: HumanReviewManifest) -> str:
     return fingerprint(manifest.model_dump(mode="json", exclude={"bundle_fingerprint"}))
 
 
+_HUMAN_REVIEW_PR46_FIELDS = frozenset(
+    {
+        "length_check",
+        "semantic_revision_count",
+        "length_adjustment_count",
+    }
+)
+
+
+def canonical_human_review_bundle_payload(bundle: HumanReviewBundle) -> dict[str, object]:
+    """Select the exact historical HumanReviewBundle artifact shape."""
+
+    present = _HUMAN_REVIEW_PR46_FIELDS & bundle.model_fields_set
+    if present and present != _HUMAN_REVIEW_PR46_FIELDS:
+        raise integrity_error(
+            "HUMAN_REVIEW_BUNDLE_INVALID",
+            "human review historical field presence is ambiguous",
+        )
+    payload = bundle.model_dump(mode="json")
+    if not present:
+        for field in _HUMAN_REVIEW_PR46_FIELDS:
+            payload.pop(field)
+    return payload
+
+
+def canonical_human_review_bundle_bytes(bundle: HumanReviewBundle) -> bytes:
+    """Serialize a current or pre-PR46 bundle without changing global JSON policy."""
+
+    return pretty_json_bytes(canonical_human_review_bundle_payload(bundle))
+
+
 def _human_review_bundle_matches(
     stored: HumanReviewBundle,
     expected: HumanReviewBundle,
@@ -3999,7 +4030,7 @@ def stage_human_review(
     path, artifact = _write_attempt_artifact(
         attempt,
         "human-review.json",
-        pretty_json_bytes(bundle),
+        canonical_human_review_bundle_bytes(bundle),
         artifact_type="human_review_bundle",
         relative_path=f"human-review/{draft.manifest.draft_version}/bundle.json",
     )
@@ -4174,7 +4205,7 @@ def load_human_review(
                 or manifest.draft_bundle_fingerprint != draft.manifest.bundle_fingerprint
                 or manifest.audit_bundle_fingerprint != audit.manifest.bundle_fingerprint
                 or manifest.bundle_fingerprint != _human_review_manifest_fingerprint(manifest)
-                or sha256_bytes(pretty_json_bytes(bundle))
+                or sha256_bytes(canonical_human_review_bundle_bytes(bundle))
                 != manifest.bundle_artifact.content_sha256
             )
         )
