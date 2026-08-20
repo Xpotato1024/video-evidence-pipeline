@@ -31,7 +31,7 @@ workspace書込み、artifact公開、state transitionはdeterministic executor�
 
 - 1 record 1 atomic propositionのevidence records
 - 各recordのsource refs、interpretation level、flags、ambiguity
-- topic map、unresolved ambiguity、必要なhuman replay request
+- schemaが許すevidence recordsとunresolved ambiguity records
 - draft本文を含まないschema-compliant response
 
 ## Information roles

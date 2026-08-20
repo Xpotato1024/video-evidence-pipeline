@@ -36,7 +36,7 @@ forbidden = ["周辺文も書き換える"]
 criteria = [
   { id = "support-verified", description = "独立したslide evidenceがexact replacementを支持する" },
   { id = "minimal-span", description = "必要なtokenだけを補正する" },
-  { id = "before-after", description = "before／afterを記録する" },
+  { id = "before-after", description = "requestのoriginal segmentとresponseのrefined textを1対1で対応させる" },
   { id = "evidence-binding", description = "correctionをslide source refへ束縛する" },
   { id = "meaning-preserved", description = "周辺propositionの意味を変えない" },
 ]
