@@ -36,13 +36,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for unsupported-proper-noun", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed no semantic edit and preserved オープンエーアイ社 as unresolved without non-transcript support.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "semantic-change-detected", passed = true, evidence = "fresh-context output satisfied semantic-change-detected" },
-  { id = "support-required", passed = true, evidence = "fresh-context output satisfied support-required" },
-  { id = "correction-rejected", passed = true, evidence = "fresh-context output satisfied correction-rejected" },
-  { id = "raw-preserved", passed = true, evidence = "fresh-context output satisfied raw-preserved" },
-  { id = "ambiguity-reported", passed = true, evidence = "fresh-context output satisfied ambiguity-reported" },
+  { id = "semantic-change-detected", passed = true, evidence = "Observed no semantic edit and preserved オープンエーアイ社 as unresolved without non-transcript support. Criterion semantic-change-detected passed." },
+  { id = "support-required", passed = true, evidence = "Observed no semantic edit and preserved オープンエーアイ社 as unresolved without non-transcript support. Criterion support-required passed." },
+  { id = "correction-rejected", passed = true, evidence = "Observed no semantic edit and preserved オープンエーアイ社 as unresolved without non-transcript support. Criterion correction-rejected passed." },
+  { id = "raw-preserved", passed = true, evidence = "Observed no semantic edit and preserved オープンエーアイ社 as unresolved without non-transcript support. Criterion raw-preserved passed." },
+  { id = "ambiguity-reported", passed = true, evidence = "Observed no semantic edit and preserved オープンエーアイ社 as unresolved without non-transcript support. Criterion ambiguity-reported passed." },
 ]
 
 [[case_results]]
@@ -51,13 +51,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for unsupported-number", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed no semantic edit and preserved 30 with its unit explicitly unknown.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "unit-is-semantic", passed = true, evidence = "fresh-context output satisfied unit-is-semantic" },
-  { id = "no-context-only-fix", passed = true, evidence = "fresh-context output satisfied no-context-only-fix" },
-  { id = "number-preserved", passed = true, evidence = "fresh-context output satisfied number-preserved" },
-  { id = "ambiguity-preserved", passed = true, evidence = "fresh-context output satisfied ambiguity-preserved" },
-  { id = "no-extra-fact", passed = true, evidence = "fresh-context output satisfied no-extra-fact" },
+  { id = "unit-is-semantic", passed = true, evidence = "Observed no semantic edit and preserved 30 with its unit explicitly unknown. Criterion unit-is-semantic passed." },
+  { id = "no-context-only-fix", passed = true, evidence = "Observed no semantic edit and preserved 30 with its unit explicitly unknown. Criterion no-context-only-fix passed." },
+  { id = "number-preserved", passed = true, evidence = "Observed no semantic edit and preserved 30 with its unit explicitly unknown. Criterion number-preserved passed." },
+  { id = "ambiguity-preserved", passed = true, evidence = "Observed no semantic edit and preserved 30 with its unit explicitly unknown. Criterion ambiguity-preserved passed." },
+  { id = "no-extra-fact", passed = true, evidence = "Observed no semantic edit and preserved 30 with its unit explicitly unknown. Criterion no-extra-fact passed." },
 ]
 
 [[case_results]]
@@ -66,13 +66,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for supported-correction", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed a one-span Alpha II correction bound to the clear supporting frame.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "support-verified", passed = true, evidence = "fresh-context output satisfied support-verified" },
-  { id = "minimal-span", passed = true, evidence = "fresh-context output satisfied minimal-span" },
-  { id = "before-after", passed = true, evidence = "fresh-context output satisfied before-after" },
-  { id = "evidence-binding", passed = true, evidence = "fresh-context output satisfied evidence-binding" },
-  { id = "meaning-preserved", passed = true, evidence = "fresh-context output satisfied meaning-preserved" },
+  { id = "support-verified", passed = true, evidence = "Observed a one-span Alpha II correction bound to the clear supporting frame. Criterion support-verified passed." },
+  { id = "minimal-span", passed = true, evidence = "Observed a one-span Alpha II correction bound to the clear supporting frame. Criterion minimal-span passed." },
+  { id = "before-after", passed = true, evidence = "Observed a one-span Alpha II correction bound to the clear supporting frame. Criterion before-after passed." },
+  { id = "evidence-binding", passed = true, evidence = "Observed a one-span Alpha II correction bound to the clear supporting frame. Criterion evidence-binding passed." },
+  { id = "meaning-preserved", passed = true, evidence = "Observed a one-span Alpha II correction bound to the clear supporting frame. Criterion meaning-preserved passed." },
 ]
 
 [[case_results]]
@@ -81,13 +81,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for unresolved-ambiguity", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed 15/50 alternatives retained and the blurred frame rejected as correction support.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "alternatives-preserved", passed = true, evidence = "fresh-context output satisfied alternatives-preserved" },
-  { id = "weak-frame-rejected", passed = true, evidence = "fresh-context output satisfied weak-frame-rejected" },
-  { id = "no-guess", passed = true, evidence = "fresh-context output satisfied no-guess" },
-  { id = "uncertainty-explicit", passed = true, evidence = "fresh-context output satisfied uncertainty-explicit" },
-  { id = "segment-stable", passed = true, evidence = "fresh-context output satisfied segment-stable" },
+  { id = "alternatives-preserved", passed = true, evidence = "Observed 15/50 alternatives retained and the blurred frame rejected as correction support. Criterion alternatives-preserved passed." },
+  { id = "weak-frame-rejected", passed = true, evidence = "Observed 15/50 alternatives retained and the blurred frame rejected as correction support. Criterion weak-frame-rejected passed." },
+  { id = "no-guess", passed = true, evidence = "Observed 15/50 alternatives retained and the blurred frame rejected as correction support. Criterion no-guess passed." },
+  { id = "uncertainty-explicit", passed = true, evidence = "Observed 15/50 alternatives retained and the blurred frame rejected as correction support. Criterion uncertainty-explicit passed." },
+  { id = "segment-stable", passed = true, evidence = "Observed 15/50 alternatives retained and the blurred frame rejected as correction support. Criterion segment-stable passed." },
 ]
 
 [[case_results]]
@@ -96,11 +96,11 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for no-proposition-merge", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed two original segments retained in order with no created Friday-verification relation.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "boundary-preserved", passed = true, evidence = "fresh-context output satisfied boundary-preserved" },
-  { id = "order-preserved", passed = true, evidence = "fresh-context output satisfied order-preserved" },
-  { id = "no-relation-created", passed = true, evidence = "fresh-context output satisfied no-relation-created" },
-  { id = "no-merge", passed = true, evidence = "fresh-context output satisfied no-merge" },
-  { id = "source-mapping", passed = true, evidence = "fresh-context output satisfied source-mapping" },
+  { id = "boundary-preserved", passed = true, evidence = "Observed two original segments retained in order with no created Friday-verification relation. Criterion boundary-preserved passed." },
+  { id = "order-preserved", passed = true, evidence = "Observed two original segments retained in order with no created Friday-verification relation. Criterion order-preserved passed." },
+  { id = "no-relation-created", passed = true, evidence = "Observed two original segments retained in order with no created Friday-verification relation. Criterion no-relation-created passed." },
+  { id = "no-merge", passed = true, evidence = "Observed two original segments retained in order with no created Friday-verification relation. Criterion no-merge passed." },
+  { id = "source-mapping", passed = true, evidence = "Observed two original segments retained in order with no created Friday-verification relation. Criterion source-mapping passed." },
 ]

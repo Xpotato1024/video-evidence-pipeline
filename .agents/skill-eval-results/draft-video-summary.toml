@@ -36,13 +36,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for central-thesis-after-chat", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed the review-interval thesis as the lead claim and greeting/chat omitted from the summary.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "thesis-preserved", passed = true, evidence = "fresh-context output satisfied thesis-preserved" },
-  { id = "chat-omitted", passed = true, evidence = "fresh-context output satisfied chat-omitted" },
-  { id = "assignment-fit", passed = true, evidence = "fresh-context output satisfied assignment-fit" },
-  { id = "evidence-bound", passed = true, evidence = "fresh-context output satisfied evidence-bound" },
-  { id = "not-chronological", passed = true, evidence = "fresh-context output satisfied not-chronological" },
+  { id = "thesis-preserved", passed = true, evidence = "Observed the review-interval thesis as the lead claim and greeting/chat omitted from the summary. Criterion thesis-preserved passed." },
+  { id = "chat-omitted", passed = true, evidence = "Observed the review-interval thesis as the lead claim and greeting/chat omitted from the summary. Criterion chat-omitted passed." },
+  { id = "assignment-fit", passed = true, evidence = "Observed the review-interval thesis as the lead claim and greeting/chat omitted from the summary. Criterion assignment-fit passed." },
+  { id = "evidence-bound", passed = true, evidence = "Observed the review-interval thesis as the lead claim and greeting/chat omitted from the summary. Criterion evidence-bound passed." },
+  { id = "not-chronological", passed = true, evidence = "Observed the review-interval thesis as the lead claim and greeting/chat omitted from the summary. Criterion not-chronological passed." },
 ]
 
 [[case_results]]
@@ -51,13 +51,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for safety-after-examples", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed the mandatory main-power-off instruction preserved and long success examples omitted.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "safety-preserved", passed = true, evidence = "fresh-context output satisfied safety-preserved" },
-  { id = "examples-downweighted", passed = true, evidence = "fresh-context output satisfied examples-downweighted" },
-  { id = "imperative-preserved", passed = true, evidence = "fresh-context output satisfied imperative-preserved" },
-  { id = "no-new-safety", passed = true, evidence = "fresh-context output satisfied no-new-safety" },
-  { id = "operational-salience", passed = true, evidence = "fresh-context output satisfied operational-salience" },
+  { id = "safety-preserved", passed = true, evidence = "Observed the mandatory main-power-off instruction preserved and long success examples omitted. Criterion safety-preserved passed." },
+  { id = "examples-downweighted", passed = true, evidence = "Observed the mandatory main-power-off instruction preserved and long success examples omitted. Criterion examples-downweighted passed." },
+  { id = "imperative-preserved", passed = true, evidence = "Observed the mandatory main-power-off instruction preserved and long success examples omitted. Criterion imperative-preserved passed." },
+  { id = "no-new-safety", passed = true, evidence = "Observed the mandatory main-power-off instruction preserved and long success examples omitted. Criterion no-new-safety passed." },
+  { id = "operational-salience", passed = true, evidence = "Observed the mandatory main-power-off instruction preserved and long success examples omitted. Criterion operational-salience passed." },
 ]
 
 [[case_results]]
@@ -66,13 +66,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for deduplicate-five-examples", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed the common source-backed principle selected with no five-example list.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "principle-selected", passed = true, evidence = "fresh-context output satisfied principle-selected" },
-  { id = "no-example-list", passed = true, evidence = "fresh-context output satisfied no-example-list" },
-  { id = "representative-only-if-useful", passed = true, evidence = "fresh-context output satisfied representative-only-if-useful" },
-  { id = "no-generalization-overreach", passed = true, evidence = "fresh-context output satisfied no-generalization-overreach" },
-  { id = "nonredundant", passed = true, evidence = "fresh-context output satisfied nonredundant" },
+  { id = "principle-selected", passed = true, evidence = "Observed the common source-backed principle selected with no five-example list. Criterion principle-selected passed." },
+  { id = "no-example-list", passed = true, evidence = "Observed the common source-backed principle selected with no five-example list. Criterion no-example-list passed." },
+  { id = "representative-only-if-useful", passed = true, evidence = "Observed the common source-backed principle selected with no five-example list. Criterion representative-only-if-useful passed." },
+  { id = "no-generalization-overreach", passed = true, evidence = "Observed the common source-backed principle selected with no five-example list. Criterion no-generalization-overreach passed." },
+  { id = "nonredundant", passed = true, evidence = "Observed the common source-backed principle selected with no five-example list. Criterion nonredundant passed." },
 ]
 
 [[case_results]]
@@ -81,13 +81,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for assignment-general-focus", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed the central principle as core, examples and action bounded, and purpose-based omission recorded.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "purpose-read", passed = true, evidence = "fresh-context output satisfied purpose-read" },
-  { id = "core-selected", passed = true, evidence = "fresh-context output satisfied core-selected" },
-  { id = "supporting-bounded", passed = true, evidence = "fresh-context output satisfied supporting-bounded" },
-  { id = "omission-rationale", passed = true, evidence = "fresh-context output satisfied omission-rationale" },
-  { id = "evidence-faithful", passed = true, evidence = "fresh-context output satisfied evidence-faithful" },
+  { id = "purpose-read", passed = true, evidence = "Observed the central principle as core, examples and action bounded, and purpose-based omission recorded. Criterion purpose-read passed." },
+  { id = "core-selected", passed = true, evidence = "Observed the central principle as core, examples and action bounded, and purpose-based omission recorded. Criterion core-selected passed." },
+  { id = "supporting-bounded", passed = true, evidence = "Observed the central principle as core, examples and action bounded, and purpose-based omission recorded. Criterion supporting-bounded passed." },
+  { id = "omission-rationale", passed = true, evidence = "Observed the central principle as core, examples and action bounded, and purpose-based omission recorded. Criterion omission-rationale passed." },
+  { id = "evidence-faithful", passed = true, evidence = "Observed the central principle as core, examples and action bounded, and purpose-based omission recorded. Criterion evidence-faithful passed." },
 ]
 
 [[case_results]]
@@ -96,13 +96,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for assignment-example-focus", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed three example differences as core, the principle as context, and the unrelated action omitted.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "purpose-changes-selection", passed = true, evidence = "fresh-context output satisfied purpose-changes-selection" },
-  { id = "examples-compared", passed = true, evidence = "fresh-context output satisfied examples-compared" },
-  { id = "principle-contextual", passed = true, evidence = "fresh-context output satisfied principle-contextual" },
-  { id = "action-not-dominant", passed = true, evidence = "fresh-context output satisfied action-not-dominant" },
-  { id = "no-example-invention", passed = true, evidence = "fresh-context output satisfied no-example-invention" },
+  { id = "purpose-changes-selection", passed = true, evidence = "Observed three example differences as core, the principle as context, and the unrelated action omitted. Criterion purpose-changes-selection passed." },
+  { id = "examples-compared", passed = true, evidence = "Observed three example differences as core, the principle as context, and the unrelated action omitted. Criterion examples-compared passed." },
+  { id = "principle-contextual", passed = true, evidence = "Observed three example differences as core, the principle as context, and the unrelated action omitted. Criterion principle-contextual passed." },
+  { id = "action-not-dominant", passed = true, evidence = "Observed three example differences as core, the principle as context, and the unrelated action omitted. Criterion action-not-dominant passed." },
+  { id = "no-example-invention", passed = true, evidence = "Observed three example differences as core, the principle as context, and the unrelated action omitted. Criterion no-example-invention passed." },
 ]
 
 [[case_results]]
@@ -111,13 +111,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for operational-notice", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed application action, September 12 deadline, device-storage prohibition, and contact direction preserved.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "action-preserved", passed = true, evidence = "fresh-context output satisfied action-preserved" },
-  { id = "deadline-preserved", passed = true, evidence = "fresh-context output satisfied deadline-preserved" },
-  { id = "prohibition-preserved", passed = true, evidence = "fresh-context output satisfied prohibition-preserved" },
-  { id = "background-compressed", passed = true, evidence = "fresh-context output satisfied background-compressed" },
-  { id = "contact-preserved-if-actionable", passed = true, evidence = "fresh-context output satisfied contact-preserved-if-actionable" },
+  { id = "action-preserved", passed = true, evidence = "Observed application action, September 12 deadline, device-storage prohibition, and contact direction preserved. Criterion action-preserved passed." },
+  { id = "deadline-preserved", passed = true, evidence = "Observed application action, September 12 deadline, device-storage prohibition, and contact direction preserved. Criterion deadline-preserved passed." },
+  { id = "prohibition-preserved", passed = true, evidence = "Observed application action, September 12 deadline, device-storage prohibition, and contact direction preserved. Criterion prohibition-preserved passed." },
+  { id = "background-compressed", passed = true, evidence = "Observed application action, September 12 deadline, device-storage prohibition, and contact direction preserved. Criterion background-compressed passed." },
+  { id = "contact-preserved-if-actionable", passed = true, evidence = "Observed application action, September 12 deadline, device-storage prohibition, and contact direction preserved. Criterion contact-preserved-if-actionable passed." },
 ]
 
 [[case_results]]
@@ -126,13 +126,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for late-conclusion", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed the late reproducibility-over-speed conclusion placed first with only necessary rationale.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "conclusion-selected", passed = true, evidence = "fresh-context output satisfied conclusion-selected" },
-  { id = "rationale-selected", passed = true, evidence = "fresh-context output satisfied rationale-selected" },
-  { id = "history-bounded", passed = true, evidence = "fresh-context output satisfied history-bounded" },
-  { id = "hierarchy-clear", passed = true, evidence = "fresh-context output satisfied hierarchy-clear" },
-  { id = "no-position-shift", passed = true, evidence = "fresh-context output satisfied no-position-shift" },
+  { id = "conclusion-selected", passed = true, evidence = "Observed the late reproducibility-over-speed conclusion placed first with only necessary rationale. Criterion conclusion-selected passed." },
+  { id = "rationale-selected", passed = true, evidence = "Observed the late reproducibility-over-speed conclusion placed first with only necessary rationale. Criterion rationale-selected passed." },
+  { id = "history-bounded", passed = true, evidence = "Observed the late reproducibility-over-speed conclusion placed first with only necessary rationale. Criterion history-bounded passed." },
+  { id = "hierarchy-clear", passed = true, evidence = "Observed the late reproducibility-over-speed conclusion placed first with only necessary rationale. Criterion hierarchy-clear passed." },
+  { id = "no-position-shift", passed = true, evidence = "Observed the late reproducibility-over-speed conclusion placed first with only necessary rationale. Criterion no-position-shift passed." },
 ]
 
 [[case_results]]
@@ -141,13 +141,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for useful-concrete-anchor", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed the source-backed 37 percent result retained while method detail was bounded.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "useful-number-preserved", passed = true, evidence = "fresh-context output satisfied useful-number-preserved" },
-  { id = "number-evidence-bound", passed = true, evidence = "fresh-context output satisfied number-evidence-bound" },
-  { id = "result-first", passed = true, evidence = "fresh-context output satisfied result-first" },
-  { id = "method-detail-bounded", passed = true, evidence = "fresh-context output satisfied method-detail-bounded" },
-  { id = "no-extra-precision", passed = true, evidence = "fresh-context output satisfied no-extra-precision" },
+  { id = "useful-number-preserved", passed = true, evidence = "Observed the source-backed 37 percent result retained while method detail was bounded. Criterion useful-number-preserved passed." },
+  { id = "number-evidence-bound", passed = true, evidence = "Observed the source-backed 37 percent result retained while method detail was bounded. Criterion number-evidence-bound passed." },
+  { id = "result-first", passed = true, evidence = "Observed the source-backed 37 percent result retained while method detail was bounded. Criterion result-first passed." },
+  { id = "method-detail-bounded", passed = true, evidence = "Observed the source-backed 37 percent result retained while method detail was bounded. Criterion method-detail-bounded passed." },
+  { id = "no-extra-precision", passed = true, evidence = "Observed the source-backed 37 percent result retained while method detail was bounded. Criterion no-extra-precision passed." },
 ]
 
 [[case_results]]
@@ -156,13 +156,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for irrelevant-number-stuffing", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed only the actionable September 12 deadline retained; room 12, exercise 47, and age 31 omitted.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "deadline-selected", passed = true, evidence = "fresh-context output satisfied deadline-selected" },
-  { id = "room-number-omitted", passed = true, evidence = "fresh-context output satisfied room-number-omitted" },
-  { id = "exercise-number-omitted", passed = true, evidence = "fresh-context output satisfied exercise-number-omitted" },
-  { id = "age-omitted", passed = true, evidence = "fresh-context output satisfied age-omitted" },
-  { id = "no-number-heuristic", passed = true, evidence = "fresh-context output satisfied no-number-heuristic" },
+  { id = "deadline-selected", passed = true, evidence = "Observed only the actionable September 12 deadline retained; room 12, exercise 47, and age 31 omitted. Criterion deadline-selected passed." },
+  { id = "room-number-omitted", passed = true, evidence = "Observed only the actionable September 12 deadline retained; room 12, exercise 47, and age 31 omitted. Criterion room-number-omitted passed." },
+  { id = "exercise-number-omitted", passed = true, evidence = "Observed only the actionable September 12 deadline retained; room 12, exercise 47, and age 31 omitted. Criterion exercise-number-omitted passed." },
+  { id = "age-omitted", passed = true, evidence = "Observed only the actionable September 12 deadline retained; room 12, exercise 47, and age 31 omitted. Criterion age-omitted passed." },
+  { id = "no-number-heuristic", passed = true, evidence = "Observed only the actionable September 12 deadline retained; room 12, exercise 47, and age 31 omitted. Criterion no-number-heuristic passed." },
 ]
 
 [[case_results]]
@@ -171,13 +171,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for meeting-specificity", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed Option B, Sato action, migration script, September 12, rollback rationale, 5 percent threshold, and unresolved owner.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "decision-specific", passed = true, evidence = "fresh-context output satisfied decision-specific" },
-  { id = "action-owner-due", passed = true, evidence = "fresh-context output satisfied action-owner-due" },
-  { id = "rationale-preserved", passed = true, evidence = "fresh-context output satisfied rationale-preserved" },
-  { id = "open-question-preserved", passed = true, evidence = "fresh-context output satisfied open-question-preserved" },
-  { id = "no-missing-value-invention", passed = true, evidence = "fresh-context output satisfied no-missing-value-invention" },
+  { id = "decision-specific", passed = true, evidence = "Observed Option B, Sato action, migration script, September 12, rollback rationale, 5 percent threshold, and unresolved owner. Criterion decision-specific passed." },
+  { id = "action-owner-due", passed = true, evidence = "Observed Option B, Sato action, migration script, September 12, rollback rationale, 5 percent threshold, and unresolved owner. Criterion action-owner-due passed." },
+  { id = "rationale-preserved", passed = true, evidence = "Observed Option B, Sato action, migration script, September 12, rollback rationale, 5 percent threshold, and unresolved owner. Criterion rationale-preserved passed." },
+  { id = "open-question-preserved", passed = true, evidence = "Observed Option B, Sato action, migration script, September 12, rollback rationale, 5 percent threshold, and unresolved owner. Criterion open-question-preserved passed." },
+  { id = "no-missing-value-invention", passed = true, evidence = "Observed Option B, Sato action, migration script, September 12, rollback rationale, 5 percent threshold, and unresolved owner. Criterion no-missing-value-invention passed." },
 ]
 
 [[case_results]]
@@ -186,11 +186,11 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for undefined-purpose", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed a stop with no draft because purpose and length were missing; no audience was invented.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "missing-purpose", passed = true, evidence = "fresh-context output satisfied missing-purpose" },
-  { id = "missing-length", passed = true, evidence = "fresh-context output satisfied missing-length" },
-  { id = "stop", passed = true, evidence = "fresh-context output satisfied stop" },
-  { id = "no-arbitrary-audience", passed = true, evidence = "fresh-context output satisfied no-arbitrary-audience" },
-  { id = "no-output-fabrication", passed = true, evidence = "fresh-context output satisfied no-output-fabrication" },
+  { id = "missing-purpose", passed = true, evidence = "Observed a stop with no draft because purpose and length were missing; no audience was invented. Criterion missing-purpose passed." },
+  { id = "missing-length", passed = true, evidence = "Observed a stop with no draft because purpose and length were missing; no audience was invented. Criterion missing-length passed." },
+  { id = "stop", passed = true, evidence = "Observed a stop with no draft because purpose and length were missing; no audience was invented. Criterion stop passed." },
+  { id = "no-arbitrary-audience", passed = true, evidence = "Observed a stop with no draft because purpose and length were missing; no audience was invented. Criterion no-arbitrary-audience passed." },
+  { id = "no-output-fabrication", passed = true, evidence = "Observed a stop with no draft because purpose and length were missing; no audience was invented. Criterion no-output-fabrication passed." },
 ]

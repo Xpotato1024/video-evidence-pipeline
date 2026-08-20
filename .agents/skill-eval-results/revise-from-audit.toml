@@ -36,13 +36,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for factual-finding", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed only the unsupported 42 percent specificity removed, with the supported improvement meaning retained.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "finding-bound", passed = true, evidence = "fresh-context output satisfied finding-bound" },
-  { id = "unsupported-specificity-removed", passed = true, evidence = "fresh-context output satisfied unsupported-specificity-removed" },
-  { id = "supported-meaning-retained", passed = true, evidence = "fresh-context output satisfied supported-meaning-retained" },
-  { id = "span-bounded", passed = true, evidence = "fresh-context output satisfied span-bounded" },
-  { id = "ledger", passed = true, evidence = "fresh-context output satisfied ledger" },
+  { id = "finding-bound", passed = true, evidence = "Observed only the unsupported 42 percent specificity removed, with the supported improvement meaning retained. Criterion finding-bound passed." },
+  { id = "unsupported-specificity-removed", passed = true, evidence = "Observed only the unsupported 42 percent specificity removed, with the supported improvement meaning retained. Criterion unsupported-specificity-removed passed." },
+  { id = "supported-meaning-retained", passed = true, evidence = "Observed only the unsupported 42 percent specificity removed, with the supported improvement meaning retained. Criterion supported-meaning-retained passed." },
+  { id = "span-bounded", passed = true, evidence = "Observed only the unsupported 42 percent specificity removed, with the supported improvement meaning retained. Criterion span-bounded passed." },
+  { id = "ledger", passed = true, evidence = "Observed only the unsupported 42 percent specificity removed, with the supported improvement meaning retained. Criterion ledger passed." },
 ]
 
 [[case_results]]
@@ -51,13 +51,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for omission-finding", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed only the source-backed main-power-off instruction added for the omission finding.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "critical-unit-added", passed = true, evidence = "fresh-context output satisfied critical-unit-added" },
-  { id = "exact-evidence", passed = true, evidence = "fresh-context output satisfied exact-evidence" },
-  { id = "finding-scope", passed = true, evidence = "fresh-context output satisfied finding-scope" },
-  { id = "no-extra-safety", passed = true, evidence = "fresh-context output satisfied no-extra-safety" },
-  { id = "resolution-recorded", passed = true, evidence = "fresh-context output satisfied resolution-recorded" },
+  { id = "critical-unit-added", passed = true, evidence = "Observed only the source-backed main-power-off instruction added for the omission finding. Criterion critical-unit-added passed." },
+  { id = "exact-evidence", passed = true, evidence = "Observed only the source-backed main-power-off instruction added for the omission finding. Criterion exact-evidence passed." },
+  { id = "finding-scope", passed = true, evidence = "Observed only the source-backed main-power-off instruction added for the omission finding. Criterion finding-scope passed." },
+  { id = "no-extra-safety", passed = true, evidence = "Observed only the source-backed main-power-off instruction added for the omission finding. Criterion no-extra-safety passed." },
+  { id = "resolution-recorded", passed = true, evidence = "Observed only the source-backed main-power-off instruction added for the omission finding. Criterion resolution-recorded passed." },
 ]
 
 [[case_results]]
@@ -66,13 +66,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for hierarchy-finding", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed the central conclusion moved first and only finding-bound chat compressed.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "hierarchy-corrected", passed = true, evidence = "fresh-context output satisfied hierarchy-corrected" },
-  { id = "peripheral-compressed", passed = true, evidence = "fresh-context output satisfied peripheral-compressed" },
-  { id = "supported-content-preserved", passed = true, evidence = "fresh-context output satisfied supported-content-preserved" },
-  { id = "no-broad-rewrite", passed = true, evidence = "fresh-context output satisfied no-broad-rewrite" },
-  { id = "hunks-bound", passed = true, evidence = "fresh-context output satisfied hunks-bound" },
+  { id = "hierarchy-corrected", passed = true, evidence = "Observed the central conclusion moved first and only finding-bound chat compressed. Criterion hierarchy-corrected passed." },
+  { id = "peripheral-compressed", passed = true, evidence = "Observed the central conclusion moved first and only finding-bound chat compressed. Criterion peripheral-compressed passed." },
+  { id = "supported-content-preserved", passed = true, evidence = "Observed the central conclusion moved first and only finding-bound chat compressed. Criterion supported-content-preserved passed." },
+  { id = "no-broad-rewrite", passed = true, evidence = "Observed the central conclusion moved first and only finding-bound chat compressed. Criterion no-broad-rewrite passed." },
+  { id = "hunks-bound", passed = true, evidence = "Observed the central conclusion moved first and only finding-bound chat compressed. Criterion hunks-bound passed." },
 ]
 
 [[case_results]]
@@ -81,13 +81,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for specificity-finding", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed the source-backed September 12 17:00 deadline added without unrelated numbers.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "useful-anchor-added", passed = true, evidence = "fresh-context output satisfied useful-anchor-added" },
-  { id = "anchor-evidence-bound", passed = true, evidence = "fresh-context output satisfied anchor-evidence-bound" },
-  { id = "no-number-stuffing", passed = true, evidence = "fresh-context output satisfied no-number-stuffing" },
-  { id = "minimal-change", passed = true, evidence = "fresh-context output satisfied minimal-change" },
-  { id = "specificity-resolved", passed = true, evidence = "fresh-context output satisfied specificity-resolved" },
+  { id = "useful-anchor-added", passed = true, evidence = "Observed the source-backed September 12 17:00 deadline added without unrelated numbers. Criterion useful-anchor-added passed." },
+  { id = "anchor-evidence-bound", passed = true, evidence = "Observed the source-backed September 12 17:00 deadline added without unrelated numbers. Criterion anchor-evidence-bound passed." },
+  { id = "no-number-stuffing", passed = true, evidence = "Observed the source-backed September 12 17:00 deadline added without unrelated numbers. Criterion no-number-stuffing passed." },
+  { id = "minimal-change", passed = true, evidence = "Observed the source-backed September 12 17:00 deadline added without unrelated numbers. Criterion minimal-change passed." },
+  { id = "specificity-resolved", passed = true, evidence = "Observed the source-backed September 12 17:00 deadline added without unrelated numbers. Criterion specificity-resolved passed." },
 ]
 
 [[case_results]]
@@ -96,11 +96,11 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for unsupported-fix", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed no draft change; missing owner evidence was deferred as unresolved instead of invented.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "evidence-gap-detected", passed = true, evidence = "fresh-context output satisfied evidence-gap-detected" },
-  { id = "no-invention", passed = true, evidence = "fresh-context output satisfied no-invention" },
-  { id = "draft-not-corrupted", passed = true, evidence = "fresh-context output satisfied draft-not-corrupted" },
-  { id = "finding-preserved", passed = true, evidence = "fresh-context output satisfied finding-preserved" },
-  { id = "escalated", passed = true, evidence = "fresh-context output satisfied escalated" },
+  { id = "evidence-gap-detected", passed = true, evidence = "Observed no draft change; missing owner evidence was deferred as unresolved instead of invented. Criterion evidence-gap-detected passed." },
+  { id = "no-invention", passed = true, evidence = "Observed no draft change; missing owner evidence was deferred as unresolved instead of invented. Criterion no-invention passed." },
+  { id = "draft-not-corrupted", passed = true, evidence = "Observed no draft change; missing owner evidence was deferred as unresolved instead of invented. Criterion draft-not-corrupted passed." },
+  { id = "finding-preserved", passed = true, evidence = "Observed no draft change; missing owner evidence was deferred as unresolved instead of invented. Criterion finding-preserved passed." },
+  { id = "escalated", passed = true, evidence = "Observed no draft change; missing owner evidence was deferred as unresolved instead of invented. Criterion escalated passed." },
 ]

@@ -384,11 +384,13 @@ revision responseにも同じlength gateを再適用します。length attempt�
 normal／deep validationとpre-semantic recoveryの対象です。human-review package作成、approval、exportでも同じcanonical validatorを
 再実行し、範囲外の成果物を後段へ進めません。
 
-provider-neutralな`external_exchange` public author／audit／revision production importは対応Skillの
-`lifecycle = "active"`を必須とします。現行のactive Skillは`draft-video-report`、`draft-video-summary`、
-`independent-content-audit`、`revise-from-audit`で、いずれも明示選択専用（`automatic_trigger = false`）かつ
-`instruction-only`です。`analyze-video-evidence`と`prepare-human-review`はdraftのままで、このproduction
-routeのallowlistには含めません。allowlist内のSkillがdraftなら`DRAFT_SKILL_FORBIDDEN`で停止します。
+provider-neutralな`external_exchange` public refinement／evidence／author／audit／revision production importは
+対応Skillの`lifecycle = "active"`を必須とします。現行のactive semantic／operator Skillは
+`refine-video-transcript`、`analyze-video-evidence`、`draft-video-report`、
+`draft-video-summary`、`independent-content-audit`、`revise-from-audit`、
+`run-video-evidence-job`です。すべて明示選択専用（`automatic_trigger = false`）かつ
+`instruction-only`で、invocationは権限を追加しません。`prepare-human-review`はdraftのままproduction
+routeのallowlistに含めません。allowlist内のSkillがdraftなら`DRAFT_SKILL_FORBIDDEN`で停止します。
 fixture identityを許可する経路はrepository test内部だけです。human-review bundleは承認対象hashと監査／差分を整理する
 `is_approval: false`のpackageです。
 requestへ保存したSkill snapshotはimmutableです。現在の同一content／eval／identityが`active`へ昇格した場合だけ

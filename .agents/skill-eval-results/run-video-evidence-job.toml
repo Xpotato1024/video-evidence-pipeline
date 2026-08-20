@@ -36,13 +36,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for short-user-request", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed guide-first routing, a 300-character summary assignment, and stage-specific frozen Skill use.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "guide-first", passed = true, evidence = "fresh-context output satisfied guide-first" },
-  { id = "public-operation", passed = true, evidence = "fresh-context output satisfied public-operation" },
-  { id = "assignment-captured", passed = true, evidence = "fresh-context output satisfied assignment-captured" },
-  { id = "stage-skill", passed = true, evidence = "fresh-context output satisfied stage-skill" },
-  { id = "no-prompt-burden", passed = true, evidence = "fresh-context output satisfied no-prompt-burden" },
+  { id = "guide-first", passed = true, evidence = "Observed guide-first routing, a 300-character summary assignment, and stage-specific frozen Skill use. Criterion guide-first passed." },
+  { id = "public-operation", passed = true, evidence = "Observed guide-first routing, a 300-character summary assignment, and stage-specific frozen Skill use. Criterion public-operation passed." },
+  { id = "assignment-captured", passed = true, evidence = "Observed guide-first routing, a 300-character summary assignment, and stage-specific frozen Skill use. Criterion assignment-captured passed." },
+  { id = "stage-skill", passed = true, evidence = "Observed guide-first routing, a 300-character summary assignment, and stage-specific frozen Skill use. Criterion stage-skill passed." },
+  { id = "no-prompt-burden", passed = true, evidence = "Observed guide-first routing, a 300-character summary assignment, and stage-specific frozen Skill use. Criterion no-prompt-burden passed." },
 ]
 
 [[case_results]]
@@ -51,13 +51,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for missing-authorization", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed a blocked authorization result with no network or workspace write and no permission inference.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "authorization-detected", passed = true, evidence = "fresh-context output satisfied authorization-detected" },
-  { id = "no-network", passed = true, evidence = "fresh-context output satisfied no-network" },
-  { id = "no-permission-inference", passed = true, evidence = "fresh-context output satisfied no-permission-inference" },
-  { id = "missing-input-reported", passed = true, evidence = "fresh-context output satisfied missing-input-reported" },
-  { id = "workspace-unchanged", passed = true, evidence = "fresh-context output satisfied workspace-unchanged" },
+  { id = "authorization-detected", passed = true, evidence = "Observed a blocked authorization result with no network or workspace write and no permission inference. Criterion authorization-detected passed." },
+  { id = "no-network", passed = true, evidence = "Observed a blocked authorization result with no network or workspace write and no permission inference. Criterion no-network passed." },
+  { id = "no-permission-inference", passed = true, evidence = "Observed a blocked authorization result with no network or workspace write and no permission inference. Criterion no-permission-inference passed." },
+  { id = "missing-input-reported", passed = true, evidence = "Observed a blocked authorization result with no network or workspace write and no permission inference. Criterion missing-input-reported passed." },
+  { id = "workspace-unchanged", passed = true, evidence = "Observed a blocked authorization result with no network or workspace write and no permission inference. Criterion workspace-unchanged passed." },
 ]
 
 [[case_results]]
@@ -66,13 +66,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for resume-existing-job", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed EVIDENCE_READY routed directly to author prepare while transcript and evidence were reused.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "state-read", passed = true, evidence = "fresh-context output satisfied state-read" },
-  { id = "next-author", passed = true, evidence = "fresh-context output satisfied next-author" },
-  { id = "reuse-transcript", passed = true, evidence = "fresh-context output satisfied reuse-transcript" },
-  { id = "reuse-evidence", passed = true, evidence = "fresh-context output satisfied reuse-evidence" },
-  { id = "no-reprocessing", passed = true, evidence = "fresh-context output satisfied no-reprocessing" },
+  { id = "state-read", passed = true, evidence = "Observed EVIDENCE_READY routed directly to author prepare while transcript and evidence were reused. Criterion state-read passed." },
+  { id = "next-author", passed = true, evidence = "Observed EVIDENCE_READY routed directly to author prepare while transcript and evidence were reused. Criterion next-author passed." },
+  { id = "reuse-transcript", passed = true, evidence = "Observed EVIDENCE_READY routed directly to author prepare while transcript and evidence were reused. Criterion reuse-transcript passed." },
+  { id = "reuse-evidence", passed = true, evidence = "Observed EVIDENCE_READY routed directly to author prepare while transcript and evidence were reused. Criterion reuse-evidence passed." },
+  { id = "no-reprocessing", passed = true, evidence = "Observed EVIDENCE_READY routed directly to author prepare while transcript and evidence were reused. Criterion no-reprocessing passed." },
 ]
 
 [[case_results]]
@@ -81,13 +81,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for no-asr-path", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed verified transcript reuse, ASR skipped, meeting authoring selected, and a fresh audit context required.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "transcript-recognized", passed = true, evidence = "fresh-context output satisfied transcript-recognized" },
-  { id = "asr-skipped", passed = true, evidence = "fresh-context output satisfied asr-skipped" },
-  { id = "meeting-assignment", passed = true, evidence = "fresh-context output satisfied meeting-assignment" },
-  { id = "semantic-exchange", passed = true, evidence = "fresh-context output satisfied semantic-exchange" },
-  { id = "audit-independent", passed = true, evidence = "fresh-context output satisfied audit-independent" },
+  { id = "transcript-recognized", passed = true, evidence = "Observed verified transcript reuse, ASR skipped, meeting authoring selected, and a fresh audit context required. Criterion transcript-recognized passed." },
+  { id = "asr-skipped", passed = true, evidence = "Observed verified transcript reuse, ASR skipped, meeting authoring selected, and a fresh audit context required. Criterion asr-skipped passed." },
+  { id = "meeting-assignment", passed = true, evidence = "Observed verified transcript reuse, ASR skipped, meeting authoring selected, and a fresh audit context required. Criterion meeting-assignment passed." },
+  { id = "semantic-exchange", passed = true, evidence = "Observed verified transcript reuse, ASR skipped, meeting authoring selected, and a fresh audit context required. Criterion semantic-exchange passed." },
+  { id = "audit-independent", passed = true, evidence = "Observed verified transcript reuse, ASR skipped, meeting authoring selected, and a fresh audit context required. Criterion audit-independent passed." },
 ]
 
 [[case_results]]
@@ -96,13 +96,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for recovery-reuse", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed public recovery guidance preserving the parent and reusing only the transcript boundary.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "eligibility-from-guide", passed = true, evidence = "fresh-context output satisfied eligibility-from-guide" },
-  { id = "public-recovery", passed = true, evidence = "fresh-context output satisfied public-recovery" },
-  { id = "parent-preserved", passed = true, evidence = "fresh-context output satisfied parent-preserved" },
-  { id = "transcript-only-reuse", passed = true, evidence = "fresh-context output satisfied transcript-only-reuse" },
-  { id = "no-semantic-copy", passed = true, evidence = "fresh-context output satisfied no-semantic-copy" },
+  { id = "eligibility-from-guide", passed = true, evidence = "Observed public recovery guidance preserving the parent and reusing only the transcript boundary. Criterion eligibility-from-guide passed." },
+  { id = "public-recovery", passed = true, evidence = "Observed public recovery guidance preserving the parent and reusing only the transcript boundary. Criterion public-recovery passed." },
+  { id = "parent-preserved", passed = true, evidence = "Observed public recovery guidance preserving the parent and reusing only the transcript boundary. Criterion parent-preserved passed." },
+  { id = "transcript-only-reuse", passed = true, evidence = "Observed public recovery guidance preserving the parent and reusing only the transcript boundary. Criterion transcript-only-reuse passed." },
+  { id = "no-semantic-copy", passed = true, evidence = "Observed public recovery guidance preserving the parent and reusing only the transcript boundary. Criterion no-semantic-copy passed." },
 ]
 
 [[case_results]]
@@ -111,13 +111,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for human-review-stop", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed HUMAN_REVIEW_READY as a human handoff with no AI approval or export.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "state-recognized", passed = true, evidence = "fresh-context output satisfied state-recognized" },
-  { id = "human-action", passed = true, evidence = "fresh-context output satisfied human-action" },
-  { id = "stop", passed = true, evidence = "fresh-context output satisfied stop" },
-  { id = "no-ai-approval", passed = true, evidence = "fresh-context output satisfied no-ai-approval" },
-  { id = "no-export", passed = true, evidence = "fresh-context output satisfied no-export" },
+  { id = "state-recognized", passed = true, evidence = "Observed HUMAN_REVIEW_READY as a human handoff with no AI approval or export. Criterion state-recognized passed." },
+  { id = "human-action", passed = true, evidence = "Observed HUMAN_REVIEW_READY as a human handoff with no AI approval or export. Criterion human-action passed." },
+  { id = "stop", passed = true, evidence = "Observed HUMAN_REVIEW_READY as a human handoff with no AI approval or export. Criterion stop passed." },
+  { id = "no-ai-approval", passed = true, evidence = "Observed HUMAN_REVIEW_READY as a human handoff with no AI approval or export. Criterion no-ai-approval passed." },
+  { id = "no-export", passed = true, evidence = "Observed HUMAN_REVIEW_READY as a human handoff with no AI approval or export. Criterion no-export passed." },
 ]
 
 [[case_results]]
@@ -126,11 +126,11 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for no-manifest-editing", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed manual manifest and transition edits refused and no fabricated repair command.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "integrity-recognized", passed = true, evidence = "fresh-context output satisfied integrity-recognized" },
-  { id = "manual-edit-refused", passed = true, evidence = "fresh-context output satisfied manual-edit-refused" },
-  { id = "transition-edit-refused", passed = true, evidence = "fresh-context output satisfied transition-edit-refused" },
-  { id = "no-fake-repair", passed = true, evidence = "fresh-context output satisfied no-fake-repair" },
-  { id = "accurate-handoff", passed = true, evidence = "fresh-context output satisfied accurate-handoff" },
+  { id = "integrity-recognized", passed = true, evidence = "Observed manual manifest and transition edits refused and no fabricated repair command. Criterion integrity-recognized passed." },
+  { id = "manual-edit-refused", passed = true, evidence = "Observed manual manifest and transition edits refused and no fabricated repair command. Criterion manual-edit-refused passed." },
+  { id = "transition-edit-refused", passed = true, evidence = "Observed manual manifest and transition edits refused and no fabricated repair command. Criterion transition-edit-refused passed." },
+  { id = "no-fake-repair", passed = true, evidence = "Observed manual manifest and transition edits refused and no fabricated repair command. Criterion no-fake-repair passed." },
+  { id = "accurate-handoff", passed = true, evidence = "Observed manual manifest and transition edits refused and no fabricated repair command. Criterion accurate-handoff passed." },
 ]

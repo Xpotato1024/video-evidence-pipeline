@@ -36,13 +36,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for atomic-propositions", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed separate migration-date and downtime records with exact source binding and no invented relation.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "one-proposition-per-record", passed = true, evidence = "fresh-context output satisfied one-proposition-per-record" },
-  { id = "no-unsupported-relation", passed = true, evidence = "fresh-context output satisfied no-unsupported-relation" },
-  { id = "exact-source-binding", passed = true, evidence = "fresh-context output satisfied exact-source-binding" },
-  { id = "interpretation-classified", passed = true, evidence = "fresh-context output satisfied interpretation-classified" },
-  { id = "no-draft", passed = true, evidence = "fresh-context output satisfied no-draft" },
+  { id = "one-proposition-per-record", passed = true, evidence = "Observed separate migration-date and downtime records with exact source binding and no invented relation. Criterion one-proposition-per-record passed." },
+  { id = "no-unsupported-relation", passed = true, evidence = "Observed separate migration-date and downtime records with exact source binding and no invented relation. Criterion no-unsupported-relation passed." },
+  { id = "exact-source-binding", passed = true, evidence = "Observed separate migration-date and downtime records with exact source binding and no invented relation. Criterion exact-source-binding passed." },
+  { id = "interpretation-classified", passed = true, evidence = "Observed separate migration-date and downtime records with exact source binding and no invented relation. Criterion interpretation-classified passed." },
+  { id = "no-draft", passed = true, evidence = "Observed separate migration-date and downtime records with exact source binding and no invented relation. Criterion no-draft passed." },
 ]
 
 [[case_results]]
@@ -51,13 +51,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for meeting-roles", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed distinct decision, action-item with supported owner, and deadline records; no decision-owner inference.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "decision-role", passed = true, evidence = "fresh-context output satisfied decision-role" },
-  { id = "action-role", passed = true, evidence = "fresh-context output satisfied action-role" },
-  { id = "deadline-role", passed = true, evidence = "fresh-context output satisfied deadline-role" },
-  { id = "roles-not-importance", passed = true, evidence = "fresh-context output satisfied roles-not-importance" },
-  { id = "no-owner-overreach", passed = true, evidence = "fresh-context output satisfied no-owner-overreach" },
+  { id = "decision-role", passed = true, evidence = "Observed distinct decision, action-item with supported owner, and deadline records; no decision-owner inference. Criterion decision-role passed." },
+  { id = "action-role", passed = true, evidence = "Observed distinct decision, action-item with supported owner, and deadline records; no decision-owner inference. Criterion action-role passed." },
+  { id = "deadline-role", passed = true, evidence = "Observed distinct decision, action-item with supported owner, and deadline records; no decision-owner inference. Criterion deadline-role passed." },
+  { id = "roles-not-importance", passed = true, evidence = "Observed distinct decision, action-item with supported owner, and deadline records; no decision-owner inference. Criterion roles-not-importance passed." },
+  { id = "no-owner-overreach", passed = true, evidence = "Observed distinct decision, action-item with supported owner, and deadline records; no decision-owner inference. Criterion no-owner-overreach passed." },
 ]
 
 [[case_results]]
@@ -66,13 +66,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for example-versus-thesis", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed one thesis record and three independent example records without unsupported generalization.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "thesis-role", passed = true, evidence = "fresh-context output satisfied thesis-role" },
-  { id = "example-role", passed = true, evidence = "fresh-context output satisfied example-role" },
-  { id = "atomic-examples", passed = true, evidence = "fresh-context output satisfied atomic-examples" },
-  { id = "no-generalization", passed = true, evidence = "fresh-context output satisfied no-generalization" },
-  { id = "role-source-bound", passed = true, evidence = "fresh-context output satisfied role-source-bound" },
+  { id = "thesis-role", passed = true, evidence = "Observed one thesis record and three independent example records without unsupported generalization. Criterion thesis-role passed." },
+  { id = "example-role", passed = true, evidence = "Observed one thesis record and three independent example records without unsupported generalization. Criterion example-role passed." },
+  { id = "atomic-examples", passed = true, evidence = "Observed one thesis record and three independent example records without unsupported generalization. Criterion atomic-examples passed." },
+  { id = "no-generalization", passed = true, evidence = "Observed one thesis record and three independent example records without unsupported generalization. Criterion no-generalization passed." },
+  { id = "role-source-bound", passed = true, evidence = "Observed one thesis record and three independent example records without unsupported generalization. Criterion role-source-bound passed." },
 ]
 
 [[case_results]]
@@ -81,13 +81,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for unsupported-role-inference", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed discussion and attendance as context plus an ambiguity stating decision, action, owner, and deadline were unsupported.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "no-decision-inference", passed = true, evidence = "fresh-context output satisfied no-decision-inference" },
-  { id = "no-action-inference", passed = true, evidence = "fresh-context output satisfied no-action-inference" },
-  { id = "no-owner-inference", passed = true, evidence = "fresh-context output satisfied no-owner-inference" },
-  { id = "no-deadline-inference", passed = true, evidence = "fresh-context output satisfied no-deadline-inference" },
-  { id = "uncertainty-reported", passed = true, evidence = "fresh-context output satisfied uncertainty-reported" },
+  { id = "no-decision-inference", passed = true, evidence = "Observed discussion and attendance as context plus an ambiguity stating decision, action, owner, and deadline were unsupported. Criterion no-decision-inference passed." },
+  { id = "no-action-inference", passed = true, evidence = "Observed discussion and attendance as context plus an ambiguity stating decision, action, owner, and deadline were unsupported. Criterion no-action-inference passed." },
+  { id = "no-owner-inference", passed = true, evidence = "Observed discussion and attendance as context plus an ambiguity stating decision, action, owner, and deadline were unsupported. Criterion no-owner-inference passed." },
+  { id = "no-deadline-inference", passed = true, evidence = "Observed discussion and attendance as context plus an ambiguity stating decision, action, owner, and deadline were unsupported. Criterion no-deadline-inference passed." },
+  { id = "uncertainty-reported", passed = true, evidence = "Observed discussion and attendance as context plus an ambiguity stating decision, action, owner, and deadline were unsupported. Criterion uncertainty-reported passed." },
 ]
 
 [[case_results]]
@@ -96,13 +96,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for ambiguity-preservation", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed unresolved 15/50 alternatives bound to transcript and unreadable frame, with no guessed value or definitive role.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "number-not-guessed", passed = true, evidence = "fresh-context output satisfied number-not-guessed" },
-  { id = "alternative-preserved", passed = true, evidence = "fresh-context output satisfied alternative-preserved" },
-  { id = "visual-limit-recorded", passed = true, evidence = "fresh-context output satisfied visual-limit-recorded" },
-  { id = "source-lineage", passed = true, evidence = "fresh-context output satisfied source-lineage" },
-  { id = "no-false-role", passed = true, evidence = "fresh-context output satisfied no-false-role" },
+  { id = "number-not-guessed", passed = true, evidence = "Observed unresolved 15/50 alternatives bound to transcript and unreadable frame, with no guessed value or definitive role. Criterion number-not-guessed passed." },
+  { id = "alternative-preserved", passed = true, evidence = "Observed unresolved 15/50 alternatives bound to transcript and unreadable frame, with no guessed value or definitive role. Criterion alternative-preserved passed." },
+  { id = "visual-limit-recorded", passed = true, evidence = "Observed unresolved 15/50 alternatives bound to transcript and unreadable frame, with no guessed value or definitive role. Criterion visual-limit-recorded passed." },
+  { id = "source-lineage", passed = true, evidence = "Observed unresolved 15/50 alternatives bound to transcript and unreadable frame, with no guessed value or definitive role. Criterion source-lineage passed." },
+  { id = "no-false-role", passed = true, evidence = "Observed unresolved 15/50 alternatives bound to transcript and unreadable frame, with no guessed value or definitive role. Criterion no-false-role passed." },
 ]
 
 [[case_results]]
@@ -111,13 +111,13 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for missing-lineage", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed a stop before publication that reported missing source ID and timestamp without fabrication.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "missing-lineage-detected", passed = true, evidence = "fresh-context output satisfied missing-lineage-detected" },
-  { id = "stop", passed = true, evidence = "fresh-context output satisfied stop" },
-  { id = "no-source-fabrication", passed = true, evidence = "fresh-context output satisfied no-source-fabrication" },
-  { id = "no-record-publication", passed = true, evidence = "fresh-context output satisfied no-record-publication" },
-  { id = "deficiency-reported", passed = true, evidence = "fresh-context output satisfied deficiency-reported" },
+  { id = "missing-lineage-detected", passed = true, evidence = "Observed a stop before publication that reported missing source ID and timestamp without fabrication. Criterion missing-lineage-detected passed." },
+  { id = "stop", passed = true, evidence = "Observed a stop before publication that reported missing source ID and timestamp without fabrication. Criterion stop passed." },
+  { id = "no-source-fabrication", passed = true, evidence = "Observed a stop before publication that reported missing source ID and timestamp without fabrication. Criterion no-source-fabrication passed." },
+  { id = "no-record-publication", passed = true, evidence = "Observed a stop before publication that reported missing source ID and timestamp without fabrication. Criterion no-record-publication passed." },
+  { id = "deficiency-reported", passed = true, evidence = "Observed a stop before publication that reported missing source ID and timestamp without fabrication. Criterion deficiency-reported passed." },
 ]
 
 [[case_results]]
@@ -126,11 +126,11 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh-context execution selected source-bound output for proposal-versus-decision", "all five semantic criteria passed and no forbidden behavior was observed"]
+evidence = ["Observed proposal and postponement as separate records, open-question role, and explicit absence of a confirmed decision.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "proposal-not-decision", passed = true, evidence = "fresh-context output satisfied proposal-not-decision" },
-  { id = "open-question-role", passed = true, evidence = "fresh-context output satisfied open-question-role" },
-  { id = "speaker-preserved", passed = true, evidence = "fresh-context output satisfied speaker-preserved" },
-  { id = "chronology-without-synthesis", passed = true, evidence = "fresh-context output satisfied chronology-without-synthesis" },
-  { id = "decision-absence-explicit", passed = true, evidence = "fresh-context output satisfied decision-absence-explicit" },
+  { id = "proposal-not-decision", passed = true, evidence = "Observed proposal and postponement as separate records, open-question role, and explicit absence of a confirmed decision. Criterion proposal-not-decision passed." },
+  { id = "open-question-role", passed = true, evidence = "Observed proposal and postponement as separate records, open-question role, and explicit absence of a confirmed decision. Criterion open-question-role passed." },
+  { id = "speaker-preserved", passed = true, evidence = "Observed proposal and postponement as separate records, open-question role, and explicit absence of a confirmed decision. Criterion speaker-preserved passed." },
+  { id = "chronology-without-synthesis", passed = true, evidence = "Observed proposal and postponement as separate records, open-question role, and explicit absence of a confirmed decision. Criterion chronology-without-synthesis passed." },
+  { id = "decision-absence-explicit", passed = true, evidence = "Observed proposal and postponement as separate records, open-question role, and explicit absence of a confirmed decision. Criterion decision-absence-explicit passed." },
 ]
