@@ -40,7 +40,7 @@ workspace書込み、artifact公開、state transitionはdeterministic executor�
 同じrecordの重要度は変わる。許可された語彙から必要なroleだけを付け、推測したroleは付けない。
 
 - `role:thesis`, `role:conclusion`, `role:rationale`
-- `role:decision`, `role:instruction`, `role:action-item`
+- `role:decision`, `role:instruction`, `role:action-item`, `role:owner`
 - `role:deadline`, `role:prohibition`, `role:condition`, `role:exception`, `role:safety`
 - `role:example`, `role:context`, `role:emphasis`, `role:open-question`
 

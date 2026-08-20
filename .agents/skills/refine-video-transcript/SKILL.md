@@ -20,7 +20,7 @@ Skillの選択は新しい取得・外部送信・書込み権限を与えない
 ## Outputs
 
 - raw segmentへ1対1で対応するrefined segments
-- correctionごとのbefore／after、reason、supporting evidence refs
+- request内のoriginal segmentへ結び付く最小限のrefined textとsupporting evidence refs
 - preserved ambiguityとunresolved items
 
 ## Correction boundary
@@ -35,7 +35,7 @@ Skillの選択は新しい取得・外部送信・書込み権限を与えない
 2. segment boundaries、timestamp、発言順、atomic propositionsを固定する。
 3. meaning-preservingなmechanical cleanupとsemantic correction candidatesを分ける。
 4. semantic candidateごとに、non-transcript evidenceがexact replacementを直接支持するか確認する。
-5. 支持されるcandidateだけを最小spanで補正し、before／afterとevidence refsを記録する。
+5. 支持されるcandidateだけを最小spanで補正し、request内のoriginal segment ID／fingerprintとevidence refsへ結び付ける。
 6. proper noun、number、technical term、否定、主体が未確定なら原文またはambiguityを保つ。
 7. propositionsをmerge、split、reorderせず、sourceが持つhesitationやuncertaintyを意味が変わる形で消さない。
 8. すべてのsemantic correctionを再検証し、unsupported candidateを出力から除く。

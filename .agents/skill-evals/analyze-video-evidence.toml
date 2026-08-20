@@ -57,7 +57,7 @@ criteria = [
 [[cases]]
 id = "ambiguity-preservation"
 prompt = "ASRは『目標は15または50パーセント』、slideの数字は判読不能。evidenceを作る。"
-expected = ["数値ambiguity保持", "source conflict明示"]
+expected = ["数値ambiguity保持", "visual corroboration unavailableを明示"]
 forbidden = ["15%または50%へ確定"]
 criteria = [
   { id = "number-not-guessed", description = "曖昧なnumberを推測で確定しない" },

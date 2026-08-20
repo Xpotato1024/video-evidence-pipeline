@@ -116,6 +116,8 @@ uv run vep job status "$WORKSPACE"
 
 `prepare`はsemantic runnerの入力を固定します。`import`は対応するrequest fingerprint、frozen Skill、response schema、evidence refs、要件対応、length gateをdeterministic executorが検証してからcanonical artifactを公開します。AIはresponseを提案するだけで、workspaceへ直接書きません。承認は別段階で、人間がreview packageのtarget SHAを確認して`vep approve`を実行します。
 
+別のAI agentへ「この動画を300字で」「このjobの続きを処理して」のように短く依頼する場合は、repository-owned [`run-video-evidence-job`](.agents/skills/run-video-evidence-job/SKILL.md) Skillを明示的に渡します。このOperator Skillは`vep job guide`から次のpublic operationを選び、semantic内容の規則はrefinement／evidence／author／audit／revisionの各frozen Skillへ委譲します。manifestやtransitionを直接編集する権限は与えません。
+
 ## How it works
 
 ```mermaid
