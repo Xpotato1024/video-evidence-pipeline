@@ -27,8 +27,11 @@ evidence → rationale → representative detail`である。
 
 - provider-neutral draft Markdown
 - evidence／requirementへ束縛したclaim records
-- ordered requirement map、omission rationale
-- unresolved itemとconfirmation requirement
+- ordered requirement map。omission rationaleは
+  `requirement_map.entries[].explanation`へ記録する
+- unresolved itemとconfirmation requirement。専用fieldを増やさず、該当entryを
+  `partial`／`unmet`として説明し、user opinionは`[要確認]`と
+  `requires_user_confirmation = true`でも表す
 
 ## Procedure
 

@@ -27,7 +27,8 @@ assignment、purpose、audienceに対して重要なsemantic unitを選ばなけ
 - provider-neutral summaryまたはmeeting-minutes draft
 - evidenceへ束縛したclaim records
 - requirement／selected-unit coverage map
-- omitted-unit rationale、unresolved item list
+- omissionとunresolvedの状態。専用fieldを増やさず、response schemaの
+  `requirement_map.entries[].explanation`と`coverage`（`partial`／`unmet`）へ記録する
 
 ## Salience profiles
 
