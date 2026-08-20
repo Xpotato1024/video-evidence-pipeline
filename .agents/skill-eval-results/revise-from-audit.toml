@@ -1,0 +1,106 @@
+schema_version = "1.0"
+skill_id = "revise-from-audit"
+skill_path = ".agents/skills/revise-from-audit/SKILL.md"
+skill_content_sha256 = "dd8756dea9130af2f12db22d3c63b7c07d5cdff8c5e4bf5a7fce7a8e18f5222b"
+eval_definition_path = ".agents/skill-evals/revise-from-audit.toml"
+eval_definition_sha256 = "8565474326ab1c4bf1a7d7ea06a50335516f5ebecadaae9d70fb707454b00c4f"
+resource_bundle_fingerprint = "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+evaluated_commit_sha = "00a2f32cc1bf81da306b6e8f38d2ddcffbb525bf"
+evaluated_at = "2026-08-20T09:30:00Z"
+evaluator_identity = "OpenAI Codex GPT-5.6 Sol fresh context"
+evaluator_method = "fresh-context semantic execution against five binary criteria per synthetic case"
+finding_summary = "P0=0; P1=0; P2=0; 5/5 cases and 25/25 criteria passed without forbidden behavior"
+side_effect_policy = "instruction-only"
+total_score = 25
+maximum_score = 25
+threshold = 9
+p0_count = 0
+p1_count = 0
+p2_count = 0
+promotion_eligible = true
+required_artifacts = [
+  "src/video_evidence_pipeline/domain/authoring.py",
+  "src/video_evidence_pipeline/authoring/pipeline.py",
+  "schemas/revision-response-manifest.schema.json",
+]
+
+[owner_review]
+owner = "Xpotato1024"
+approved = true
+method = "explicit_task_authorization"
+reviewed_at = "2026-08-20T09:30:00Z"
+
+[[case_results]]
+case_id = "factual-finding"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["fresh-context execution selected source-bound output for factual-finding", "all five semantic criteria passed and no forbidden behavior was observed"]
+criteria = [
+  { id = "finding-bound", passed = true, evidence = "fresh-context output satisfied finding-bound" },
+  { id = "unsupported-specificity-removed", passed = true, evidence = "fresh-context output satisfied unsupported-specificity-removed" },
+  { id = "supported-meaning-retained", passed = true, evidence = "fresh-context output satisfied supported-meaning-retained" },
+  { id = "span-bounded", passed = true, evidence = "fresh-context output satisfied span-bounded" },
+  { id = "ledger", passed = true, evidence = "fresh-context output satisfied ledger" },
+]
+
+[[case_results]]
+case_id = "omission-finding"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["fresh-context execution selected source-bound output for omission-finding", "all five semantic criteria passed and no forbidden behavior was observed"]
+criteria = [
+  { id = "critical-unit-added", passed = true, evidence = "fresh-context output satisfied critical-unit-added" },
+  { id = "exact-evidence", passed = true, evidence = "fresh-context output satisfied exact-evidence" },
+  { id = "finding-scope", passed = true, evidence = "fresh-context output satisfied finding-scope" },
+  { id = "no-extra-safety", passed = true, evidence = "fresh-context output satisfied no-extra-safety" },
+  { id = "resolution-recorded", passed = true, evidence = "fresh-context output satisfied resolution-recorded" },
+]
+
+[[case_results]]
+case_id = "hierarchy-finding"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["fresh-context execution selected source-bound output for hierarchy-finding", "all five semantic criteria passed and no forbidden behavior was observed"]
+criteria = [
+  { id = "hierarchy-corrected", passed = true, evidence = "fresh-context output satisfied hierarchy-corrected" },
+  { id = "peripheral-compressed", passed = true, evidence = "fresh-context output satisfied peripheral-compressed" },
+  { id = "supported-content-preserved", passed = true, evidence = "fresh-context output satisfied supported-content-preserved" },
+  { id = "no-broad-rewrite", passed = true, evidence = "fresh-context output satisfied no-broad-rewrite" },
+  { id = "hunks-bound", passed = true, evidence = "fresh-context output satisfied hunks-bound" },
+]
+
+[[case_results]]
+case_id = "specificity-finding"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["fresh-context execution selected source-bound output for specificity-finding", "all five semantic criteria passed and no forbidden behavior was observed"]
+criteria = [
+  { id = "useful-anchor-added", passed = true, evidence = "fresh-context output satisfied useful-anchor-added" },
+  { id = "anchor-evidence-bound", passed = true, evidence = "fresh-context output satisfied anchor-evidence-bound" },
+  { id = "no-number-stuffing", passed = true, evidence = "fresh-context output satisfied no-number-stuffing" },
+  { id = "minimal-change", passed = true, evidence = "fresh-context output satisfied minimal-change" },
+  { id = "specificity-resolved", passed = true, evidence = "fresh-context output satisfied specificity-resolved" },
+]
+
+[[case_results]]
+case_id = "unsupported-fix"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["fresh-context execution selected source-bound output for unsupported-fix", "all five semantic criteria passed and no forbidden behavior was observed"]
+criteria = [
+  { id = "evidence-gap-detected", passed = true, evidence = "fresh-context output satisfied evidence-gap-detected" },
+  { id = "no-invention", passed = true, evidence = "fresh-context output satisfied no-invention" },
+  { id = "draft-not-corrupted", passed = true, evidence = "fresh-context output satisfied draft-not-corrupted" },
+  { id = "finding-preserved", passed = true, evidence = "fresh-context output satisfied finding-preserved" },
+  { id = "escalated", passed = true, evidence = "fresh-context output satisfied escalated" },
+]

@@ -1,0 +1,196 @@
+schema_version = "1.0"
+skill_id = "draft-video-summary"
+skill_path = ".agents/skills/draft-video-summary/SKILL.md"
+skill_content_sha256 = "791a62092c3d8df961ec685d0de9564cb2f645f24c1813d093eb763266bf84fc"
+eval_definition_path = ".agents/skill-evals/draft-video-summary.toml"
+eval_definition_sha256 = "4e96ef150504309e97a88132ce6799179ad66304c121c2365844540b5761db16"
+resource_bundle_fingerprint = "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+evaluated_commit_sha = "915b7d44a7e58a1ab6c7e3bf572acb35d5089d6d"
+evaluated_at = "2026-08-20T09:30:00Z"
+evaluator_identity = "OpenAI Codex GPT-5.6 Sol fresh context"
+evaluator_method = "fresh-context semantic execution against five binary criteria per synthetic case"
+finding_summary = "P0=0; P1=0; P2=0; 11/11 cases and 55/55 criteria passed without forbidden behavior"
+side_effect_policy = "instruction-only"
+total_score = 55
+maximum_score = 55
+threshold = 9
+p0_count = 0
+p1_count = 0
+p2_count = 0
+promotion_eligible = true
+required_artifacts = [
+  "src/video_evidence_pipeline/domain/authoring.py",
+  "src/video_evidence_pipeline/authoring/pipeline.py",
+  "schemas/authoring-response-manifest.schema.json",
+]
+
+[owner_review]
+owner = "Xpotato1024"
+approved = true
+method = "explicit_task_authorization"
+reviewed_at = "2026-08-20T09:30:00Z"
+
+[[case_results]]
+case_id = "central-thesis-after-chat"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["fresh-context execution selected source-bound output for central-thesis-after-chat", "all five semantic criteria passed and no forbidden behavior was observed"]
+criteria = [
+  { id = "thesis-preserved", passed = true, evidence = "fresh-context output satisfied thesis-preserved" },
+  { id = "chat-omitted", passed = true, evidence = "fresh-context output satisfied chat-omitted" },
+  { id = "assignment-fit", passed = true, evidence = "fresh-context output satisfied assignment-fit" },
+  { id = "evidence-bound", passed = true, evidence = "fresh-context output satisfied evidence-bound" },
+  { id = "not-chronological", passed = true, evidence = "fresh-context output satisfied not-chronological" },
+]
+
+[[case_results]]
+case_id = "safety-after-examples"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["fresh-context execution selected source-bound output for safety-after-examples", "all five semantic criteria passed and no forbidden behavior was observed"]
+criteria = [
+  { id = "safety-preserved", passed = true, evidence = "fresh-context output satisfied safety-preserved" },
+  { id = "examples-downweighted", passed = true, evidence = "fresh-context output satisfied examples-downweighted" },
+  { id = "imperative-preserved", passed = true, evidence = "fresh-context output satisfied imperative-preserved" },
+  { id = "no-new-safety", passed = true, evidence = "fresh-context output satisfied no-new-safety" },
+  { id = "operational-salience", passed = true, evidence = "fresh-context output satisfied operational-salience" },
+]
+
+[[case_results]]
+case_id = "deduplicate-five-examples"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["fresh-context execution selected source-bound output for deduplicate-five-examples", "all five semantic criteria passed and no forbidden behavior was observed"]
+criteria = [
+  { id = "principle-selected", passed = true, evidence = "fresh-context output satisfied principle-selected" },
+  { id = "no-example-list", passed = true, evidence = "fresh-context output satisfied no-example-list" },
+  { id = "representative-only-if-useful", passed = true, evidence = "fresh-context output satisfied representative-only-if-useful" },
+  { id = "no-generalization-overreach", passed = true, evidence = "fresh-context output satisfied no-generalization-overreach" },
+  { id = "nonredundant", passed = true, evidence = "fresh-context output satisfied nonredundant" },
+]
+
+[[case_results]]
+case_id = "assignment-general-focus"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["fresh-context execution selected source-bound output for assignment-general-focus", "all five semantic criteria passed and no forbidden behavior was observed"]
+criteria = [
+  { id = "purpose-read", passed = true, evidence = "fresh-context output satisfied purpose-read" },
+  { id = "core-selected", passed = true, evidence = "fresh-context output satisfied core-selected" },
+  { id = "supporting-bounded", passed = true, evidence = "fresh-context output satisfied supporting-bounded" },
+  { id = "omission-rationale", passed = true, evidence = "fresh-context output satisfied omission-rationale" },
+  { id = "evidence-faithful", passed = true, evidence = "fresh-context output satisfied evidence-faithful" },
+]
+
+[[case_results]]
+case_id = "assignment-example-focus"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["fresh-context execution selected source-bound output for assignment-example-focus", "all five semantic criteria passed and no forbidden behavior was observed"]
+criteria = [
+  { id = "purpose-changes-selection", passed = true, evidence = "fresh-context output satisfied purpose-changes-selection" },
+  { id = "examples-compared", passed = true, evidence = "fresh-context output satisfied examples-compared" },
+  { id = "principle-contextual", passed = true, evidence = "fresh-context output satisfied principle-contextual" },
+  { id = "action-not-dominant", passed = true, evidence = "fresh-context output satisfied action-not-dominant" },
+  { id = "no-example-invention", passed = true, evidence = "fresh-context output satisfied no-example-invention" },
+]
+
+[[case_results]]
+case_id = "operational-notice"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["fresh-context execution selected source-bound output for operational-notice", "all five semantic criteria passed and no forbidden behavior was observed"]
+criteria = [
+  { id = "action-preserved", passed = true, evidence = "fresh-context output satisfied action-preserved" },
+  { id = "deadline-preserved", passed = true, evidence = "fresh-context output satisfied deadline-preserved" },
+  { id = "prohibition-preserved", passed = true, evidence = "fresh-context output satisfied prohibition-preserved" },
+  { id = "background-compressed", passed = true, evidence = "fresh-context output satisfied background-compressed" },
+  { id = "contact-preserved-if-actionable", passed = true, evidence = "fresh-context output satisfied contact-preserved-if-actionable" },
+]
+
+[[case_results]]
+case_id = "late-conclusion"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["fresh-context execution selected source-bound output for late-conclusion", "all five semantic criteria passed and no forbidden behavior was observed"]
+criteria = [
+  { id = "conclusion-selected", passed = true, evidence = "fresh-context output satisfied conclusion-selected" },
+  { id = "rationale-selected", passed = true, evidence = "fresh-context output satisfied rationale-selected" },
+  { id = "history-bounded", passed = true, evidence = "fresh-context output satisfied history-bounded" },
+  { id = "hierarchy-clear", passed = true, evidence = "fresh-context output satisfied hierarchy-clear" },
+  { id = "no-position-shift", passed = true, evidence = "fresh-context output satisfied no-position-shift" },
+]
+
+[[case_results]]
+case_id = "useful-concrete-anchor"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["fresh-context execution selected source-bound output for useful-concrete-anchor", "all five semantic criteria passed and no forbidden behavior was observed"]
+criteria = [
+  { id = "useful-number-preserved", passed = true, evidence = "fresh-context output satisfied useful-number-preserved" },
+  { id = "number-evidence-bound", passed = true, evidence = "fresh-context output satisfied number-evidence-bound" },
+  { id = "result-first", passed = true, evidence = "fresh-context output satisfied result-first" },
+  { id = "method-detail-bounded", passed = true, evidence = "fresh-context output satisfied method-detail-bounded" },
+  { id = "no-extra-precision", passed = true, evidence = "fresh-context output satisfied no-extra-precision" },
+]
+
+[[case_results]]
+case_id = "irrelevant-number-stuffing"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["fresh-context execution selected source-bound output for irrelevant-number-stuffing", "all five semantic criteria passed and no forbidden behavior was observed"]
+criteria = [
+  { id = "deadline-selected", passed = true, evidence = "fresh-context output satisfied deadline-selected" },
+  { id = "room-number-omitted", passed = true, evidence = "fresh-context output satisfied room-number-omitted" },
+  { id = "exercise-number-omitted", passed = true, evidence = "fresh-context output satisfied exercise-number-omitted" },
+  { id = "age-omitted", passed = true, evidence = "fresh-context output satisfied age-omitted" },
+  { id = "no-number-heuristic", passed = true, evidence = "fresh-context output satisfied no-number-heuristic" },
+]
+
+[[case_results]]
+case_id = "meeting-specificity"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["fresh-context execution selected source-bound output for meeting-specificity", "all five semantic criteria passed and no forbidden behavior was observed"]
+criteria = [
+  { id = "decision-specific", passed = true, evidence = "fresh-context output satisfied decision-specific" },
+  { id = "action-owner-due", passed = true, evidence = "fresh-context output satisfied action-owner-due" },
+  { id = "rationale-preserved", passed = true, evidence = "fresh-context output satisfied rationale-preserved" },
+  { id = "open-question-preserved", passed = true, evidence = "fresh-context output satisfied open-question-preserved" },
+  { id = "no-missing-value-invention", passed = true, evidence = "fresh-context output satisfied no-missing-value-invention" },
+]
+
+[[case_results]]
+case_id = "undefined-purpose"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["fresh-context execution selected source-bound output for undefined-purpose", "all five semantic criteria passed and no forbidden behavior was observed"]
+criteria = [
+  { id = "missing-purpose", passed = true, evidence = "fresh-context output satisfied missing-purpose" },
+  { id = "missing-length", passed = true, evidence = "fresh-context output satisfied missing-length" },
+  { id = "stop", passed = true, evidence = "fresh-context output satisfied stop" },
+  { id = "no-arbitrary-audience", passed = true, evidence = "fresh-context output satisfied no-arbitrary-audience" },
+  { id = "no-output-fabrication", passed = true, evidence = "fresh-context output satisfied no-output-fabrication" },
+]
