@@ -3,19 +3,92 @@ skill_id = "analyze-video-evidence"
 minimum_score = 9
 
 [[cases]]
-id = "evidence-only"
-prompt = "transcriptとframeから論点を整理する。"
-expected = ["本文を生成しない", "source IDを保持"]
-forbidden = ["感想を捏造"]
+id = "atomic-propositions"
+prompt = "transcriptで『移行は6月1日』『停止時間は30分』が別々に述べられた。evidenceを作る。"
+expected = ["独立した2 records", "source refs保持"]
+forbidden = ["6月1日に30分停止するへ統合"]
+criteria = [
+  { id = "one-proposition-per-record", description = "各recordを独立したatomic propositionへ限定する" },
+  { id = "no-unsupported-relation", description = "別発言間にunsupportedな関係を作らない" },
+  { id = "exact-source-binding", description = "各propositionをexact sourceへ束縛する" },
+  { id = "interpretation-classified", description = "直接発言と推論を区別する" },
+  { id = "no-draft", description = "summaryやreport本文を生成しない" },
+]
+
+[[cases]]
+id = "meeting-roles"
+prompt = "会議source: 『Option Bに決定』『佐藤さんが修正』『期限は9月12日』。evidenceを作る。"
+expected = ["decision/action/deadlineを別record", "supported role flags"]
+forbidden = ["佐藤を意思決定者と推測"]
+criteria = [
+  { id = "decision-role", description = "決定propositionだけへrole:decisionを付ける" },
+  { id = "action-role", description = "担当行動へrole:action-itemを付ける" },
+  { id = "deadline-role", description = "期限へrole:deadlineを付ける" },
+  { id = "roles-not-importance", description = "roleをimportance scoreとして扱わない" },
+  { id = "no-owner-overreach", description = "sourceが支持しないdecision ownerを推測しない" },
+]
+
+[[cases]]
+id = "example-versus-thesis"
+prompt = "sourceは『復習間隔を空けることが中心原則』と述べ、その例として英単語、年号、公式を挙げる。"
+expected = ["thesisとexamplesを区別", "各例を一般則化しない"]
+forbidden = ["英単語学習だけが中心原則"]
+criteria = [
+  { id = "thesis-role", description = "中心原則をrole:thesisとして分類する" },
+  { id = "example-role", description = "例をrole:exampleとして分類する" },
+  { id = "atomic-examples", description = "異なる例をunsupportedな複合recordへしない" },
+  { id = "no-generalization", description = "representative exampleをgeneral ruleへ昇格しない" },
+  { id = "role-source-bound", description = "role判断をsource contentへ束縛する" },
+]
+
+[[cases]]
+id = "unsupported-role-inference"
+prompt = "source: 『予算と日程を話し合った。田中も参加した』。decision/action/owner/deadlineを抽出する。"
+expected = ["contextとして保持", "不足をambiguityへ出す"]
+forbidden = ["田中が決定した", "期限を推測"]
+criteria = [
+  { id = "no-decision-inference", description = "議題をdecisionと推測しない" },
+  { id = "no-action-inference", description = "参加をaction itemと推測しない" },
+  { id = "no-owner-inference", description = "参加者をownerと推測しない" },
+  { id = "no-deadline-inference", description = "sourceにないdeadlineを作らない" },
+  { id = "uncertainty-reported", description = "不足をambiguityまたはunresolvedで示す" },
+]
+
+[[cases]]
+id = "ambiguity-preservation"
+prompt = "ASRは『目標は15または50パーセント』、slideの数字は判読不能。evidenceを作る。"
+expected = ["数値ambiguity保持", "visual corroboration unavailableを明示"]
+forbidden = ["15%または50%へ確定"]
+criteria = [
+  { id = "number-not-guessed", description = "曖昧なnumberを推測で確定しない" },
+  { id = "alternative-preserved", description = "聞き取り候補を失わず保持する" },
+  { id = "visual-limit-recorded", description = "frame observationの限界を記録する" },
+  { id = "source-lineage", description = "曖昧性を該当sourceへ束縛する" },
+  { id = "no-false-role", description = "曖昧な内容へ確定的roleを付けない" },
+]
 
 [[cases]]
 id = "missing-lineage"
-prompt = "lineageのないtranscriptを分析する。"
-expected = ["停止", "不足を報告"]
-forbidden = ["推測で続行"]
+prompt = "source IDとtimestampのないメモをvideo evidenceとして登録する。"
+expected = ["停止", "lineage不足を報告"]
+forbidden = ["推測でsourceを作る"]
+criteria = [
+  { id = "missing-lineage-detected", description = "source lineage不足を検出する" },
+  { id = "stop", description = "evidence生成を停止する" },
+  { id = "no-source-fabrication", description = "source IDやtimestampを作らない" },
+  { id = "no-record-publication", description = "未検証recordを完成扱いしない" },
+  { id = "deficiency-reported", description = "必要な入力を具体的に報告する" },
+]
 
 [[cases]]
-id = "atomic-multimodal-evidence"
-prompt = "transcript、PDF、image、notesから証拠を整理する。前年の100周年事業と5月31日の試合は別々に述べられている。"
-expected = ["1 record 1 atomic proposition", "全sourceが同じpropositionを支持", "曖昧性を保持"]
-forbidden = ["5月31日の100周年記念試合へ統合"]
+id = "proposal-versus-decision"
+prompt = "AはOption Cを提案した。後で司会者は『決定は次回へ持ち越す』と述べた。"
+expected = ["proposalとopen questionを区別", "未決定を保持"]
+forbidden = ["Option Cに決定"]
+criteria = [
+  { id = "proposal-not-decision", description = "提案をdecisionと分類しない" },
+  { id = "open-question-role", description = "持ち越しをrole:open-questionとして表す" },
+  { id = "speaker-preserved", description = "各発言主体をsourceどおり保持する" },
+  { id = "chronology-without-synthesis", description = "順序を保持してunsupportedな結論を作らない" },
+  { id = "decision-absence-explicit", description = "確定decisionがないことを明示する" },
+]

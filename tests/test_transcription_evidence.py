@@ -176,7 +176,9 @@ def _job(job_id: str = "issue14-job") -> JobSpec:
 
 
 def _workspace(tmp_path: Path, job: JobSpec) -> JobWorkspace:
-    return JobWorkspace.create(tmp_path, job.job_id)
+    workspace = JobWorkspace.create(tmp_path, job.job_id)
+    shutil.copytree(Path(__file__).parents[1] / ".agents", tmp_path / ".agents", dirs_exist_ok=True)
+    return workspace
 
 
 def _required_ffmpeg() -> str:
@@ -259,6 +261,9 @@ def _application_transcribed_job(
         min_chars=min_chars,
         max_chars=max_chars,
         maximum_length_adjustments=maximum_length_adjustments,
+    )
+    shutil.copytree(
+        Path(__file__).parents[1] / ".agents", repository / ".agents", dirs_exist_ok=True
     )
     authorize_job(
         workspace.root,

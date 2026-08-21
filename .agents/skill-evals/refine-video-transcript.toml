@@ -1,0 +1,68 @@
+schema_version = "1.0"
+skill_id = "refine-video-transcript"
+minimum_score = 9
+
+[[cases]]
+id = "unsupported-proper-noun"
+prompt = "ASR『オープンエーアイ社』をcontextだけで『OpenAI社』へ直す。non-transcript evidenceはない。"
+expected = ["訂正拒否", "原文またはambiguity保持"]
+forbidden = ["もっともらしさで固有名詞訂正"]
+criteria = [
+  { id = "semantic-change-detected", description = "proper noun変更をsemantic correctionと認識する" },
+  { id = "support-required", description = "non-transcript supporting evidenceを要求する" },
+  { id = "correction-rejected", description = "unsupported correctionを出力しない" },
+  { id = "raw-preserved", description = "raw wordingを保持する" },
+  { id = "ambiguity-reported", description = "必要ならambiguityとして示す" },
+]
+
+[[cases]]
+id = "unsupported-number"
+prompt = "ASR『目標は30』を会話の流れだけで『目標は30%』へ直す。slideはない。"
+expected = ["単位追加拒否", "number ambiguity保持"]
+forbidden = ["30%へ確定"]
+criteria = [
+  { id = "unit-is-semantic", description = "単位追加をsemantic correctionと認識する" },
+  { id = "no-context-only-fix", description = "transcript contextだけで訂正しない" },
+  { id = "number-preserved", description = "raw numberを保持する" },
+  { id = "ambiguity-preserved", description = "単位不明をambiguityとして残す" },
+  { id = "no-extra-fact", description = "sourceにないpercentageを作らない" },
+]
+
+[[cases]]
+id = "supported-correction"
+prompt = "ASR『アルファ2』、同timestampのslide titleは明瞭に『Alpha II』。最小補正する。"
+expected = ["Alpha IIへ補正", "slide refを記録"]
+forbidden = ["周辺文も書き換える"]
+criteria = [
+  { id = "support-verified", description = "独立したslide evidenceがexact replacementを支持する" },
+  { id = "minimal-span", description = "必要なtokenだけを補正する" },
+  { id = "before-after", description = "requestのoriginal segmentとresponseのrefined textを1対1で対応させる" },
+  { id = "evidence-binding", description = "correctionをslide source refへ束縛する" },
+  { id = "meaning-preserved", description = "周辺propositionの意味を変えない" },
+]
+
+[[cases]]
+id = "unresolved-ambiguity"
+prompt = "ASR『15か50』、frameもぼやけている。読みやすい一つの数字へ整える。"
+expected = ["候補保持", "確定不能を報告"]
+forbidden = ["15または50を選択"]
+criteria = [
+  { id = "alternatives-preserved", description = "rawの複数候補を保持する" },
+  { id = "weak-frame-rejected", description = "判読不能frameをcorrection evidenceにしない" },
+  { id = "no-guess", description = "もっともらしい数字を選ばない" },
+  { id = "uncertainty-explicit", description = "確定不能を明示する" },
+  { id = "segment-stable", description = "segment identityとtimestampを保持する" },
+]
+
+[[cases]]
+id = "no-proposition-merge"
+prompt = "連続segments: S1『検証を行う』、S2『公開は金曜』。読みやすい一文へ統合する。"
+expected = ["segmentsを分離保持", "atomic propositions保持"]
+forbidden = ["金曜に検証して公開するへ統合"]
+criteria = [
+  { id = "boundary-preserved", description = "segment boundariesを維持する" },
+  { id = "order-preserved", description = "発言順を維持する" },
+  { id = "no-relation-created", description = "propositions間に新しい関係を作らない" },
+  { id = "no-merge", description = "読みやすさのためにmergeしない" },
+  { id = "source-mapping", description = "各refined segmentをraw segmentへ1対1対応させる" },
+]

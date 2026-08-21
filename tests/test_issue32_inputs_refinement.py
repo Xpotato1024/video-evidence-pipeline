@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -95,6 +96,16 @@ from video_evidence_pipeline.transcription.refinement import (
     prepare_refinement_request,
     publish_refinement,
 )
+
+
+def _install_repository_skills(workspace: JobWorkspace) -> None:
+    repository_root = workspace.jobs_root.parent.parent
+    shutil.copytree(
+        Path(__file__).parents[1] / ".agents",
+        repository_root / ".agents",
+        dirs_exist_ok=True,
+    )
+
 
 _NOW = datetime(2026, 8, 11, tzinfo=UTC)
 
@@ -204,6 +215,7 @@ def test_automatic_filler_cleanup_preserves_raw_transcript_and_records_edits(
         prepared,
         create_transcription_attempt(workspace),
     )
+    _install_repository_skills(workspace)
     original_segments = transcript.segments
     request = prepare_refinement_request(
         workspace,
@@ -490,6 +502,7 @@ def test_supplied_transcript_refines_separately_and_rejects_ungrounded_merge(
     )
     assert workspace.safe_path(raw.relative_storage_path).read_bytes() == raw_bytes
 
+    _install_repository_skills(workspace)
     request = prepare_refinement_request(
         workspace,
         job,

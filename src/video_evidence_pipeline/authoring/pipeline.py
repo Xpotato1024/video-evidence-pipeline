@@ -6,7 +6,6 @@ import json
 import re
 import shutil
 import stat
-import tomllib
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -55,7 +54,6 @@ from video_evidence_pipeline.domain.authoring import (
     RevisionManifest,
     RevisionRequestManifest,
     RevisionResponseManifest,
-    SkillSnapshot,
     fixed_evidence_identity,
     fixed_evidence_identity_matches,
 )
@@ -79,6 +77,7 @@ from video_evidence_pipeline.domain.length import (
     validate_character_range,
 )
 from video_evidence_pipeline.domain.manifests import StageManifest, StageStatus
+from video_evidence_pipeline.domain.semantic import SkillSnapshot
 from video_evidence_pipeline.domain.serialization import (
     canonical_json_bytes,
     fingerprint,
@@ -86,6 +85,11 @@ from video_evidence_pipeline.domain.serialization import (
 )
 from video_evidence_pipeline.domain.state import JobState
 from video_evidence_pipeline.errors import integrity_error, state_error
+from video_evidence_pipeline.semantic.skills import (
+    load_skill_snapshot,
+    require_pending_semantic_request_importable,
+    validate_import_skill,
+)
 from video_evidence_pipeline.storage.atomic import (
     atomic_copy_exclusive,
     atomic_write_bytes,
@@ -101,7 +105,6 @@ AUTHORING_IMPLEMENTATION_VERSION = "authoring-v1"
 _ATTEMPT_NAME = re.compile(r"^[0-9a-f]{32}$")
 _MAXIMUM_MACHINE_BYTES = 128 * 1024 * 1024
 _MAXIMUM_DRAFT_BYTES = 4 * 1024 * 1024
-_MAXIMUM_SKILL_BYTES = 1024 * 1024
 _FIXTURE_MARKERS = frozenset({"deterministic", "fake", "fixture", "mock", "synthetic", "test"})
 _AUTHOR_SKILLS = frozenset({"draft-video-report", "draft-video-summary"})
 _AUDIT_SKILLS = frozenset({"independent-content-audit"})
@@ -483,17 +486,6 @@ def _validate_execution(identity: AgentIdentity, *, allow_fixture: bool) -> None
         raise state_error("FIXTURE_AGENT_FORBIDDEN", "fixture agent output is not allowed")
 
 
-def _same_skill_snapshot_except_lifecycle(
-    frozen: SkillSnapshot,
-    current: SkillSnapshot,
-) -> bool:
-    """Compare the immutable execution contract without treating promotion as drift."""
-
-    return frozen.model_dump(mode="json", exclude={"lifecycle"}) == current.model_dump(
-        mode="json", exclude={"lifecycle"}
-    )
-
-
 def _validate_import_skill(
     workspace: JobWorkspace,
     skill: SkillSnapshot,
@@ -511,80 +503,7 @@ def _validate_import_skill(
 
     if allow_fixture and _response_is_fixture(identity):
         return
-    current = load_skill_snapshot(workspace, skill.skill_id, allowed=allowed)
-    if not _same_skill_snapshot_except_lifecycle(skill, current):
-        raise integrity_error(
-            "SKILL_SNAPSHOT_STALE",
-            "current Skill content, evaluation, or identity differs from the request snapshot",
-        )
-    if current.lifecycle != "active":
-        raise state_error(
-            "DRAFT_SKILL_FORBIDDEN",
-            "draft Skill output is not allowed on a production import route",
-        )
-
-
-def _repository_root(workspace: JobWorkspace) -> Path:
-    return workspace.jobs_root.parent.parent
-
-
-def load_skill_snapshot(
-    workspace: JobWorkspace,
-    skill_id: str,
-    *,
-    allowed: frozenset[str],
-) -> SkillSnapshot:
-    if skill_id not in allowed:
-        raise state_error("SKILL_ROUTE_INVALID", "selected Skill is not valid for this stage")
-    root = _repository_root(workspace)
-    registry_path = root / ".agents" / "skill-system.toml"
-    payload = _read_bounded_bytes(
-        registry_path,
-        maximum_bytes=_MAXIMUM_SKILL_BYTES,
-        code="SKILL_REGISTRY_INVALID",
-    )
-    try:
-        registry = tomllib.loads(payload.decode("utf-8"))
-        entries = [item for item in registry["skills"] if item.get("id") == skill_id]
-        if len(entries) != 1:
-            raise ValueError
-        entry = entries[0]
-        relative_path = entry["path"].replace("\\", "/")
-        eval_relative = entry["eval_path"].replace("\\", "/")
-        if (
-            entry["automatic_trigger"] is not False
-            or entry["side_effect_policy"] != "instruction-only"
-            or entry["lifecycle"] not in {"draft", "active"}
-        ):
-            raise ValueError
-    except (KeyError, TypeError, UnicodeError, tomllib.TOMLDecodeError, ValueError):
-        raise integrity_error("SKILL_REGISTRY_INVALID", "Skill registry is invalid") from None
-    skill_path = root.joinpath(*relative_path.split("/"))
-    eval_path = root.joinpath(*eval_relative.split("/"))
-    for path in (skill_path, eval_path):
-        try:
-            path.resolve(strict=True).relative_to(root.resolve(strict=True))
-        except (OSError, ValueError):
-            raise integrity_error("SKILL_REGISTRY_INVALID", "Skill path is invalid") from None
-        if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
-            raise integrity_error("SKILL_REGISTRY_INVALID", "Skill path is invalid")
-    skill_bytes = _read_bounded_bytes(
-        skill_path, maximum_bytes=_MAXIMUM_SKILL_BYTES, code="SKILL_SNAPSHOT_INVALID"
-    )
-    eval_bytes = _read_bounded_bytes(
-        eval_path, maximum_bytes=_MAXIMUM_SKILL_BYTES, code="SKILL_SNAPSHOT_INVALID"
-    )
-    return SkillSnapshot(
-        skill_id=skill_id,
-        relative_path=relative_path,
-        content_sha256=sha256_bytes(skill_bytes),
-        eval_sha256=sha256_bytes(eval_bytes),
-        lifecycle=entry["lifecycle"],
-        automatic_trigger=False,
-        side_effect_policy="instruction-only",
-        explicit_selection=True,
-        owner=entry["owner"],
-    )
+    validate_import_skill(workspace, skill, allowed=allowed)
 
 
 def build_fixed_evidence_bundle(
@@ -622,6 +541,8 @@ def _constraints(job: JobSpec, fixed: FixedEvidenceBundle) -> OutputConstraints:
         requirements=fixed.evidence_request.assignment.requirements,
         length=job.assignment.length if effective_length is not None else None,
         effective_length=effective_length,
+        purpose=job.assignment.purpose,
+        audience=job.assignment.audience,
     )
 
 
@@ -1213,6 +1134,15 @@ def _request_fingerprint(value: BaseModel) -> str:
     if isinstance(constraints, dict) and constraints.get("length") is None:
         constraints.pop("length", None)
         constraints.pop("effective_length", None)
+    evidence_request = payload.get("fixed_evidence", {}).get("evidence_request")
+    if isinstance(evidence_request, dict):
+        analyzer_contract = evidence_request.get("analyzer_contract")
+        source_contract = value.fixed_evidence.evidence_request.analyzer_contract
+        if (
+            isinstance(analyzer_contract, dict)
+            and "atomic_proposition_contract" not in source_contract.model_fields_set
+        ):
+            analyzer_contract.pop("atomic_proposition_contract", None)
     return fingerprint(payload)
 
 
@@ -1226,8 +1156,17 @@ def _request_fingerprint_matches(value: _AuthoringRequestManifest) -> bool:
 
 
 def _validate_request_fingerprint(value: _AuthoringRequestManifest, *, deep: bool = False) -> None:
-    if deep and not _request_fingerprint_matches(value):
-        raise integrity_error("AUTHORING_REQUEST_INVALID", "request fingerprint is inconsistent")
+    """Validate the small machine contract on every path; deep remains artifact-oriented."""
+
+    del deep
+    if _request_fingerprint_matches(value):
+        return
+    code = {
+        AuthoringRequestManifest: "AUTHORING_REQUEST_INVALID",
+        AuditRequestManifest: "AUDIT_REQUEST_INVALID",
+        RevisionRequestManifest: "REVISION_REQUEST_INVALID",
+    }[type(value)]
+    raise integrity_error(code, "request fingerprint is inconsistent")
 
 
 def prepare_authoring_request(
@@ -1253,6 +1192,13 @@ def prepare_authoring_request(
             or request.skill.skill_id != skill_id
         ):
             raise integrity_error("AUTHORING_REQUEST_STALE", "authoring request is stale")
+        if not _draft_manifest_path(workspace, "v001").exists():
+            require_pending_semantic_request_importable(
+                workspace,
+                request.skill,
+                allowed=_AUTHOR_SKILLS,
+                expected_skill_id=skill_id,
+            )
         return AuthoringPrepareResult(request=request, reused=True)
     skill = load_skill_snapshot(workspace, skill_id, allowed=_AUTHOR_SKILLS)
     provisional = AuthoringRequestManifest(
@@ -2065,6 +2011,13 @@ def prepare_audit_request(
             or request.output_constraints != _constraints(job, fixed)
         ):
             raise integrity_error("AUDIT_REQUEST_STALE", "audit request is stale")
+        if not _audit_manifest_path(workspace, draft.manifest.draft_version).exists():
+            require_pending_semantic_request_importable(
+                workspace,
+                request.skill,
+                allowed=_AUDIT_SKILLS,
+                expected_skill_id=skill_id,
+            )
         return AuditPrepareResult(request=request, reused=True)
     skill = load_skill_snapshot(workspace, skill_id, allowed=_AUDIT_SKILLS)
     provisional = AuditRequestManifest(
@@ -2975,6 +2928,13 @@ def prepare_revision_request(
             or request.skill.skill_id != skill_id
         ):
             raise integrity_error("REVISION_REQUEST_STALE", "revision request is stale")
+        if not _draft_manifest_path(workspace, next_version).exists():
+            require_pending_semantic_request_importable(
+                workspace,
+                request.skill,
+                allowed=_REVISION_SKILLS,
+                expected_skill_id=skill_id,
+            )
         return RevisionPrepareResult(request=request, reused=True)
     skill = load_skill_snapshot(workspace, skill_id, allowed=_REVISION_SKILLS)
     provisional = RevisionRequestManifest(

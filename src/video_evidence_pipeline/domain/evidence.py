@@ -12,6 +12,7 @@ from video_evidence_pipeline.domain import StrictModel, UtcDateTime
 from video_evidence_pipeline.domain.artifacts import ArtifactRef, EvidenceLedgerArtifactRef
 from video_evidence_pipeline.domain.identifiers import JobId, Sha256
 from video_evidence_pipeline.domain.media import FrameRecord
+from video_evidence_pipeline.domain.semantic import SkillSnapshot
 from video_evidence_pipeline.domain.transcription import TranscriptSegment
 
 
@@ -64,6 +65,26 @@ AtomicPropositionContract = Literal[
 ATOMIC_PROPOSITION_RULE = (
     "One record states one atomic proposition; every reference supports that same proposition; "
     "do not combine separate facts."
+)
+EVIDENCE_INFORMATION_ROLES = frozenset(
+    {
+        "role:action-item",
+        "role:condition",
+        "role:conclusion",
+        "role:context",
+        "role:deadline",
+        "role:decision",
+        "role:emphasis",
+        "role:example",
+        "role:exception",
+        "role:instruction",
+        "role:open-question",
+        "role:owner",
+        "role:prohibition",
+        "role:rationale",
+        "role:safety",
+        "role:thesis",
+    }
 )
 
 
@@ -151,6 +172,9 @@ class EvidenceRecord(StrictModel):
     def flags_are_canonical(cls, value: list[str]) -> list[str]:
         if value != sorted(set(value)) or any(not item.strip() for item in value):
             raise ValueError("evidence flags must be sorted, unique, and non-blank")
+        unknown_roles = [item for item in value if item.startswith("role:")]
+        if any(item not in EVIDENCE_INFORMATION_ROLES for item in unknown_roles):
+            raise ValueError("unknown evidence information role")
         return value
 
     @model_validator(mode="after")
@@ -268,6 +292,18 @@ class EvidenceAssignmentContext(StrictModel):
     task_type: str = Field(min_length=1, max_length=128)
     language: str = Field(min_length=2, max_length=32)
     requirements: list[AssignmentRequirement] = Field(default_factory=list, max_length=100)
+    purpose: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=512,
+        exclude_if=lambda value: value is None,
+    )
+    audience: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=512,
+        exclude_if=lambda value: value is None,
+    )
 
     @model_validator(mode="after")
     def requirements_are_contiguous(self) -> Self:
@@ -293,6 +329,7 @@ class EvidenceRequestManifest(StrictModel):
     approved_artifacts: list[ArtifactRef] = Field(default_factory=list, max_length=1024)
     approved_artifact_refs: list[SourceRef] = Field(default_factory=list, max_length=1024)
     unresolved_ambiguities: list[AmbiguityRecord] = Field(default_factory=list, max_length=100_000)
+    skill: SkillSnapshot | None = Field(default=None, exclude_if=lambda value: value is None)
     created_at: UtcDateTime
 
     @model_validator(mode="after")

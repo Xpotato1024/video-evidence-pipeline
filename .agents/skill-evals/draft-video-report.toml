@@ -3,27 +3,79 @@ skill_id = "draft-video-report"
 minimum_score = 9
 
 [[cases]]
-id = "argument-report"
-prompt = "課題要件と証拠からレポート初稿を作る。"
-expected = ["claim ledger", "要約と考察を分離"]
-forbidden = ["ユーザー意見を捏造"]
+id = "question-first"
+prompt = "設問『再現性を高める最重要施策は何か』。evidenceはversion固定、再試行、UI改善。400字report。"
+expected = ["設問へ直接回答", "最強のevidenceとrationale"]
+forbidden = ["3 topicの均等紹介"]
 criteria = [
-  { id = "argument-structure", description = "課題要件に対応する論証構造を作る" },
-  { id = "claim-ledger", description = "主要主張をclaim recordとして列挙する" },
-  { id = "evidence-requirement-binding", description = "各material claimをevidenceとrequirementへ束縛する" },
-  { id = "summary-opinion-separation", description = "動画内容とユーザー考察を区別する" },
-  { id = "no-invented-opinion", description = "ユーザー意見を生成しない" },
+  { id = "direct-answer", description = "最重要施策を直接答える" },
+  { id = "question-aligned-selection", description = "設問に最も関係するevidenceを選ぶ" },
+  { id = "rationale", description = "選択理由をsource-backedに示す" },
+  { id = "claim-binding", description = "material claimをevidence／requirementへ束縛する" },
+  { id = "not-generic-summary", description = "source全体のtopic inventoryへしない" },
 ]
 
 [[cases]]
-id = "insufficient-evidence"
-prompt = "必須論点の証拠がない。"
-expected = ["要確認または停止"]
-forbidden = ["断定で補完"]
+id = "irrelevant-evidence-abundance"
+prompt = "設問は安全手順。evidence 20件中18件は会社史、2件は主電源停止とlockout。短いreport。"
+expected = ["安全evidenceを優先", "会社史をomit"]
+forbidden = ["evidence件数比例"]
 criteria = [
-  { id = "missing-evidence-detected", description = "必須論点の証拠不足を検出する" },
-  { id = "unresolved-marker-or-stop", description = "literal [要確認]または停止として表す" },
-  { id = "no-unsupported-claim", description = "根拠のないmaterial claimを作らない" },
-  { id = "requirement-left-unresolved", description = "未充足requirementを充足済みにしない" },
-  { id = "no-invented-user-position", description = "不足をユーザーの立場で補わない" },
+  { id = "critical-evidence-selected", description = "安全手順の2件を中心に選ぶ" },
+  { id = "irrelevant-abundance-omitted", description = "大量の会社史を省略する" },
+  { id = "instruction-force", description = "必須手順の意味を弱めない" },
+  { id = "question-answer", description = "安全手順という設問へ答える" },
+  { id = "no-unsupported-detail", description = "sourceにない安全策を追加しない" },
+]
+
+[[cases]]
+id = "short-report"
+prompt = "120字。設問『結果と主要制約を述べよ』。result、constraint、5 examplesがある。"
+expected = ["resultとconstraint優先", "examplesを削る"]
+forbidden = ["全topicを詰め込む"]
+criteria = [
+  { id = "result-preserved", description = "central resultを保持する" },
+  { id = "constraint-preserved", description = "meaning-changing constraintを保持する" },
+  { id = "examples-bounded", description = "example列挙を避ける" },
+  { id = "length-aware", description = "120字で問いへ答えるselectionをする" },
+  { id = "nonredundant", description = "重複を除く" },
+]
+
+[[cases]]
+id = "missing-user-opinion"
+prompt = "課題は動画要約と自分の経験を結び付けること。user opinion／notesは空。"
+expected = ["[要確認]", "confirmation requirement"]
+forbidden = ["ユーザー経験を捏造"]
+criteria = [
+  { id = "opinion-required-detected", description = "user opinionが必須と検出する" },
+  { id = "literal-marker", description = "literal [要確認]で未提供箇所を示す" },
+  { id = "confirmation-requirement", description = "必要なuser inputを明示する" },
+  { id = "no-invented-position", description = "userの感想や経験を作らない" },
+  { id = "source-opinion-separated", description = "動画内容とuser opinionを区別する" },
+]
+
+[[cases]]
+id = "example-heavy-source"
+prompt = "設問はmethodの原理。sourceは原理1件と同種example8件。500字report。"
+expected = ["原理とrationale中心", "代表例だけ必要なら使用"]
+forbidden = ["8例の逐次紹介"]
+criteria = [
+  { id = "principle-first", description = "method principleをcentral claimにする" },
+  { id = "rationale-supported", description = "source-backed rationaleを示す" },
+  { id = "example-selection", description = "representative detailだけを必要に応じて選ぶ" },
+  { id = "no-example-overweight", description = "8 examplesをreportの中心にしない" },
+  { id = "no-generalization", description = "exampleをsource以上のgeneral ruleにしない" },
+]
+
+[[cases]]
+id = "concrete-evidence-required"
+prompt = "設問は『改善の規模を根拠付きで評価せよ』。evidenceはerror 8.0→5.0、背景の無関係な年号多数。"
+expected = ["8.0→5.0を保持", "年号をomit"]
+forbidden = ["具体的に見せるため年号を列挙"]
+criteria = [
+  { id = "metric-preserved", description = "evaluationに必要なexact metricを保持する" },
+  { id = "metric-evidence-bound", description = "8.0→5.0をexact evidenceへ束縛する" },
+  { id = "evaluation-bounded", description = "sourceが許す範囲で規模を評価する" },
+  { id = "irrelevant-numbers-omitted", description = "無関係な年号を省略する" },
+  { id = "no-extra-calculation", description = "source／requestにない精度や因果を追加しない" },
 ]

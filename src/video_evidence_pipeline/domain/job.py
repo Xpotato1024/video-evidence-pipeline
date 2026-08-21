@@ -105,6 +105,15 @@ RequirementText = Annotated[
         pattern=r".*\S.*",
     ),
 ]
+AssignmentIntentText = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        max_length=512,
+        pattern=r".*\S.*",
+    ),
+]
 
 
 class AssignmentSpec(StrictModel):
@@ -112,6 +121,12 @@ class AssignmentSpec(StrictModel):
     language: str = Field(min_length=2, max_length=32)
     requirements: list[RequirementText] = Field(default_factory=list, max_length=100)
     length: CharacterLengthConstraint | None = None
+    purpose: AssignmentIntentText | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    audience: AssignmentIntentText | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class OutputSpec(StrictModel):
@@ -166,8 +181,9 @@ def job_fingerprint(job: JobSpec) -> str:
         key: serialized[key]
         for key in ("schema_version", "job_id", "created_at", "source", "assignment", "output")
     }
-    if job.assignment.length is None:
-        data["assignment"].pop("length", None)
+    for optional in ("length", "purpose", "audience"):
+        if getattr(job.assignment, optional) is None:
+            data["assignment"].pop(optional, None)
     if job.primary_input is not None or job.supporting_inputs:
         data["primary_input"] = serialized["primary_input"]
         data["supporting_inputs"] = serialized["supporting_inputs"]
@@ -200,8 +216,9 @@ def load_job_yaml(path: Path) -> JobSpec:
 
 def job_to_yaml(job: JobSpec) -> str:
     data = job.model_dump(mode="json")
-    if job.assignment.length is None:
-        data["assignment"].pop("length", None)
+    for optional in ("length", "purpose", "audience"):
+        if getattr(job.assignment, optional) is None:
+            data["assignment"].pop(optional, None)
     if job.primary_input is None:
         data.pop("primary_input", None)
     if not job.supporting_inputs:

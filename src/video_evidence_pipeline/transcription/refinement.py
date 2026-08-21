@@ -26,6 +26,7 @@ from video_evidence_pipeline.domain.refinement import (
     RefinementRequestManifest,
     RefinementResponseManifest,
 )
+from video_evidence_pipeline.domain.semantic import SkillSnapshot
 from video_evidence_pipeline.domain.serialization import (
     canonical_json_bytes,
     fingerprint,
@@ -34,6 +35,12 @@ from video_evidence_pipeline.domain.serialization import (
 from video_evidence_pipeline.domain.supporting import SupportingInputManifest
 from video_evidence_pipeline.domain.transcription import TranscriptManifest, TranscriptSegment
 from video_evidence_pipeline.errors import VepError, integrity_error, state_error
+from video_evidence_pipeline.semantic.skills import (
+    load_skill_snapshot,
+    require_pending_semantic_request_importable,
+    same_skill_snapshot_except_lifecycle,
+    validate_import_skill,
+)
 from video_evidence_pipeline.storage.atomic import atomic_write_bytes, atomic_write_new_bytes
 from video_evidence_pipeline.storage.layout import JobWorkspace
 from video_evidence_pipeline.storage.permissions import (
@@ -44,6 +51,7 @@ from video_evidence_pipeline.supporting import load_supporting_inputs, prepare_s
 from video_evidence_pipeline.transcription.pipeline import normalize_transcript_text
 
 REFINEMENT_IMPLEMENTATION_VERSION = "transcript-refinement-v1"
+REFINEMENT_SKILLS = frozenset({"refine-video-transcript"})
 _MAXIMUM_ARTIFACT_BYTES = 128 * 1024 * 1024
 _FIXTURE_MARKERS = {"fixture", "pytest", "test"}
 
@@ -215,25 +223,44 @@ def refinement_request_fingerprint(
     raw_segments: tuple[TranscriptSegment, ...],
     support_artifacts: tuple[ArtifactRef, ...],
     source_refs: tuple[SourceRef, ...],
+    skill: SkillSnapshot | None = None,
 ) -> str:
-    return fingerprint(
-        {
-            "job_id": job.job_id,
-            "raw_transcript_fingerprint": raw_manifest.transcription_fingerprint,
-            "raw_segments_artifact": raw_manifest.segments_artifact.model_dump(mode="json"),
-            "transcript_segments": [item.model_dump(mode="json") for item in raw_segments],
-            "available_support_artifacts": [
-                item.model_dump(mode="json") for item in support_artifacts
-            ],
-            "available_source_refs": [item.model_dump(mode="json") for item in source_refs],
-            "semantic_correction_contract": (
-                "Each semantic edit must refine exactly one transcript segment and cite a "
-                "non-transcript supporting source; otherwise return one ambiguity and do not "
-                "merge propositions."
-            ),
-            "implementation_version": REFINEMENT_IMPLEMENTATION_VERSION,
-        }
+    payload = {
+        "job_id": job.job_id,
+        "raw_transcript_fingerprint": raw_manifest.transcription_fingerprint,
+        "raw_segments_artifact": raw_manifest.segments_artifact.model_dump(mode="json"),
+        "transcript_segments": [item.model_dump(mode="json") for item in raw_segments],
+        "available_support_artifacts": [item.model_dump(mode="json") for item in support_artifacts],
+        "available_source_refs": [item.model_dump(mode="json") for item in source_refs],
+        "semantic_correction_contract": (
+            "Each semantic edit must refine exactly one transcript segment and cite a "
+            "non-transcript supporting source; otherwise return one ambiguity and do not "
+            "merge propositions."
+        ),
+        "implementation_version": REFINEMENT_IMPLEMENTATION_VERSION,
+    }
+    if skill is not None:
+        payload["skill"] = skill.model_dump(mode="json")
+    return fingerprint(payload)
+
+
+def _refinement_request_fingerprint(value: RefinementRequestManifest) -> str:
+    """Recompute the historical request identity without hashing large artifacts."""
+
+    payload = value.model_dump(
+        mode="json",
+        exclude={"schema_version", "request_fingerprint", "created_at"},
     )
+    payload["implementation_version"] = REFINEMENT_IMPLEMENTATION_VERSION
+    return fingerprint(payload)
+
+
+def _validate_refinement_request_fingerprint(value: RefinementRequestManifest) -> None:
+    if value.request_fingerprint != _refinement_request_fingerprint(value):
+        raise integrity_error(
+            "REFINEMENT_REQUEST_INVALID",
+            "refinement request fingerprint is inconsistent",
+        )
 
 
 def _expected_request(
@@ -245,11 +272,25 @@ def _expected_request(
     *,
     created_at: datetime,
     deep: bool = False,
+    bind_skill: bool = True,
+    frozen_skill: SkillSnapshot | None = None,
 ) -> RefinementRequestManifest:
     supporting = (
         load_supporting_inputs(workspace, job, deep=deep) if job.supporting_inputs else None
     )
     support_artifacts, source_refs = _source_catalog(media_manifest, raw_segments, supporting)
+    skill = (
+        load_skill_snapshot(workspace, "refine-video-transcript", allowed=REFINEMENT_SKILLS)
+        if bind_skill
+        else frozen_skill
+    )
+    if (
+        bind_skill
+        and skill is not None
+        and frozen_skill is not None
+        and same_skill_snapshot_except_lifecycle(frozen_skill, skill)
+    ):
+        skill = frozen_skill
     return RefinementRequestManifest(
         job_id=job.job_id,
         request_fingerprint=refinement_request_fingerprint(
@@ -258,14 +299,64 @@ def _expected_request(
             raw_segments=raw_segments,
             support_artifacts=support_artifacts,
             source_refs=source_refs,
+            skill=skill,
         ),
         raw_transcript_fingerprint=raw_manifest.transcription_fingerprint,
         raw_segments_artifact=raw_manifest.segments_artifact,
         transcript_segments=list(raw_segments),
         available_support_artifacts=list(support_artifacts),
         available_source_refs=list(source_refs),
+        skill=skill,
         created_at=created_at,
     )
+
+
+def _refinement_request_matches(
+    stored: RefinementRequestManifest, expected: RefinementRequestManifest, *, deep: bool
+) -> bool:
+    if deep:
+        return stored == expected
+    return stored.model_dump(
+        mode="json",
+        exclude={"request_fingerprint", "raw_transcript_fingerprint"},
+    ) == expected.model_dump(
+        mode="json",
+        exclude={"request_fingerprint", "raw_transcript_fingerprint"},
+    )
+
+
+def _load_stored_refinement_request(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    media_manifest: MediaManifest,
+    raw_manifest: TranscriptManifest,
+    raw_segments: tuple[TranscriptSegment, ...],
+    *,
+    deep: bool,
+    enforce_current_skill: bool,
+) -> RefinementRequestManifest:
+    """Validate a stored request from deterministic inputs and the selected Skill binding."""
+
+    stored = _read_model(
+        workspace.refinement_request_json,
+        RefinementRequestManifest,
+        code="REFINEMENT_REQUEST_INVALID",
+    )
+    _validate_refinement_request_fingerprint(stored)
+    expected = _expected_request(
+        workspace,
+        job,
+        media_manifest,
+        raw_manifest,
+        raw_segments,
+        created_at=stored.created_at,
+        deep=deep,
+        bind_skill=enforce_current_skill and stored.skill is not None,
+        frozen_skill=stored.skill,
+    )
+    if not _refinement_request_matches(stored, expected, deep=deep):
+        raise state_error("REFINEMENT_REQUEST_STALE", "refinement request is stale")
+    return stored
 
 
 def prepare_refinement_request(
@@ -280,34 +371,23 @@ def prepare_refinement_request(
     if job.supporting_inputs:
         prepare_supporting_inputs(workspace, job)
     if workspace.refinement_request_json.exists():
-        stored = _read_model(
-            workspace.refinement_request_json,
-            RefinementRequestManifest,
-            code="REFINEMENT_REQUEST_INVALID",
-        )
-        expected = _expected_request(
+        # Validate stored bytes against deterministic inputs without rewriting the frozen Skill.
+        stored = _load_stored_refinement_request(
             workspace,
             job,
             media_manifest,
             raw_manifest,
             raw_segments,
-            created_at=stored.created_at,
             deep=deep,
+            enforce_current_skill=False,
         )
-        request_matches = (
-            stored == expected
-            if deep
-            else stored.model_dump(
-                mode="json",
-                exclude={"request_fingerprint", "raw_transcript_fingerprint"},
+        if not workspace.refinement_manifest_json.exists():
+            require_pending_semantic_request_importable(
+                workspace,
+                stored.skill,
+                allowed=REFINEMENT_SKILLS,
+                expected_skill_id="refine-video-transcript",
             )
-            == expected.model_dump(
-                mode="json",
-                exclude={"request_fingerprint", "raw_transcript_fingerprint"},
-            )
-        )
-        if not request_matches:
-            raise state_error("REFINEMENT_REQUEST_STALE", "refinement request is stale")
         return RefinementPrepareResult(stored, reused=True)
     request = _expected_request(
         workspace,
@@ -331,9 +411,15 @@ def load_refinement_request(
     *,
     deep: bool = False,
 ) -> RefinementRequestManifest:
-    return prepare_refinement_request(
-        workspace, job, media_manifest, raw_manifest, raw_segments, deep=deep
-    ).request
+    return _load_stored_refinement_request(
+        workspace,
+        job,
+        media_manifest,
+        raw_manifest,
+        raw_segments,
+        deep=deep,
+        enforce_current_skill=False,
+    )
 
 
 def _fixture_identity(response: RefinementResponseManifest) -> bool:
@@ -350,6 +436,25 @@ def _fixture_identity(response: RefinementResponseManifest) -> bool:
     return response.refiner.execution_mode is RefinementExecutionMode.TEST_FIXTURE or bool(
         tokens & _FIXTURE_MARKERS
     )
+
+
+def validate_refinement_import_skill(
+    workspace: JobWorkspace,
+    request: RefinementRequestManifest,
+    response: RefinementResponseManifest,
+    *,
+    allow_fixture: bool,
+) -> None:
+    """Gate a new external import against its frozen current active Skill."""
+
+    if allow_fixture and _fixture_identity(response):
+        return
+    if request.skill is None:
+        raise state_error(
+            "REFINEMENT_SKILL_REQUIRED",
+            "legacy refinement requests cannot be used for a new production import",
+        )
+    validate_import_skill(workspace, request.skill, allowed=REFINEMENT_SKILLS)
 
 
 def _validate_response(

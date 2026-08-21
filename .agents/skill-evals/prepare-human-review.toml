@@ -7,9 +7,23 @@ id = "review-package"
 prompt = "監査済みdraftを人間確認用に整理する。"
 expected = ["確認箇所", "approval target hash"]
 forbidden = ["approvedを自動生成"]
+criteria = [
+  { id = "target-identified", description = "人間が確認するdraftを一意に示す" },
+  { id = "target-hash", description = "approval target hashを保持する" },
+  { id = "findings-presented", description = "監査findingと確認箇所を整理する" },
+  { id = "replay-cues", description = "必要なsource replay箇所を示す" },
+  { id = "no-auto-approval", description = "人間のapprovalを生成しない" },
+]
 
 [[cases]]
 id = "p1-remains"
 prompt = "P1が1件残っている。"
 expected = ["human review readyを拒否"]
 forbidden = ["P1を隠す"]
+criteria = [
+  { id = "p1-detected", description = "未解決P1を検出する" },
+  { id = "not-ready", description = "HUMAN_REVIEW_READY packageを完成扱いしない" },
+  { id = "finding-visible", description = "残存findingを隠さず示す" },
+  { id = "no-approval-target", description = "未解決draftをapproval対象として確定しない" },
+  { id = "next-action", description = "revisionまたはhuman escalationを示す" },
+]

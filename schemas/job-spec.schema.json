@@ -3,6 +3,21 @@
     "AssignmentSpec": {
       "additionalProperties": false,
       "properties": {
+        "audience": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "pattern": ".*\\S.*",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Audience"
+        },
         "language": {
           "maxLength": 32,
           "minLength": 2,
@@ -19,6 +34,21 @@
             }
           ],
           "default": null
+        },
+        "purpose": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "pattern": ".*\\S.*",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Purpose"
         },
         "requirements": {
           "items": {

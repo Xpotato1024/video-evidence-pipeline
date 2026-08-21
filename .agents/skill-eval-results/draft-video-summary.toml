@@ -1,17 +1,18 @@
 schema_version = "1.0"
 skill_id = "draft-video-summary"
 skill_path = ".agents/skills/draft-video-summary/SKILL.md"
-skill_content_sha256 = "bd388efd527d4abb227b06e0370de6ad0317a4a4a93d4c5257e0347ec65935ac"
+skill_content_sha256 = "ea3a222dd0cee0b95d16e143bdc6e2b549c72ab66bf210aca760a39f77a5962a"
 eval_definition_path = ".agents/skill-evals/draft-video-summary.toml"
-eval_definition_sha256 = "80cc210292151e7d50fab773f586bf997f3d2fca5498dada50b6cf00b72146c0"
-evaluated_commit_sha = "d8a2115b72a02944f452fbbb41d39e11419946bd"
-evaluated_at = "2026-08-10T04:12:41Z"
-evaluator_identity = "OpenAI Codex GPT-5.6 Sol"
-evaluator_method = "fresh-context synthetic Skill run plus public production import validation"
-finding_summary = "P0=0; P1=0; purpose-bounded summary and missing-purpose stop cases passed"
+eval_definition_sha256 = "728707ac66e12508e7d12426148943e01a8e5b3c858aeb7f9df408bc870d4dd0"
+resource_bundle_fingerprint = "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+evaluated_commit_sha = "7ba634bfac692a2d104e9d4ef0080ce562290b9d"
+evaluated_at = "2026-08-20T11:45:00Z"
+evaluator_identity = "OpenAI Codex GPT-5.6 Sol fresh context"
+evaluator_method = "fresh-context semantic execution against five binary criteria per synthetic case"
+finding_summary = "P0=0; P1=0; P2=0; 14/14 cases and 70/70 criteria passed without forbidden behavior"
 side_effect_policy = "instruction-only"
-total_score = 10
-maximum_score = 10
+total_score = 70
+maximum_score = 70
 threshold = 9
 p0_count = 0
 p1_count = 0
@@ -20,7 +21,6 @@ promotion_eligible = true
 required_artifacts = [
   "src/video_evidence_pipeline/domain/authoring.py",
   "src/video_evidence_pipeline/authoring/pipeline.py",
-  "schemas/authoring-request-manifest.schema.json",
   "schemas/authoring-response-manifest.schema.json",
 ]
 
@@ -28,21 +28,156 @@ required_artifacts = [
 owner = "Xpotato1024"
 approved = true
 method = "explicit_task_authorization"
-reviewed_at = "2026-08-10T04:12:41Z"
+reviewed_at = "2026-08-20T11:45:00Z"
 
 [[case_results]]
-case_id = "purpose-summary"
+case_id = "central-thesis-after-chat"
 result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh synthetic summary case C", "tests/test_authoring_pipeline.py::test_public_production_straight_routes_use_committed_active_skills"]
+evidence = ["Observed the review-interval thesis as the lead claim and omitted greeting and chat.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "purpose-bounded-summary", passed = true, evidence = "summary respected audience and length" },
-  { id = "claim-evidence-binding", passed = true, evidence = "claims bound E1 and E2" },
-  { id = "coverage-map", passed = true, evidence = "R1 trade-off coverage was explicit" },
-  { id = "exceptions-preserved", passed = true, evidence = "overshoot and settling-time trade-off was retained" },
-  { id = "no-new-evaluation", passed = true, evidence = "no evidence-external evaluation was added" },
+  { id = "thesis-preserved", passed = true, evidence = "Observed the review-interval thesis as the lead claim and omitted greeting and chat. Criterion thesis-preserved passed." },
+  { id = "chat-omitted", passed = true, evidence = "Observed the review-interval thesis as the lead claim and omitted greeting and chat. Criterion chat-omitted passed." },
+  { id = "assignment-fit", passed = true, evidence = "Observed the review-interval thesis as the lead claim and omitted greeting and chat. Criterion assignment-fit passed." },
+  { id = "evidence-bound", passed = true, evidence = "Observed the review-interval thesis as the lead claim and omitted greeting and chat. Criterion evidence-bound passed." },
+  { id = "not-chronological", passed = true, evidence = "Observed the review-interval thesis as the lead claim and omitted greeting and chat. Criterion not-chronological passed." },
+]
+
+[[case_results]]
+case_id = "safety-after-examples"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed the mandatory main-power-off instruction preserved and long success examples omitted.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "safety-preserved", passed = true, evidence = "Observed the mandatory main-power-off instruction preserved and long success examples omitted. Criterion safety-preserved passed." },
+  { id = "examples-downweighted", passed = true, evidence = "Observed the mandatory main-power-off instruction preserved and long success examples omitted. Criterion examples-downweighted passed." },
+  { id = "imperative-preserved", passed = true, evidence = "Observed the mandatory main-power-off instruction preserved and long success examples omitted. Criterion imperative-preserved passed." },
+  { id = "no-new-safety", passed = true, evidence = "Observed the mandatory main-power-off instruction preserved and long success examples omitted. Criterion no-new-safety passed." },
+  { id = "operational-salience", passed = true, evidence = "Observed the mandatory main-power-off instruction preserved and long success examples omitted. Criterion operational-salience passed." },
+]
+
+[[case_results]]
+case_id = "deduplicate-five-examples"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed the common source-backed principle selected with at most one useful representative example.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "principle-selected", passed = true, evidence = "Observed the common source-backed principle selected with at most one useful representative example. Criterion principle-selected passed." },
+  { id = "no-example-list", passed = true, evidence = "Observed the common source-backed principle selected with at most one useful representative example. Criterion no-example-list passed." },
+  { id = "representative-only-if-useful", passed = true, evidence = "Observed the common source-backed principle selected with at most one useful representative example. Criterion representative-only-if-useful passed." },
+  { id = "no-generalization-overreach", passed = true, evidence = "Observed the common source-backed principle selected with at most one useful representative example. Criterion no-generalization-overreach passed." },
+  { id = "nonredundant", passed = true, evidence = "Observed the common source-backed principle selected with at most one useful representative example. Criterion nonredundant passed." },
+]
+
+[[case_results]]
+case_id = "assignment-general-focus"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed the central principle as core, examples and action bounded, and purpose-based omission recorded.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "purpose-read", passed = true, evidence = "Observed the central principle as core, examples and action bounded, and purpose-based omission recorded. Criterion purpose-read passed." },
+  { id = "core-selected", passed = true, evidence = "Observed the central principle as core, examples and action bounded, and purpose-based omission recorded. Criterion core-selected passed." },
+  { id = "supporting-bounded", passed = true, evidence = "Observed the central principle as core, examples and action bounded, and purpose-based omission recorded. Criterion supporting-bounded passed." },
+  { id = "omission-rationale", passed = true, evidence = "Observed the central principle as core, examples and action bounded, and purpose-based omission recorded. Criterion omission-rationale passed." },
+  { id = "evidence-faithful", passed = true, evidence = "Observed the central principle as core, examples and action bounded, and purpose-based omission recorded. Criterion evidence-faithful passed." },
+]
+
+[[case_results]]
+case_id = "assignment-example-focus"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed three example differences as core, the principle as context, and the unrelated action omitted.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "purpose-changes-selection", passed = true, evidence = "Observed three example differences as core, the principle as context, and the unrelated action omitted. Criterion purpose-changes-selection passed." },
+  { id = "examples-compared", passed = true, evidence = "Observed three example differences as core, the principle as context, and the unrelated action omitted. Criterion examples-compared passed." },
+  { id = "principle-contextual", passed = true, evidence = "Observed three example differences as core, the principle as context, and the unrelated action omitted. Criterion principle-contextual passed." },
+  { id = "action-not-dominant", passed = true, evidence = "Observed three example differences as core, the principle as context, and the unrelated action omitted. Criterion action-not-dominant passed." },
+  { id = "no-example-invention", passed = true, evidence = "Observed three example differences as core, the principle as context, and the unrelated action omitted. Criterion no-example-invention passed." },
+]
+
+[[case_results]]
+case_id = "operational-notice"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed application action, September 12 deadline, device-storage prohibition, and contact direction preserved.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "action-preserved", passed = true, evidence = "Observed application action, September 12 deadline, device-storage prohibition, and contact direction preserved. Criterion action-preserved passed." },
+  { id = "deadline-preserved", passed = true, evidence = "Observed application action, September 12 deadline, device-storage prohibition, and contact direction preserved. Criterion deadline-preserved passed." },
+  { id = "prohibition-preserved", passed = true, evidence = "Observed application action, September 12 deadline, device-storage prohibition, and contact direction preserved. Criterion prohibition-preserved passed." },
+  { id = "background-compressed", passed = true, evidence = "Observed application action, September 12 deadline, device-storage prohibition, and contact direction preserved. Criterion background-compressed passed." },
+  { id = "contact-preserved-if-actionable", passed = true, evidence = "Observed application action, September 12 deadline, device-storage prohibition, and contact direction preserved. Criterion contact-preserved-if-actionable passed." },
+]
+
+[[case_results]]
+case_id = "late-conclusion"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed the late reproducibility-over-speed conclusion placed first with only necessary rationale.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "conclusion-selected", passed = true, evidence = "Observed the late reproducibility-over-speed conclusion placed first with only necessary rationale. Criterion conclusion-selected passed." },
+  { id = "rationale-selected", passed = true, evidence = "Observed the late reproducibility-over-speed conclusion placed first with only necessary rationale. Criterion rationale-selected passed." },
+  { id = "history-bounded", passed = true, evidence = "Observed the late reproducibility-over-speed conclusion placed first with only necessary rationale. Criterion history-bounded passed." },
+  { id = "hierarchy-clear", passed = true, evidence = "Observed the late reproducibility-over-speed conclusion placed first with only necessary rationale. Criterion hierarchy-clear passed." },
+  { id = "no-position-shift", passed = true, evidence = "Observed the late reproducibility-over-speed conclusion placed first with only necessary rationale. Criterion no-position-shift passed." },
+]
+
+[[case_results]]
+case_id = "useful-concrete-anchor"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed the source-backed 37 percent result retained while method detail was bounded.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "useful-number-preserved", passed = true, evidence = "Observed the source-backed 37 percent result retained while method detail was bounded. Criterion useful-number-preserved passed." },
+  { id = "number-evidence-bound", passed = true, evidence = "Observed the source-backed 37 percent result retained while method detail was bounded. Criterion number-evidence-bound passed." },
+  { id = "result-first", passed = true, evidence = "Observed the source-backed 37 percent result retained while method detail was bounded. Criterion result-first passed." },
+  { id = "method-detail-bounded", passed = true, evidence = "Observed the source-backed 37 percent result retained while method detail was bounded. Criterion method-detail-bounded passed." },
+  { id = "no-extra-precision", passed = true, evidence = "Observed the source-backed 37 percent result retained while method detail was bounded. Criterion no-extra-precision passed." },
+]
+
+[[case_results]]
+case_id = "irrelevant-number-stuffing"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed only the actionable September 12 deadline retained; room 12, exercise 47, and age 31 omitted.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "deadline-selected", passed = true, evidence = "Observed only the actionable September 12 deadline retained; room 12, exercise 47, and age 31 omitted. Criterion deadline-selected passed." },
+  { id = "room-number-omitted", passed = true, evidence = "Observed only the actionable September 12 deadline retained; room 12, exercise 47, and age 31 omitted. Criterion room-number-omitted passed." },
+  { id = "exercise-number-omitted", passed = true, evidence = "Observed only the actionable September 12 deadline retained; room 12, exercise 47, and age 31 omitted. Criterion exercise-number-omitted passed." },
+  { id = "age-omitted", passed = true, evidence = "Observed only the actionable September 12 deadline retained; room 12, exercise 47, and age 31 omitted. Criterion age-omitted passed." },
+  { id = "no-number-heuristic", passed = true, evidence = "Observed only the actionable September 12 deadline retained; room 12, exercise 47, and age 31 omitted. Criterion no-number-heuristic passed." },
+]
+
+[[case_results]]
+case_id = "meeting-specificity"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed Option B, Sato action, migration script, September 12, rollback rationale, 5 percent threshold, and unresolved owner.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "decision-specific", passed = true, evidence = "Observed Option B, Sato action, migration script, September 12, rollback rationale, 5 percent threshold, and unresolved owner. Criterion decision-specific passed." },
+  { id = "action-owner-due", passed = true, evidence = "Observed Option B, Sato action, migration script, September 12, rollback rationale, 5 percent threshold, and unresolved owner. Criterion action-owner-due passed." },
+  { id = "rationale-preserved", passed = true, evidence = "Observed Option B, Sato action, migration script, September 12, rollback rationale, 5 percent threshold, and unresolved owner. Criterion rationale-preserved passed." },
+  { id = "open-question-preserved", passed = true, evidence = "Observed Option B, Sato action, migration script, September 12, rollback rationale, 5 percent threshold, and unresolved owner. Criterion open-question-preserved passed." },
+  { id = "no-missing-value-invention", passed = true, evidence = "Observed Option B, Sato action, migration script, September 12, rollback rationale, 5 percent threshold, and unresolved owner. Criterion no-missing-value-invention passed." },
 ]
 
 [[case_results]]
@@ -51,11 +186,56 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh synthetic summary case D"]
+evidence = ["Observed a stop with no draft because intent was insufficient; no audience or length was invented.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "missing-purpose-detected", passed = true, evidence = "purpose and audience absence was detected" },
-  { id = "missing-length-detected", passed = true, evidence = "length absence was detected" },
-  { id = "stop-or-report", passed = true, evidence = "summary generation stopped" },
-  { id = "no-arbitrary-specification", passed = true, evidence = "no arbitrary audience or length was invented" },
-  { id = "no-invented-opinion", passed = true, evidence = "no user opinion was emitted" },
+  { id = "missing-purpose", passed = true, evidence = "Observed a stop with no draft because intent was insufficient; no audience or length was invented. Criterion missing-purpose passed." },
+  { id = "missing-length", passed = true, evidence = "Observed a stop with no draft because intent was insufficient; no audience or length was invented. Criterion missing-length passed." },
+  { id = "stop", passed = true, evidence = "Observed a stop with no draft because intent was insufficient; no audience or length was invented. Criterion stop passed." },
+  { id = "no-arbitrary-audience", passed = true, evidence = "Observed a stop with no draft because intent was insufficient; no audience or length was invented. Criterion no-arbitrary-audience passed." },
+  { id = "no-output-fabrication", passed = true, evidence = "Observed a stop with no draft because intent was insufficient; no audience or length was invented. Criterion no-output-fabrication passed." },
+]
+
+[[case_results]]
+case_id = "equal-weight-topic-inventory"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed thesis and conclusion selected as core while equal one-sentence allocation to chat, peripheral topics, and examples was rejected.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "core-hierarchy", passed = true, evidence = "Observed thesis and conclusion selected as core while equal one-sentence allocation to chat, peripheral topics, and examples was rejected. Criterion core-hierarchy passed." },
+  { id = "peripheral-omitted", passed = true, evidence = "Observed thesis and conclusion selected as core while equal one-sentence allocation to chat, peripheral topics, and examples was rejected. Criterion peripheral-omitted passed." },
+  { id = "inventory-rejected", passed = true, evidence = "Observed thesis and conclusion selected as core while equal one-sentence allocation to chat, peripheral topics, and examples was rejected. Criterion inventory-rejected passed." },
+  { id = "no-equal-allocation", passed = true, evidence = "Observed thesis and conclusion selected as core while equal one-sentence allocation to chat, peripheral topics, and examples was rejected. Criterion no-equal-allocation passed." },
+  { id = "evidence-faithful", passed = true, evidence = "Observed thesis and conclusion selected as core while equal one-sentence allocation to chat, peripheral topics, and examples was rejected. Criterion evidence-faithful passed." },
+]
+
+[[case_results]]
+case_id = "entity-dense-unreadable"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed the 37 percent result and one meaning-changing constraint retained while unrelated names, products, and numbers were omitted.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "core-result-selected", passed = true, evidence = "Observed the 37 percent result and one meaning-changing constraint retained while unrelated names, products, and numbers were omitted. Criterion core-result-selected passed." },
+  { id = "useful-anchor-budget", passed = true, evidence = "Observed the 37 percent result and one meaning-changing constraint retained while unrelated names, products, and numbers were omitted. Criterion useful-anchor-budget passed." },
+  { id = "irrelevant-entities-omitted", passed = true, evidence = "Observed the 37 percent result and one meaning-changing constraint retained while unrelated names, products, and numbers were omitted. Criterion irrelevant-entities-omitted passed." },
+  { id = "readability-preserved", passed = true, evidence = "Observed the 37 percent result and one meaning-changing constraint retained while unrelated names, products, and numbers were omitted. Criterion readability-preserved passed." },
+  { id = "no-entity-heuristic", passed = true, evidence = "Observed the 37 percent result and one meaning-changing constraint retained while unrelated names, products, and numbers were omitted. Criterion no-entity-heuristic passed." },
+]
+
+[[case_results]]
+case_id = "no-explicit-length"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed a newcomer safety summary preserving main-power shutdown and lockout without inventing a numeric length.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "intent-sufficient", passed = true, evidence = "Observed a newcomer safety summary preserving main-power shutdown and lockout without inventing a numeric length. Criterion intent-sufficient passed." },
+  { id = "summary-produced", passed = true, evidence = "Observed a newcomer safety summary preserving main-power shutdown and lockout without inventing a numeric length. Criterion summary-produced passed." },
+  { id = "no-length-invention", passed = true, evidence = "Observed a newcomer safety summary preserving main-power shutdown and lockout without inventing a numeric length. Criterion no-length-invention passed." },
+  { id = "critical-units-preserved", passed = true, evidence = "Observed a newcomer safety summary preserving main-power shutdown and lockout without inventing a numeric length. Criterion critical-units-preserved passed." },
+  { id = "no-length-only-stop", passed = true, evidence = "Observed a newcomer safety summary preserving main-power shutdown and lockout without inventing a numeric length. Criterion no-length-only-stop passed." },
 ]

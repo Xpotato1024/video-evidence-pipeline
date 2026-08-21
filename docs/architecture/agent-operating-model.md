@@ -47,12 +47,15 @@ adapterは自動検出の互換層であり、共通規則を弱めません。
 
 ## 3. Skills
 
-active Skillは`repository-sot-audit`に加え、`draft-video-report`、`draft-video-summary`、
-`independent-content-audit`、`revise-from-audit`です。後者4つは明示選択専用
-（`automatic_trigger = false`）かつ`instruction-only`で、各result evidenceはSkill本文SHA、eval定義SHA、
-評価対象commit、10/10（threshold 9）、P0/P1=0、owner reviewへ束縛されています。`analyze-video-evidence`と
-`prepare-human-review`はdraft／explicit-onlyのままで、production importには使用できません。
-authoring／audit／revisionの`external_exchange` public response importは`lifecycle = "active"`を必須とし、
+active Skillは`repository-sot-audit`に加え、`refine-video-transcript`、
+`analyze-video-evidence`、`draft-video-report`、`draft-video-summary`、
+`independent-content-audit`、`revise-from-audit`、`run-video-evidence-job`です。後者7つは
+明示選択専用（`automatic_trigger = false`）です。semantic responseを担う6 Skillは`instruction-only`、
+deterministic public CLIを選択・実行する`run-video-evidence-job`は`workspace-write`で、各result evidenceは
+Skill本文SHA、resource bundle fingerprint、eval定義SHA、評価対象commit、case別結果、P0/P1=0、
+owner reviewへ束縛されています。`prepare-human-review`はdraft／explicit-onlyのままです。
+refinement／evidence／authoring／audit／revisionの`external_exchange` public response importは
+`lifecycle = "active"`を必須とし、
 draft Skillを`DRAFT_SKILL_FORBIDDEN`で拒否します。fixture executionはrepository test内部だけで許可し、
 CLIのproduction routeには公開しません。
 requestへ固定したSkill snapshotは履歴の正本であり、完成済みjobを現在のSkill file／eval／lifecycleへ再結合しません。

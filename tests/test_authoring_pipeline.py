@@ -128,7 +128,11 @@ def _evidence_ready_job(
         maximum_length_adjustments=maximum_length_adjustments,
     )
     repository_root = workspace.jobs_root.parent.parent
-    shutil.copytree(Path(__file__).parents[1] / ".agents", repository_root / ".agents")
+    shutil.copytree(
+        Path(__file__).parents[1] / ".agents",
+        repository_root / ".agents",
+        dirs_exist_ok=True,
+    )
     request = prepare_evidence_job(workspace.root).request
     response_path = tmp_path / f"{job_id}-evidence-response.json"
     _write_evidence_response(

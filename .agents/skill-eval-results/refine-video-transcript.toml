@@ -1,0 +1,106 @@
+schema_version = "1.0"
+skill_id = "refine-video-transcript"
+skill_path = ".agents/skills/refine-video-transcript/SKILL.md"
+skill_content_sha256 = "f7d09fa16cc10da37c857747e67831e327e4683f332c55c8de0df85b1b5fb763"
+eval_definition_path = ".agents/skill-evals/refine-video-transcript.toml"
+eval_definition_sha256 = "0d559a03823e57498d4fc09d6a4b6b7c34addebe65067d31b8992f85b6ed13f3"
+resource_bundle_fingerprint = "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+evaluated_commit_sha = "a4d0eec1b81418a54e654ead694d3d536469edb3"
+evaluated_at = "2026-08-20T09:30:00Z"
+evaluator_identity = "OpenAI Codex GPT-5.6 Sol fresh context"
+evaluator_method = "fresh-context semantic execution against five binary criteria per synthetic case"
+finding_summary = "P0=0; P1=0; P2=0; 5/5 cases and 25/25 criteria passed without forbidden behavior"
+side_effect_policy = "instruction-only"
+total_score = 25
+maximum_score = 25
+threshold = 9
+p0_count = 0
+p1_count = 0
+p2_count = 0
+promotion_eligible = true
+required_artifacts = [
+  "src/video_evidence_pipeline/domain/refinement.py",
+  "src/video_evidence_pipeline/transcription/refinement.py",
+  "schemas/refinement-response-manifest.schema.json",
+]
+
+[owner_review]
+owner = "Xpotato1024"
+approved = true
+method = "explicit_task_authorization"
+reviewed_at = "2026-08-20T09:30:00Z"
+
+[[case_results]]
+case_id = "unsupported-proper-noun"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed no semantic edit and preserved オープンエーアイ社 as unresolved without non-transcript support.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "semantic-change-detected", passed = true, evidence = "Observed no semantic edit and preserved オープンエーアイ社 as unresolved without non-transcript support. Criterion semantic-change-detected passed." },
+  { id = "support-required", passed = true, evidence = "Observed no semantic edit and preserved オープンエーアイ社 as unresolved without non-transcript support. Criterion support-required passed." },
+  { id = "correction-rejected", passed = true, evidence = "Observed no semantic edit and preserved オープンエーアイ社 as unresolved without non-transcript support. Criterion correction-rejected passed." },
+  { id = "raw-preserved", passed = true, evidence = "Observed no semantic edit and preserved オープンエーアイ社 as unresolved without non-transcript support. Criterion raw-preserved passed." },
+  { id = "ambiguity-reported", passed = true, evidence = "Observed no semantic edit and preserved オープンエーアイ社 as unresolved without non-transcript support. Criterion ambiguity-reported passed." },
+]
+
+[[case_results]]
+case_id = "unsupported-number"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed no semantic edit and preserved 30 with its unit explicitly unknown.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "unit-is-semantic", passed = true, evidence = "Observed no semantic edit and preserved 30 with its unit explicitly unknown. Criterion unit-is-semantic passed." },
+  { id = "no-context-only-fix", passed = true, evidence = "Observed no semantic edit and preserved 30 with its unit explicitly unknown. Criterion no-context-only-fix passed." },
+  { id = "number-preserved", passed = true, evidence = "Observed no semantic edit and preserved 30 with its unit explicitly unknown. Criterion number-preserved passed." },
+  { id = "ambiguity-preserved", passed = true, evidence = "Observed no semantic edit and preserved 30 with its unit explicitly unknown. Criterion ambiguity-preserved passed." },
+  { id = "no-extra-fact", passed = true, evidence = "Observed no semantic edit and preserved 30 with its unit explicitly unknown. Criterion no-extra-fact passed." },
+]
+
+[[case_results]]
+case_id = "supported-correction"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed a one-span Alpha II correction bound to the clear supporting frame.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "support-verified", passed = true, evidence = "Observed a one-span Alpha II correction bound to the clear supporting frame. Criterion support-verified passed." },
+  { id = "minimal-span", passed = true, evidence = "Observed a one-span Alpha II correction bound to the clear supporting frame. Criterion minimal-span passed." },
+  { id = "before-after", passed = true, evidence = "Observed a one-span Alpha II correction bound to the clear supporting frame. Criterion before-after passed." },
+  { id = "evidence-binding", passed = true, evidence = "Observed a one-span Alpha II correction bound to the clear supporting frame. Criterion evidence-binding passed." },
+  { id = "meaning-preserved", passed = true, evidence = "Observed a one-span Alpha II correction bound to the clear supporting frame. Criterion meaning-preserved passed." },
+]
+
+[[case_results]]
+case_id = "unresolved-ambiguity"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed 15/50 alternatives retained and the blurred frame rejected as correction support.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "alternatives-preserved", passed = true, evidence = "Observed 15/50 alternatives retained and the blurred frame rejected as correction support. Criterion alternatives-preserved passed." },
+  { id = "weak-frame-rejected", passed = true, evidence = "Observed 15/50 alternatives retained and the blurred frame rejected as correction support. Criterion weak-frame-rejected passed." },
+  { id = "no-guess", passed = true, evidence = "Observed 15/50 alternatives retained and the blurred frame rejected as correction support. Criterion no-guess passed." },
+  { id = "uncertainty-explicit", passed = true, evidence = "Observed 15/50 alternatives retained and the blurred frame rejected as correction support. Criterion uncertainty-explicit passed." },
+  { id = "segment-stable", passed = true, evidence = "Observed 15/50 alternatives retained and the blurred frame rejected as correction support. Criterion segment-stable passed." },
+]
+
+[[case_results]]
+case_id = "no-proposition-merge"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed two original segments retained in order with no created Friday-verification relation.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "boundary-preserved", passed = true, evidence = "Observed two original segments retained in order with no created Friday-verification relation. Criterion boundary-preserved passed." },
+  { id = "order-preserved", passed = true, evidence = "Observed two original segments retained in order with no created Friday-verification relation. Criterion order-preserved passed." },
+  { id = "no-relation-created", passed = true, evidence = "Observed two original segments retained in order with no created Friday-verification relation. Criterion no-relation-created passed." },
+  { id = "no-merge", passed = true, evidence = "Observed two original segments retained in order with no created Friday-verification relation. Criterion no-merge passed." },
+  { id = "source-mapping", passed = true, evidence = "Observed two original segments retained in order with no created Friday-verification relation. Criterion source-mapping passed." },
+]

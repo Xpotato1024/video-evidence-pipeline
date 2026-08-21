@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
 
+import pytest
 from test_authoring_pipeline import _author_response, _write_model
 from test_issue33_recovery import _block_initial_draft, _file_bytes
 from test_media_normalization import _synthetic_source
@@ -446,11 +447,12 @@ def test_frozen_pre_35_bundle_validates_and_recovery_reuses_only_legacy_inputs(
     request_payload["transcript_bundle_fingerprint"] = "0" * 64
     request_payload["media_bundle_fingerprint"] = "0" * 64
     parent.evidence_request_json.write_bytes(pretty_json_bytes(request_payload))
-    assert validate_job(parent.root)["state"] == JobState.BLOCKED.value
+    with pytest.raises(VepError, match="evidence request fingerprint is inconsistent"):
+        validate_job(parent.root)
     try:
         validate_job(parent.root, deep=True)
     except VepError as exc:
-        assert exc.code == "EVIDENCE_REQUEST_STALE"
+        assert exc.code == "EVIDENCE_REQUEST_INVALID"
     else:
         raise AssertionError("deep validation must reject the frozen request fingerprints")
     parent.evidence_request_json.write_bytes(request_bytes)
@@ -575,6 +577,10 @@ def _freeze_pre_35_request(path: Path, request_type):
     }
     analyzer_contract.pop("atomic_proposition_contract")
     stored_payload = {key: value for key, value in payload.items() if key != "request_fingerprint"}
+    constraints = stored_payload.get("output_constraints")
+    if isinstance(constraints, dict) and constraints.get("length") is None:
+        constraints.pop("length", None)
+        constraints.pop("effective_length", None)
     stored_fingerprint = fingerprint(stored_payload)
     payload["request_fingerprint"] = stored_fingerprint
     path.write_bytes(pretty_json_bytes(payload))
@@ -583,6 +589,10 @@ def _freeze_pre_35_request(path: Path, request_type):
 
 def _request_fingerprint_without_atomic_contract(request) -> str:
     payload = request.model_dump(mode="json", exclude={"request_fingerprint"})
+    constraints = payload.get("output_constraints")
+    if isinstance(constraints, dict) and constraints.get("length") is None:
+        constraints.pop("length", None)
+        constraints.pop("effective_length", None)
     analyzer_contract = request.fixed_evidence.evidence_request.analyzer_contract.model_dump(
         mode="json", exclude_none=True
     )
@@ -616,8 +626,8 @@ def test_frozen_pre_35_authoring_requests_match_only_absent_atomic_contract(
             request.fixed_evidence.evidence_request.analyzer_contract.atomic_proposition_contract
             is None
         )
-        assert _request_fingerprint(request) != stored_fingerprint
-        assert not _request_fingerprint_matches(request)
+        assert _request_fingerprint(request) == stored_fingerprint
+        assert _request_fingerprint_matches(request)
         _validate_request_fingerprint(request)
 
 

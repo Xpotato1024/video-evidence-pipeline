@@ -1,17 +1,18 @@
 schema_version = "1.0"
 skill_id = "draft-video-report"
 skill_path = ".agents/skills/draft-video-report/SKILL.md"
-skill_content_sha256 = "046bf25c787dd66292f515c79584a1d70a59d3d74bb9c8c1b14b22cc3af933c1"
+skill_content_sha256 = "45f28eff8dd808cefc042513f1dbacc9de2a3c289fd85c901ae53e69644afcb2"
 eval_definition_path = ".agents/skill-evals/draft-video-report.toml"
-eval_definition_sha256 = "417d18a1f7880dee298cf2e54d8ff430d0c060de65c14d3f2d2b38a811bc9659"
-evaluated_commit_sha = "d8a2115b72a02944f452fbbb41d39e11419946bd"
-evaluated_at = "2026-08-10T04:12:41Z"
-evaluator_identity = "OpenAI Codex GPT-5.6 Sol"
-evaluator_method = "fresh-context synthetic Skill run plus public production import validation"
-finding_summary = "P0=0; P1=0; supported report and missing-opinion stop cases passed"
+eval_definition_sha256 = "d200afa19ab59a8cceb850b942bcb56a3c92bc84d6569df67a671047afebfd6e"
+resource_bundle_fingerprint = "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+evaluated_commit_sha = "915b7d44a7e58a1ab6c7e3bf572acb35d5089d6d"
+evaluated_at = "2026-08-20T09:30:00Z"
+evaluator_identity = "OpenAI Codex GPT-5.6 Sol fresh context"
+evaluator_method = "fresh-context semantic execution against five binary criteria per synthetic case"
+finding_summary = "P0=0; P1=0; P2=0; 6/6 cases and 30/30 criteria passed without forbidden behavior"
 side_effect_policy = "instruction-only"
-total_score = 10
-maximum_score = 10
+total_score = 30
+maximum_score = 30
 threshold = 9
 p0_count = 0
 p1_count = 0
@@ -20,7 +21,6 @@ promotion_eligible = true
 required_artifacts = [
   "src/video_evidence_pipeline/domain/authoring.py",
   "src/video_evidence_pipeline/authoring/pipeline.py",
-  "schemas/authoring-request-manifest.schema.json",
   "schemas/authoring-response-manifest.schema.json",
 ]
 
@@ -28,34 +28,94 @@ required_artifacts = [
 owner = "Xpotato1024"
 approved = true
 method = "explicit_task_authorization"
-reviewed_at = "2026-08-10T04:12:41Z"
+reviewed_at = "2026-08-20T09:30:00Z"
 
 [[case_results]]
-case_id = "argument-report"
+case_id = "question-first"
 result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh synthetic author case A", "tests/test_authoring_pipeline.py::test_public_production_straight_routes_use_committed_active_skills"]
+evidence = ["Observed version pinning as the direct answer, retry as subordinate support, and unrelated UI evidence omitted.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "argument-structure", passed = true, evidence = "response directly answered the tuning requirement" },
-  { id = "claim-ledger", passed = true, evidence = "video-fact claim was emitted" },
-  { id = "evidence-requirement-binding", passed = true, evidence = "claim bound E1 and R1" },
-  { id = "summary-opinion-separation", passed = true, evidence = "observed effect was not presented as user opinion" },
-  { id = "no-invented-opinion", passed = true, evidence = "no user position was generated" },
+  { id = "direct-answer", passed = true, evidence = "Observed version pinning as the direct answer, retry as subordinate support, and unrelated UI evidence omitted. Criterion direct-answer passed." },
+  { id = "question-aligned-selection", passed = true, evidence = "Observed version pinning as the direct answer, retry as subordinate support, and unrelated UI evidence omitted. Criterion question-aligned-selection passed." },
+  { id = "rationale", passed = true, evidence = "Observed version pinning as the direct answer, retry as subordinate support, and unrelated UI evidence omitted. Criterion rationale passed." },
+  { id = "claim-binding", passed = true, evidence = "Observed version pinning as the direct answer, retry as subordinate support, and unrelated UI evidence omitted. Criterion claim-binding passed." },
+  { id = "not-generic-summary", passed = true, evidence = "Observed version pinning as the direct answer, retry as subordinate support, and unrelated UI evidence omitted. Criterion not-generic-summary passed." },
 ]
 
 [[case_results]]
-case_id = "insufficient-evidence"
+case_id = "irrelevant-evidence-abundance"
 result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh synthetic author case B"]
+evidence = ["Observed only power-off and lockout safety claims selected while 18 company-history records were omitted.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "missing-evidence-detected", passed = true, evidence = "missing user-authored opinion was detected" },
-  { id = "unresolved-marker-or-stop", passed = true, evidence = "response stopped with literal [要確認]" },
-  { id = "no-unsupported-claim", passed = true, evidence = "no personal-reaction claim was emitted" },
-  { id = "requirement-left-unresolved", passed = true, evidence = "R1 remained unresolved" },
-  { id = "no-invented-user-position", passed = true, evidence = "E1 was not substituted for personal opinion" },
+  { id = "critical-evidence-selected", passed = true, evidence = "Observed only power-off and lockout safety claims selected while 18 company-history records were omitted. Criterion critical-evidence-selected passed." },
+  { id = "irrelevant-abundance-omitted", passed = true, evidence = "Observed only power-off and lockout safety claims selected while 18 company-history records were omitted. Criterion irrelevant-abundance-omitted passed." },
+  { id = "instruction-force", passed = true, evidence = "Observed only power-off and lockout safety claims selected while 18 company-history records were omitted. Criterion instruction-force passed." },
+  { id = "question-answer", passed = true, evidence = "Observed only power-off and lockout safety claims selected while 18 company-history records were omitted. Criterion question-answer passed." },
+  { id = "no-unsupported-detail", passed = true, evidence = "Observed only power-off and lockout safety claims selected while 18 company-history records were omitted. Criterion no-unsupported-detail passed." },
+]
+
+[[case_results]]
+case_id = "short-report"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed the exact result and meaning-changing constraint selected within 120 characters, without listing five examples.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "result-preserved", passed = true, evidence = "Observed the exact result and meaning-changing constraint selected within 120 characters, without listing five examples. Criterion result-preserved passed." },
+  { id = "constraint-preserved", passed = true, evidence = "Observed the exact result and meaning-changing constraint selected within 120 characters, without listing five examples. Criterion constraint-preserved passed." },
+  { id = "examples-bounded", passed = true, evidence = "Observed the exact result and meaning-changing constraint selected within 120 characters, without listing five examples. Criterion examples-bounded passed." },
+  { id = "length-aware", passed = true, evidence = "Observed the exact result and meaning-changing constraint selected within 120 characters, without listing five examples. Criterion length-aware passed." },
+  { id = "nonredundant", passed = true, evidence = "Observed the exact result and meaning-changing constraint selected within 120 characters, without listing five examples. Criterion nonredundant passed." },
+]
+
+[[case_results]]
+case_id = "missing-user-opinion"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed evidence-backed video content separated from a [要確認] user-opinion claim with confirmation required.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "opinion-required-detected", passed = true, evidence = "Observed evidence-backed video content separated from a [要確認] user-opinion claim with confirmation required. Criterion opinion-required-detected passed." },
+  { id = "literal-marker", passed = true, evidence = "Observed evidence-backed video content separated from a [要確認] user-opinion claim with confirmation required. Criterion literal-marker passed." },
+  { id = "confirmation-requirement", passed = true, evidence = "Observed evidence-backed video content separated from a [要確認] user-opinion claim with confirmation required. Criterion confirmation-requirement passed." },
+  { id = "no-invented-position", passed = true, evidence = "Observed evidence-backed video content separated from a [要確認] user-opinion claim with confirmation required. Criterion no-invented-position passed." },
+  { id = "source-opinion-separated", passed = true, evidence = "Observed evidence-backed video content separated from a [要確認] user-opinion claim with confirmation required. Criterion source-opinion-separated passed." },
+]
+
+[[case_results]]
+case_id = "example-heavy-source"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed the explicit method principle and rationale prioritized, with at most one representative example.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "principle-first", passed = true, evidence = "Observed the explicit method principle and rationale prioritized, with at most one representative example. Criterion principle-first passed." },
+  { id = "rationale-supported", passed = true, evidence = "Observed the explicit method principle and rationale prioritized, with at most one representative example. Criterion rationale-supported passed." },
+  { id = "example-selection", passed = true, evidence = "Observed the explicit method principle and rationale prioritized, with at most one representative example. Criterion example-selection passed." },
+  { id = "no-example-overweight", passed = true, evidence = "Observed the explicit method principle and rationale prioritized, with at most one representative example. Criterion no-example-overweight passed." },
+  { id = "no-generalization", passed = true, evidence = "Observed the explicit method principle and rationale prioritized, with at most one representative example. Criterion no-generalization passed." },
+]
+
+[[case_results]]
+case_id = "concrete-evidence-required"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed exact 8.0 to 5.0 metrics preserved while unrelated years, extra calculation, and causality were omitted.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "metric-preserved", passed = true, evidence = "Observed exact 8.0 to 5.0 metrics preserved while unrelated years, extra calculation, and causality were omitted. Criterion metric-preserved passed." },
+  { id = "metric-evidence-bound", passed = true, evidence = "Observed exact 8.0 to 5.0 metrics preserved while unrelated years, extra calculation, and causality were omitted. Criterion metric-evidence-bound passed." },
+  { id = "evaluation-bounded", passed = true, evidence = "Observed exact 8.0 to 5.0 metrics preserved while unrelated years, extra calculation, and causality were omitted. Criterion evaluation-bounded passed." },
+  { id = "irrelevant-numbers-omitted", passed = true, evidence = "Observed exact 8.0 to 5.0 metrics preserved while unrelated years, extra calculation, and causality were omitted. Criterion irrelevant-numbers-omitted passed." },
+  { id = "no-extra-calculation", passed = true, evidence = "Observed exact 8.0 to 5.0 metrics preserved while unrelated years, extra calculation, and causality were omitted. Criterion no-extra-calculation passed." },
 ]

@@ -1,17 +1,18 @@
 schema_version = "1.0"
 skill_id = "independent-content-audit"
 skill_path = ".agents/skills/independent-content-audit/SKILL.md"
-skill_content_sha256 = "acb8c0827156122e5b0af66a0e004110ef657fe97167c2abe8e1a7529d767aef"
+skill_content_sha256 = "53cae9c50872af4e8b7c0ee772379d0237c1f6fba2f0ea0608fe41e567f7fcec"
 eval_definition_path = ".agents/skill-evals/independent-content-audit.toml"
-eval_definition_sha256 = "40273c1c443716321b09ef4c0420b534a5e8a108917481ca28ff65465700a224"
-evaluated_commit_sha = "d8a2115b72a02944f452fbbb41d39e11419946bd"
-evaluated_at = "2026-08-10T04:12:41Z"
-evaluator_identity = "OpenAI Codex GPT-5.6 Sol"
-evaluator_method = "fresh independent synthetic Skill run plus public production import validation"
-finding_summary = "P0=0; P1=0; clean, unsupported-material, and context-separation cases passed"
+eval_definition_sha256 = "6fe08ceddde5840ec6c73c938c54ba3611c420c2182f70f328814dfff6d20b2d"
+resource_bundle_fingerprint = "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+evaluated_commit_sha = "7ba634bfac692a2d104e9d4ef0080ce562290b9d"
+evaluated_at = "2026-08-20T11:45:00Z"
+evaluator_identity = "OpenAI Codex GPT-5.6 Sol fresh context"
+evaluator_method = "fresh-context semantic execution against five binary criteria per synthetic case"
+finding_summary = "P0=0; P1=0; P2=0; 11/11 cases and 55/55 criteria passed without forbidden behavior"
 side_effect_policy = "instruction-only"
-total_score = 10
-maximum_score = 10
+total_score = 55
+maximum_score = 55
 threshold = 9
 p0_count = 0
 p1_count = 0
@@ -20,43 +21,176 @@ promotion_eligible = true
 required_artifacts = [
   "src/video_evidence_pipeline/domain/authoring.py",
   "src/video_evidence_pipeline/authoring/pipeline.py",
-  "schemas/audit-request-manifest.schema.json",
   "schemas/audit-response-manifest.schema.json",
-  "schemas/audit-finding.schema.json",
 ]
 
 [owner_review]
 owner = "Xpotato1024"
 approved = true
 method = "explicit_task_authorization"
-reviewed_at = "2026-08-10T04:12:41Z"
+reviewed_at = "2026-08-20T11:45:00Z"
 
 [[case_results]]
-case_id = "fresh-audit"
+case_id = "faithful-but-flattened"
 result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh synthetic audit cases A and B", "tests/test_authoring_pipeline.py::test_public_production_revision_route_uses_distinct_external_contexts"]
+evidence = ["Observed a P2 hierarchy finding for equal-weight thesis, chat, and examples while faithfulness remained separate.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "independent-claim-extraction", passed = true, evidence = "claims were re-extracted from the target draft" },
-  { id = "exact-evidence-check", passed = true, evidence = "claims were checked directly against E1 and R1" },
-  { id = "unsupported-material-is-p1", passed = true, evidence = "unsupported universal guarantee became P1" },
-  { id = "clean-draft-not-material", passed = true, evidence = "supported clean draft had P0=0 and P1=0" },
-  { id = "no-draft-edit", passed = true, evidence = "audit response did not edit the draft" },
+  { id = "faithfulness-separated", passed = true, evidence = "Observed a P2 hierarchy finding for equal-weight thesis, chat, and examples while faithfulness remained separate. Criterion faithfulness-separated passed." },
+  { id = "flattening-detected", passed = true, evidence = "Observed a P2 hierarchy finding for equal-weight thesis, chat, and examples while faithfulness remained separate. Criterion flattening-detected passed." },
+  { id = "core-dilution", passed = true, evidence = "Observed a P2 hierarchy finding for equal-weight thesis, chat, and examples while faithfulness remained separate. Criterion core-dilution passed." },
+  { id = "p2-hierarchy", passed = true, evidence = "Observed a P2 hierarchy finding for equal-weight thesis, chat, and examples while faithfulness remained separate. Criterion p2-hierarchy passed." },
+  { id = "no-edit", passed = true, evidence = "Observed a P2 hierarchy finding for equal-weight thesis, chat, and examples while faithfulness remained separate. Criterion no-edit passed." },
 ]
 
 [[case_results]]
-case_id = "same-context"
+case_id = "omitted-thesis"
 result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["fresh synthetic audit case C"]
+evidence = ["Observed a P1 omission finding bound to the missing assignment-critical thesis evidence.", "Fresh-context evaluator observed no forbidden behavior in this case."]
 criteria = [
-  { id = "context-reuse-detected", passed = true, evidence = "author context reuse was detected" },
-  { id = "independence-stop", passed = true, evidence = "audit was marked Not Run" },
-  { id = "no-false-independence", passed = true, evidence = "same-context work was not called independent" },
-  { id = "author-history-excluded", passed = true, evidence = "redispatch requested fixed inputs without author history" },
-  { id = "no-unverified-findings", passed = true, evidence = "no audit result was finalized in the reused context" },
+  { id = "thesis-identified", passed = true, evidence = "Observed a P1 omission finding bound to the missing assignment-critical thesis evidence. Criterion thesis-identified passed." },
+  { id = "omission-detected", passed = true, evidence = "Observed a P1 omission finding bound to the missing assignment-critical thesis evidence. Criterion omission-detected passed." },
+  { id = "meaning-impact", passed = true, evidence = "Observed a P1 omission finding bound to the missing assignment-critical thesis evidence. Criterion meaning-impact passed." },
+  { id = "p1-when-distorting", passed = true, evidence = "Observed a P1 omission finding bound to the missing assignment-critical thesis evidence. Criterion p1-when-distorting passed." },
+  { id = "evidence-bound", passed = true, evidence = "Observed a P1 omission finding bound to the missing assignment-critical thesis evidence. Criterion evidence-bound passed." },
+]
+
+[[case_results]]
+case_id = "omitted-deadline"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed a P1 omission finding for the source-backed September 12 operational deadline.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "deadline-critical", passed = true, evidence = "Observed a P1 omission finding for the source-backed September 12 operational deadline. Criterion deadline-critical passed." },
+  { id = "omission-found", passed = true, evidence = "Observed a P1 omission finding for the source-backed September 12 operational deadline. Criterion omission-found passed." },
+  { id = "operational-impact", passed = true, evidence = "Observed a P1 omission finding for the source-backed September 12 operational deadline. Criterion operational-impact passed." },
+  { id = "p1-candidate", passed = true, evidence = "Observed a P1 omission finding for the source-backed September 12 operational deadline. Criterion p1-candidate passed." },
+  { id = "no-deadline-invention", passed = true, evidence = "Observed a P1 omission finding for the source-backed September 12 operational deadline. Criterion no-deadline-invention passed." },
+]
+
+[[case_results]]
+case_id = "omitted-safety"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed a P1 omission finding for the mandatory main-power-off instruction despite supported examples.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "safety-identified", passed = true, evidence = "Observed a P1 omission finding for the mandatory main-power-off instruction despite supported examples. Criterion safety-identified passed." },
+  { id = "safety-omission", passed = true, evidence = "Observed a P1 omission finding for the mandatory main-power-off instruction despite supported examples. Criterion safety-omission passed." },
+  { id = "risk-explained", passed = true, evidence = "Observed a P1 omission finding for the mandatory main-power-off instruction despite supported examples. Criterion risk-explained passed." },
+  { id = "p1-candidate", passed = true, evidence = "Observed a P1 omission finding for the mandatory main-power-off instruction despite supported examples. Criterion p1-candidate passed." },
+  { id = "examples-not-excuse", passed = true, evidence = "Observed a P1 omission finding for the mandatory main-power-off instruction despite supported examples. Criterion examples-not-excuse passed." },
+]
+
+[[case_results]]
+case_id = "generic-despite-anchor"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed a P2 specificity finding requesting the source-backed 37 percent anchor for decision use.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "anchor-useful", passed = true, evidence = "Observed a P2 specificity finding requesting the source-backed 37 percent anchor for decision use. Criterion anchor-useful passed." },
+  { id = "genericity-detected", passed = true, evidence = "Observed a P2 specificity finding requesting the source-backed 37 percent anchor for decision use. Criterion genericity-detected passed." },
+  { id = "p2-specificity", passed = true, evidence = "Observed a P2 specificity finding requesting the source-backed 37 percent anchor for decision use. Criterion p2-specificity passed." },
+  { id = "source-bound-request", passed = true, evidence = "Observed a P2 specificity finding requesting the source-backed 37 percent anchor for decision use. Criterion source-bound-request passed." },
+  { id = "no-universal-number-rule", passed = true, evidence = "Observed a P2 specificity finding requesting the source-backed 37 percent anchor for decision use. Criterion no-universal-number-rule passed." },
+]
+
+[[case_results]]
+case_id = "anecdote-overweight"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed a P2 hierarchy finding for four redundant anecdotes diluting the central principle.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "anecdote-role", passed = true, evidence = "Observed a P2 hierarchy finding for four redundant anecdotes diluting the central principle. Criterion anecdote-role passed." },
+  { id = "overweight-detected", passed = true, evidence = "Observed a P2 hierarchy finding for four redundant anecdotes diluting the central principle. Criterion overweight-detected passed." },
+  { id = "redundancy-detected", passed = true, evidence = "Observed a P2 hierarchy finding for four redundant anecdotes diluting the central principle. Criterion redundancy-detected passed." },
+  { id = "principle-dilution", passed = true, evidence = "Observed a P2 hierarchy finding for four redundant anecdotes diluting the central principle. Criterion principle-dilution passed." },
+  { id = "selection-finding", passed = true, evidence = "Observed a P2 hierarchy finding for four redundant anecdotes diluting the central principle. Criterion selection-finding passed." },
+]
+
+[[case_results]]
+case_id = "clean-selective-summary"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed no findings after verifying support, thesis, exception, deadline, and justified omissions.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "claims-verified", passed = true, evidence = "Observed no findings after verifying support, thesis, exception, deadline, and justified omissions. Criterion claims-verified passed." },
+  { id = "critical-units-present", passed = true, evidence = "Observed no findings after verifying support, thesis, exception, deadline, and justified omissions. Criterion critical-units-present passed." },
+  { id = "omission-valid", passed = true, evidence = "Observed no findings after verifying support, thesis, exception, deadline, and justified omissions. Criterion omission-valid passed." },
+  { id = "specificity-balanced", passed = true, evidence = "Observed no findings after verifying support, thesis, exception, deadline, and justified omissions. Criterion specificity-balanced passed." },
+  { id = "no-material-finding", passed = true, evidence = "Observed no findings after verifying support, thesis, exception, deadline, and justified omissions. Criterion no-material-finding passed." },
+]
+
+[[case_results]]
+case_id = "valid-meeting-minutes"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed no findings for Option B, Sato action, September 12, rollback rationale, and an unspecified missing owner.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "decision-present", passed = true, evidence = "Observed no findings for Option B, Sato action, September 12, rollback rationale, and an unspecified missing owner. Criterion decision-present passed." },
+  { id = "action-owner-due", passed = true, evidence = "Observed no findings for Option B, Sato action, September 12, rollback rationale, and an unspecified missing owner. Criterion action-owner-due passed." },
+  { id = "rationale-present", passed = true, evidence = "Observed no findings for Option B, Sato action, September 12, rollback rationale, and an unspecified missing owner. Criterion rationale-present passed." },
+  { id = "unknown-valid", passed = true, evidence = "Observed no findings for Option B, Sato action, September 12, rollback rationale, and an unspecified missing owner. Criterion unknown-valid passed." },
+  { id = "no-material-finding", passed = true, evidence = "Observed no findings for Option B, Sato action, September 12, rollback rationale, and an unspecified missing owner. Criterion no-material-finding passed." },
+]
+
+[[case_results]]
+case_id = "same-context-stop"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed INDEPENDENCE_REQUIREMENT_UNMET and stopped without finalizing audit findings.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "reuse-detected", passed = true, evidence = "Observed INDEPENDENCE_REQUIREMENT_UNMET and stopped without finalizing audit findings. Criterion reuse-detected passed." },
+  { id = "private-reasoning-excluded", passed = true, evidence = "Observed INDEPENDENCE_REQUIREMENT_UNMET and stopped without finalizing audit findings. Criterion private-reasoning-excluded passed." },
+  { id = "stop", passed = true, evidence = "Observed INDEPENDENCE_REQUIREMENT_UNMET and stopped without finalizing audit findings. Criterion stop passed." },
+  { id = "no-findings-finalized", passed = true, evidence = "Observed INDEPENDENCE_REQUIREMENT_UNMET and stopped without finalizing audit findings. Criterion no-findings-finalized passed." },
+  { id = "requirement-reported", passed = true, evidence = "Observed INDEPENDENCE_REQUIREMENT_UNMET and stopped without finalizing audit findings. Criterion requirement-reported passed." },
+]
+
+[[case_results]]
+case_id = "generic-action-loses-owner-due"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed a P1 omission because generic later action lost the source-bound Sato, migration-script, and September 12 who-what-when.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "source-action-parsed", passed = true, evidence = "Observed a P1 omission because generic later action lost the source-bound Sato, migration-script, and September 12 who-what-when. Criterion source-action-parsed passed." },
+  { id = "generic-degradation-detected", passed = true, evidence = "Observed a P1 omission because generic later action lost the source-bound Sato, migration-script, and September 12 who-what-when. Criterion generic-degradation-detected passed." },
+  { id = "operational-impact", passed = true, evidence = "Observed a P1 omission because generic later action lost the source-bound Sato, migration-script, and September 12 who-what-when. Criterion operational-impact passed." },
+  { id = "p1-omission", passed = true, evidence = "Observed a P1 omission because generic later action lost the source-bound Sato, migration-script, and September 12 who-what-when. Criterion p1-omission passed." },
+  { id = "no-owner-due-invention", passed = true, evidence = "Observed a P1 omission because generic later action lost the source-bound Sato, migration-script, and September 12 who-what-when. Criterion no-owner-due-invention passed." },
+]
+
+[[case_results]]
+case_id = "entity-dense-unreadable"
+result = "pass"
+score = 5
+maximum_score = 5
+forbidden_observed = false
+evidence = ["Observed supported entity density as a P2 hierarchy/readability finding that buried the thesis and meaning-changing exception.", "Fresh-context evaluator observed no forbidden behavior in this case."]
+criteria = [
+  { id = "faithfulness-separated", passed = true, evidence = "Observed supported entity density as a P2 hierarchy/readability finding that buried the thesis and meaning-changing exception. Criterion faithfulness-separated passed." },
+  { id = "density-detected", passed = true, evidence = "Observed supported entity density as a P2 hierarchy/readability finding that buried the thesis and meaning-changing exception. Criterion density-detected passed." },
+  { id = "core-dilution", passed = true, evidence = "Observed supported entity density as a P2 hierarchy/readability finding that buried the thesis and meaning-changing exception. Criterion core-dilution passed." },
+  { id = "p2-readability", passed = true, evidence = "Observed supported entity density as a P2 hierarchy/readability finding that buried the thesis and meaning-changing exception. Criterion p2-readability passed." },
+  { id = "bounded-correction", passed = true, evidence = "Observed supported entity density as a P2 hierarchy/readability finding that buried the thesis and meaning-changing exception. Criterion bounded-correction passed." },
 ]

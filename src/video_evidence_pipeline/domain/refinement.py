@@ -11,6 +11,7 @@ from video_evidence_pipeline.domain import StrictModel, UtcDateTime
 from video_evidence_pipeline.domain.artifacts import ArtifactRef
 from video_evidence_pipeline.domain.evidence import SourceRef, SourceRefKind
 from video_evidence_pipeline.domain.identifiers import JobId, Sha256
+from video_evidence_pipeline.domain.semantic import SkillSnapshot
 from video_evidence_pipeline.domain.transcription import TranscriptSegment
 
 
@@ -112,6 +113,7 @@ class RefinementRequestManifest(StrictModel):
     transcript_segments: list[TranscriptSegment] = Field(min_length=1, max_length=100_000)
     available_support_artifacts: list[ArtifactRef] = Field(default_factory=list, max_length=1024)
     available_source_refs: list[SourceRef] = Field(min_length=1, max_length=200_000)
+    skill: SkillSnapshot | None = Field(default=None, exclude_if=lambda value: value is None)
     semantic_correction_contract: Literal[
         "Each semantic edit must refine exactly one transcript segment and cite a non-transcript supporting source; otherwise return one ambiguity and do not merge propositions."
     ] = "Each semantic edit must refine exactly one transcript segment and cite a non-transcript supporting source; otherwise return one ambiguity and do not merge propositions."

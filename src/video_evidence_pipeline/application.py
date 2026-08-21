@@ -99,6 +99,7 @@ from video_evidence_pipeline.domain.length import CharacterLengthConstraint
 from video_evidence_pipeline.domain.manifests import SourceManifest, StageManifest
 from video_evidence_pipeline.domain.media import NormalizationConfig
 from video_evidence_pipeline.domain.recovery import RecoveryManifest
+from video_evidence_pipeline.domain.semantic import PendingSemanticRequestStatus
 from video_evidence_pipeline.domain.serialization import fingerprint
 from video_evidence_pipeline.domain.state import JobState
 from video_evidence_pipeline.domain.supporting import SupportingInputManifest
@@ -130,6 +131,7 @@ from video_evidence_pipeline.evidence.pipeline import (
     read_evidence_response,
     recover_evidence_result,
     stage_evidence,
+    validate_evidence_import_skill,
 )
 from video_evidence_pipeline.evidence.pipeline import cleanup_attempt as cleanup_evidence_attempt
 from video_evidence_pipeline.evidence.pipeline import (
@@ -155,6 +157,10 @@ from video_evidence_pipeline.search import (
     SearchResult,
     build_index,
     search_index,
+)
+from video_evidence_pipeline.semantic.skills import (
+    classify_pending_semantic_request,
+    load_skill_snapshot,
 )
 from video_evidence_pipeline.storage.atomic import (
     atomic_copy_exclusive,
@@ -195,6 +201,7 @@ from video_evidence_pipeline.transcription.refinement import (
     prepare_refinement_request,
     publish_refinement,
     read_refinement_response,
+    validate_refinement_import_skill,
 )
 
 
@@ -229,6 +236,8 @@ def initialize_job(
     language: str,
     output_format: str,
     requirements: list[str] | None = None,
+    purpose: str | None = None,
+    audience: str | None = None,
     primary_input: PrimaryInputKind | None = None,
     supporting_inputs: list[SupportingInputSpec] | None = None,
     min_chars: int | None = None,
@@ -266,6 +275,8 @@ def initialize_job(
             task_type=task_type,
             language=language,
             requirements=list(requirements or []),
+            purpose=purpose,
+            audience=audience,
             length=(
                 CharacterLengthConstraint(
                     min_chars=min_chars,
@@ -1499,6 +1510,13 @@ def import_transcript_refinement_job(
             transcription.segments,
         )
         response = read_refinement_response(response_path, request, allow_fixture=_allow_fixture)
+        if state is not JobState.TRANSCRIPT_REFINED:
+            validate_refinement_import_skill(
+                workspace,
+                request,
+                response,
+                allow_fixture=_allow_fixture,
+            )
         if response.refiner.external_api_used and not authorization.allow_external_api:
             raise state_error(
                 "EXTERNAL_API_NOT_AUTHORIZED",
@@ -1519,6 +1537,18 @@ def import_transcript_refinement_job(
                     "refinement response does not match the committed bundle",
                 )
             return existing
+        current_request = load_refinement_request(
+            workspace,
+            job,
+            media_manifest,
+            transcription.transcript_manifest,
+            transcription.segments,
+        )
+        if current_request != request:
+            raise state_error(
+                "REFINEMENT_SNAPSHOT_STALE",
+                "refinement request changed before publication",
+            )
         result = publish_refinement(
             workspace,
             job,
@@ -1656,6 +1686,13 @@ def _import_evidence_job_locked(
         request,
         allow_fixture=allow_fixture,
     )
+    if snapshot_state is not JobState.EVIDENCE_READY:
+        validate_evidence_import_skill(
+            workspace,
+            request,
+            response,
+            allow_fixture=allow_fixture,
+        )
     if response.analyzer.external_api_used and not snapshot_authorization.allow_external_api:
         raise state_error(
             "EXTERNAL_API_NOT_AUTHORIZED",
@@ -3047,6 +3084,564 @@ def search_job(path: Path, query: str, limit: int = 20) -> SearchResult:
         query,
         limit,
     )
+
+
+_AUTHOR_SKILL_BY_TASK_TYPE = {
+    "meeting-minutes": "draft-video-summary",
+    "minutes": "draft-video-summary",
+    "report": "draft-video-report",
+    "short-report": "draft-video-report",
+    "short-summary": "draft-video-summary",
+    "summary": "draft-video-summary",
+    "video-summary": "draft-video-summary",
+}
+
+
+def default_authoring_skill(task_type: str) -> str | None:
+    """Return an exact, non-fuzzy authoring Skill mapping when one is defined."""
+
+    return _AUTHOR_SKILL_BY_TASK_TYPE.get(task_type)
+
+
+_GUIDE_SIDE_EFFECT_KEYS = (
+    "network_acquisition",
+    "normalization",
+    "ffmpeg",
+    "asr",
+    "model_provision",
+    "external_api_possible",
+    "workspace_write",
+)
+
+
+_GUIDE_ALLOWED_SKILLS_BY_OPERATION = {
+    "refine_prepare": frozenset({"refine-video-transcript"}),
+    "evidence_prepare": frozenset({"analyze-video-evidence"}),
+    "author_prepare": frozenset({"draft-video-report", "draft-video-summary"}),
+    "audit_prepare": frozenset({"independent-content-audit"}),
+    "revision_prepare": frozenset({"revise-from-audit"}),
+}
+
+
+def _guide_side_effects(**enabled: bool) -> dict[str, bool]:
+    return {key: bool(enabled.get(key, False)) for key in _GUIDE_SIDE_EFFECT_KEYS}
+
+
+def _guide_semantic_skill_block(
+    workspace: JobWorkspace,
+    *,
+    operation: str,
+    skill_id: str,
+) -> dict[str, Any] | None:
+    """Return a fail-closed guide result when the current Skill is not import-eligible."""
+
+    try:
+        skill = load_skill_snapshot(
+            workspace,
+            skill_id,
+            allowed=_GUIDE_ALLOWED_SKILLS_BY_OPERATION[operation],
+        )
+    except VepError as exc:
+        code = "SKILL_SNAPSHOT_STALE" if exc.code == "SKILL_EVAL_RESULT_INVALID" else exc.code
+        return {
+            "status": "integrity-error",
+            "next_operation": None,
+            "reason": f"{code}: current Skill eligibility could not be verified",
+            "command": None,
+            "side_effects": _guide_side_effects(),
+        }
+    if skill.lifecycle != "active":
+        return {
+            "status": "blocked",
+            "next_operation": None,
+            "reason": (
+                "DRAFT_SKILL_FORBIDDEN: current Skill "
+                f"{skill_id!r} is not active for production semantic preparation"
+            ),
+            "command": None,
+            "side_effects": _guide_side_effects(),
+        }
+    return None
+
+
+def _effective_status_state(status: dict[str, Any], stored: JobState) -> JobState:
+    """Project the highest verified durable boundary without mutating the job."""
+
+    if stored is not JobState.BLOCKED:
+        return stored
+    authoring = status.get("authoring_integrity", {})
+    if authoring.get("status") == "valid":
+        disposition = authoring.get("audit_disposition")
+        if disposition == AuditDisposition.REVISION_REQUIRED.value:
+            return JobState.REVISION_REQUIRED
+        if disposition == AuditDisposition.HUMAN_REVIEW_READY.value:
+            return JobState.HUMAN_REVIEW_READY
+        return JobState.DRAFTED
+    if status.get("evidence_integrity", {}).get("status") == "valid":
+        return JobState.EVIDENCE_READY
+    if status.get("refinement_integrity", {}).get("status") == "valid":
+        return JobState.TRANSCRIPT_REFINED
+    if status.get("transcription_integrity", {}).get("status") == "valid":
+        return JobState.TRANSCRIBED
+    if status.get("normalization_integrity", {}).get("status") == "valid":
+        return JobState.NORMALIZED
+    if status.get("artifact_integrity", {}).get("status") == "valid":
+        return JobState.ACQUIRED
+    if status.get("authorization", {}).get("valid") is True:
+        return JobState.AUTHORIZED
+    return JobState.CREATED
+
+
+def _guide_integrity_reason(status: dict[str, Any]) -> str:
+    for key in (
+        "authorization",
+        "artifact_integrity",
+        "normalization_integrity",
+        "transcription_integrity",
+        "refinement_integrity",
+        "evidence_integrity",
+        "authoring_integrity",
+        "approval_integrity",
+        "export_integrity",
+    ):
+        value = status.get(key, {})
+        if value.get("valid") is False or value.get("status") == "invalid":
+            return f"{key}: {value.get('error_code', 'integrity validation failed')}"
+    return "stored job integrity could not be verified"
+
+
+def _guide_semantic_paths(
+    workspace: JobWorkspace,
+    *,
+    operation: str,
+    skill_id: str,
+    draft_version: str | None = None,
+) -> dict[str, str]:
+    repository_root = workspace.jobs_root.parent.parent
+    request = _guide_semantic_request_path(
+        workspace,
+        operation=operation,
+        draft_version=draft_version,
+    )
+    schema = {
+        "refine_prepare": "refinement-response-manifest.schema.json",
+        "evidence_prepare": "evidence-response-manifest.schema.json",
+        "author_prepare": "authoring-response-manifest.schema.json",
+        "audit_prepare": "audit-response-manifest.schema.json",
+        "revision_prepare": "revision-response-manifest.schema.json",
+    }[operation]
+    return {
+        "request_path": str(request.resolve()),
+        "skill_path": str(
+            (repository_root / ".agents" / "skills" / skill_id / "SKILL.md").resolve()
+        ),
+        "response_schema_path": str((repository_root / "schemas" / schema).resolve()),
+    }
+
+
+def _guide_semantic_request_path(
+    workspace: JobWorkspace,
+    *,
+    operation: str,
+    draft_version: str | None = None,
+) -> Path:
+    if operation == "refine_prepare":
+        request = workspace.refinement_request_json
+    elif operation == "evidence_prepare":
+        request = workspace.evidence_request_json
+    elif operation == "author_prepare":
+        request = workspace.safe_path("authoring/requests/author-v001.json")
+    elif operation == "audit_prepare":
+        version = draft_version or "v001"
+        request = workspace.safe_path(f"authoring/requests/audit-{version}.json")
+    elif operation == "revision_prepare":
+        current = int((draft_version or "v001")[1:])
+        request = workspace.safe_path(f"authoring/requests/revision-v{current + 1:03d}.json")
+    else:  # pragma: no cover - caller is a closed state planner
+        raise ValueError("not a semantic prepare operation")
+    return request
+
+
+def _guide_validated_pending_request(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    *,
+    operation: str,
+) -> Any:
+    """Read and validate one pending request against canonical upstream artifacts."""
+
+    if operation in {"refine_prepare", "evidence_prepare"}:
+        raw = verify_acquired_bundle(workspace, job)
+        media = load_normalization_result(workspace, job, raw)
+        transcription = load_transcription_result(
+            workspace,
+            job,
+            media.media_manifest,
+        )
+        if operation == "refine_prepare":
+            return load_refinement_request(
+                workspace,
+                job,
+                media.media_manifest,
+                transcription.transcript_manifest,
+                transcription.segments,
+            )
+        transcript_manifest = transcription.transcript_manifest
+        segments = transcription.segments
+        if requires_transcript_refinement(job):
+            refinement = load_refinement_result(
+                workspace,
+                job,
+                media.media_manifest,
+                transcription.transcript_manifest,
+                transcription.segments,
+            )
+            transcript_manifest = evidence_transcript_projection(
+                transcription.transcript_manifest,
+                refinement,
+            )
+            segments = refinement.segments
+        return load_evidence_request(
+            workspace,
+            job,
+            media.media_manifest,
+            transcript_manifest,
+            segments,
+        )
+    fixed = _load_fixed_evidence(workspace, job)
+    if operation == "author_prepare":
+        return load_authoring_request(workspace, job, fixed)
+    history = _load_authoring_history(workspace, job, fixed)
+    if not history:
+        raise integrity_error("DRAFT_HISTORY_INVALID", "draft history is absent")
+    if operation == "audit_prepare":
+        return load_audit_request(workspace, job, fixed, history[-1][0])
+    if operation == "revision_prepare":
+        target = history[-1]
+        if target[1] is None and target[0].manifest.revision_count > 0 and len(history) > 1:
+            target = history[-2]
+        draft, audit = target
+        if audit is None:
+            raise integrity_error("AUDIT_BUNDLE_INVALID", "revision audit is absent")
+        return load_revision_request(workspace, job, fixed, draft, audit)
+    raise ValueError("not a semantic prepare operation")  # pragma: no cover
+
+
+def _guide_pending_semantic_request(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    *,
+    operation: str,
+    skill_id: str,
+    draft_version: str | None,
+) -> dict[str, Any] | None:
+    """Classify an existing pending request without preparing or rewriting it."""
+
+    request_path = _guide_semantic_request_path(
+        workspace,
+        operation=operation,
+        draft_version=draft_version,
+    )
+    if not request_path.exists():
+        return None
+    try:
+        request = _guide_validated_pending_request(
+            workspace,
+            job,
+            operation=operation,
+        )
+    except VepError as exc:
+        return {
+            "status": "integrity-error",
+            "next_operation": None,
+            "reason": f"{exc.code}: pending semantic request is invalid",
+            "command": None,
+            "side_effects": _guide_side_effects(),
+            "request_path": str(request_path.resolve()),
+            "pending_request_status": PendingSemanticRequestStatus.INVALID.value,
+            "import_eligible": False,
+            "migration_required": False,
+        }
+    assessment = classify_pending_semantic_request(
+        workspace,
+        request.skill,
+        allowed=_GUIDE_ALLOWED_SKILLS_BY_OPERATION[operation],
+        expected_skill_id=skill_id,
+    )
+    if assessment.import_eligible:
+        return {
+            "pending_request_status": assessment.status.value,
+            "import_eligible": True,
+            "migration_required": False,
+        }
+    result = {
+        "request_path": str(request_path.resolve()),
+        "pending_request_status": assessment.status.value,
+        "import_eligible": False,
+        "migration_required": assessment.migration_required,
+    }
+    if not assessment.migration_required:
+        return {
+            **result,
+            "status": "integrity-error",
+            "next_operation": None,
+            "reason": f"{assessment.reason_code}: {assessment.reason}",
+            "command": None,
+            "side_effects": _guide_side_effects(),
+        }
+    return {
+        **result,
+        "status": "migration-required",
+        "next_operation": "recover",
+        "reason": (
+            f"{assessment.reason_code}: existing semantic request cannot be imported under "
+            "the current frozen Skill contract; preserve the parent and recover from its "
+            "verified transcript"
+        ),
+        "command": (
+            f'vep job recover "{workspace.root}" <new-job-id> --confirm --basis <basis> '
+            "--child-spec <job.yaml>"
+        ),
+        "side_effects": _guide_side_effects(workspace_write=True),
+        "reuses_verified_transcript": True,
+    }
+
+
+def _guide_operation(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    transitions: list[TransitionRecord],
+    state: JobState,
+    status: dict[str, Any],
+) -> dict[str, Any]:
+    quoted = f'"{workspace.root}"'
+    primary = primary_input_kind(job)
+    authoring = status.get("authoring_integrity", {})
+    draft_version = authoring.get("draft_version")
+    if state is JobState.CREATED:
+        authorize_base = (
+            f"vep job authorize {quoted} --confirm --basis <basis> --allow-local-processing"
+        )
+        if job.source.kind is not SourceKind.LOCAL_FILE:
+            return {
+                "status": "human-action-required",
+                "next_operation": "authorize",
+                "reason": (
+                    "network acquisition and external API authorization are one-time human decisions; "
+                    "choose exactly one explicit permission combination before the job can advance"
+                ),
+                "command": None,
+                "authorization_choices": {
+                    "allow_network_local_semantics": (
+                        f"{authorize_base} --allow-network-acquisition --deny-external-api"
+                    ),
+                    "allow_network_external_semantics": (
+                        f"{authorize_base} --allow-network-acquisition --allow-external-api"
+                    ),
+                    "deny_network_local_semantics": (
+                        f"{authorize_base} --deny-network-acquisition --deny-external-api"
+                    ),
+                    "deny_network_external_semantics": (
+                        f"{authorize_base} --deny-network-acquisition --allow-external-api"
+                    ),
+                },
+                "side_effects": _guide_side_effects(workspace_write=True),
+            }
+        return {
+            "status": "human-action-required",
+            "next_operation": "authorize",
+            "reason": (
+                "external API authorization is a one-time human decision; choose local-only or "
+                "explicitly authorized external semantics before the job can advance"
+            ),
+            "command": None,
+            "authorization_choices": {
+                "local_semantic_runner": f"{authorize_base} --deny-external-api",
+                "external_semantic_runner": f"{authorize_base} --allow-external-api",
+            },
+            "side_effects": _guide_side_effects(workspace_write=True),
+        }
+    if state is JobState.AUTHORIZED:
+        if (
+            job.source.kind is not SourceKind.LOCAL_FILE
+            and status.get("authorization", {}).get("allow_network_acquisition") is not True
+        ):
+            return {
+                "status": "blocked",
+                "next_operation": None,
+                "reason": (
+                    "NETWORK_ACQUISITION_NOT_AUTHORIZED: recorded authorization denies network "
+                    "acquisition, and authorization cannot be changed after job creation"
+                ),
+                "command": None,
+                "side_effects": _guide_side_effects(),
+            }
+        return {
+            "status": "ready",
+            "next_operation": "acquire",
+            "reason": "the authorized source has not been acquired",
+            "command": f"vep acquire {quoted}",
+            "side_effects": _guide_side_effects(
+                network_acquisition=job.source.kind is not SourceKind.LOCAL_FILE,
+                workspace_write=True,
+            ),
+        }
+    if state is JobState.ACQUIRED:
+        return {
+            "status": "ready",
+            "next_operation": "normalize",
+            "reason": "the acquired input has not been normalized",
+            "command": f"vep normalize {quoted}",
+            "side_effects": _guide_side_effects(
+                normalization=True,
+                ffmpeg=primary is not PrimaryInputKind.TRANSCRIPT,
+                workspace_write=True,
+            ),
+        }
+    if state is JobState.NORMALIZED:
+        return {
+            "status": "ready",
+            "next_operation": "transcribe",
+            "reason": "a canonical transcript has not been published",
+            "command": f"vep transcribe {quoted}",
+            "side_effects": _guide_side_effects(
+                asr=primary is not PrimaryInputKind.TRANSCRIPT,
+                workspace_write=True,
+            ),
+        }
+    semantic: tuple[str, str, str] | None = None
+    if state is JobState.TRANSCRIBED and requires_transcript_refinement(job):
+        semantic = ("refine_prepare", "refine-video-transcript", "vep refine prepare")
+    elif state in {JobState.TRANSCRIBED, JobState.TRANSCRIPT_REFINED}:
+        semantic = ("evidence_prepare", "analyze-video-evidence", "vep evidence prepare")
+    elif state is JobState.EVIDENCE_READY:
+        skill_id = default_authoring_skill(job.assignment.task_type)
+        if skill_id is None:
+            return {
+                "status": "blocked",
+                "next_operation": "author_prepare",
+                "reason": "task_type has no deterministic authoring Skill mapping; select --skill explicitly",
+                "command": f"vep author prepare {quoted} --skill <skill-id>",
+                "side_effects": _guide_side_effects(workspace_write=True),
+            }
+        semantic = ("author_prepare", skill_id, "vep author prepare")
+    elif state is JobState.DRAFTED:
+        semantic = ("audit_prepare", "independent-content-audit", "vep audit prepare")
+    elif state is JobState.REVISION_REQUIRED:
+        semantic = ("revision_prepare", "revise-from-audit", "vep revision prepare")
+    if semantic is not None:
+        operation, skill_id, command = semantic
+        blocked = _guide_semantic_skill_block(
+            workspace,
+            operation=operation,
+            skill_id=skill_id,
+        )
+        if blocked is not None:
+            return blocked
+        pending = _guide_pending_semantic_request(
+            workspace,
+            job,
+            operation=operation,
+            skill_id=skill_id,
+            draft_version=draft_version,
+        )
+        if pending is not None and "status" in pending:
+            return pending
+        return {
+            "status": "ready",
+            "next_operation": operation,
+            "reason": "prepare the frozen semantic request before an independent AI exchange",
+            "command": f"{command} {quoted}",
+            "side_effects": _guide_side_effects(workspace_write=True),
+            "semantic_exchange_external_api_allowed": (
+                status.get("authorization", {}).get("allow_external_api") is True
+            ),
+            **(pending or {}),
+            **_guide_semantic_paths(
+                workspace,
+                operation=operation,
+                skill_id=skill_id,
+                draft_version=draft_version,
+            ),
+        }
+    if state is JobState.AUDITED:
+        return {
+            "status": "blocked",
+            "next_operation": None,
+            "reason": "the audit transition is incomplete; inspect status without inventing a repair",
+            "command": f"vep job status {quoted}",
+            "side_effects": _guide_side_effects(),
+        }
+    if state is JobState.HUMAN_REVIEW_READY:
+        return {
+            "status": "human-action-required",
+            "next_operation": "human_approve",
+            "reason": "a human must review and explicitly approve the bound draft",
+            "command": (
+                f"vep approve {quoted} --confirm --reviewer <identity> --basis <basis> "
+                "--approval-target-sha256 <sha256>"
+            ),
+            "side_effects": _guide_side_effects(workspace_write=True),
+        }
+    if state is JobState.HUMAN_APPROVED:
+        return {
+            "status": "ready",
+            "next_operation": "export",
+            "reason": "the human-approved artifact is ready for deterministic export",
+            "command": f"vep export {quoted}",
+            "side_effects": _guide_side_effects(workspace_write=True),
+        }
+    if state is JobState.EXPORTED:
+        return {
+            "status": "complete",
+            "next_operation": None,
+            "reason": "the approved artifact has been exported",
+            "command": None,
+            "side_effects": _guide_side_effects(),
+        }
+    if state is JobState.BLOCKED and _recovery_parent_is_creation_eligible(transitions, state):
+        return {
+            "status": "blocked",
+            "next_operation": "recover",
+            "reason": "a verified transcript boundary can be reused in a new child job",
+            "command": (
+                f"vep job recover {quoted} <new-job-id> --confirm --basis <basis> "
+                "--child-spec <job.yaml>"
+            ),
+            "side_effects": _guide_side_effects(workspace_write=True),
+        }
+    return {
+        "status": "terminal" if state in {JobState.FAILED, JobState.CANCELLED} else "blocked",
+        "next_operation": None,
+        "reason": "no safe public recovery operation can be derived from the verified state",
+        "command": None,
+        "side_effects": _guide_side_effects(),
+    }
+
+
+def job_guide(path: Path) -> dict[str, Any]:
+    """Return read-only, state-aware guidance without preparing or repairing artifacts."""
+
+    workspace, job, transitions, state = _load_context(path)
+    status, exit_code = job_status(path)
+    effective = _effective_status_state(status, state)
+    if exit_code:
+        operation = {
+            "status": "integrity-error",
+            "next_operation": None,
+            "reason": _guide_integrity_reason(status),
+            "command": None,
+            "side_effects": _guide_side_effects(),
+        }
+    else:
+        operation = _guide_operation(workspace, job, transitions, state, status)
+    return {
+        "job_id": job.job_id,
+        "stored_state": state.value,
+        "effective_state": effective.value,
+        "guide_read_only": True,
+        **operation,
+    }
 
 
 def job_status(path: Path) -> tuple[dict[str, Any], int]:

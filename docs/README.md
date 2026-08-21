@@ -14,6 +14,9 @@ related_documents:
   - VEP-GOV-DOCUMENTS
   - VEP-DOC-REGISTRY
   - VEP-README
+  - VEP-GUIDE-GETTING-STARTED
+  - VEP-OPS-AI-EXCHANGE
+  - VEP-CONCEPT-SEMANTIC-QUALITY
   - VEP-AGENT-INDEX
   - VEP-OPS-CI
   - VEP-OPS-NETWORK
@@ -26,6 +29,13 @@ related_documents:
 
 文書ごとのfront matter有無は台帳の`metadata_mode`で決まります。READMEやAI入口は
 `registry-only`、内部設計文書は原則`front-matter`です。
+
+## Start here
+
+- [`../README.md`](../README.md): 初見向けのproduct landing page、最短quickstart、全体図
+- [`getting-started.md`](getting-started.md): transcript／mediaからの導入手順
+- [`operations/ai-exchange.md`](operations/ai-exchange.md): request／Skill／response schemaの運用契約
+- [`concepts/semantic-quality.md`](concepts/semantic-quality.md): source-backedなselection／faithfulness方針
 
 ## Governance
 
@@ -46,10 +56,16 @@ related_documents:
 
 ## Operations
 
+- [`getting-started.md`](getting-started.md)
 - [`operations/ci-quality-gates.md`](operations/ci-quality-gates.md)
 - [`operations/cli-and-local-workspace.md`](operations/cli-and-local-workspace.md)
+- [`operations/ai-exchange.md`](operations/ai-exchange.md)
 - [`operations/asr-runtime.md`](operations/asr-runtime.md)
 - [`operations/network-acquisition.md`](operations/network-acquisition.md)
+
+## Concepts
+
+- [`concepts/semantic-quality.md`](concepts/semantic-quality.md)
 
 ## Agent system
 

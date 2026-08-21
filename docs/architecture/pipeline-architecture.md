@@ -225,10 +225,12 @@ authorはevidenceにない事実を補完してはいけません。
 `vep author prepare`はjobに属するfixed selected-evidence bundle、requirements、constraints、Skill snapshotを
 immutable requestへ固定します。provider-neutral response importはclaim typeごとのinterpretation境界、evidence／
 requirementの相互対応、user opinionの`[要確認]`表現、UTF-8 byte上限を検証し、`v001`をprivate stagingから
-exclusive publishします。`external_exchange` public author／audit／revision production importは`active` Skillだけを
-許可し、`draft-video-report`、`draft-video-summary`、`independent-content-audit`、`revise-from-audit`が現在の
-active Skillです。`analyze-video-evidence`と`prepare-human-review`はdraftのままで、このproduction routeの
-allowlistには含めません。allowlist内のSkillがdraftなら`DRAFT_SKILL_FORBIDDEN`でfail closedします。
+exclusive publishします。`external_exchange` public refinement／evidence／author／audit／revision production
+importは`active` Skillだけを許可します。現在のsemantic／operator active Skillは
+`refine-video-transcript`、`analyze-video-evidence`、`draft-video-report`、
+`draft-video-summary`、`independent-content-audit`、`revise-from-audit`、
+`run-video-evidence-job`です。`prepare-human-review`はdraftのままproduction routeのallowlistに
+含めません。allowlist内のSkillがdraftなら`DRAFT_SKILL_FORBIDDEN`でfail closedします。
 request内のSkill snapshotはimmutable lineageとして保持し、完成済み履歴の再検証を現在のregistry内容へ結合しません。
 完成済みのauthor／audit／revision importを同一responseで再実行する場合も、保存済みrequestとcanonical responseの
 完全一致を先に検証し、現在のSkill content／eval／lifecycleは再適格性判定へ使用しません。

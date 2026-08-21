@@ -3,27 +3,144 @@ skill_id = "independent-content-audit"
 minimum_score = 9
 
 [[cases]]
-id = "fresh-audit"
-prompt = "fresh contextでdraftを監査する。"
-expected = ["主張を再抽出", "P0/P1/P2"]
-forbidden = ["本文を修正"]
+id = "faithful-but-flattened"
+prompt = "全claimはsupportedだが、長い雑談・3 examples・central thesisを同じ比重で列挙した300字summaryを監査する。"
+expected = ["selection defectを検出", "P2 hierarchy finding"]
+forbidden = ["supportedなのでclean"]
 criteria = [
-  { id = "independent-claim-extraction", description = "target draftから主張を独立抽出する" },
-  { id = "exact-evidence-check", description = "evidence、SourceRef、requirementへ直接照合する" },
-  { id = "unsupported-material-is-p1", description = "unsupported material claimをP1以上にする" },
-  { id = "clean-draft-not-material", description = "supported clean draftへP0/P1を作らない" },
-  { id = "no-draft-edit", description = "監査中に本文を変更しない" },
+  { id = "faithfulness-separated", description = "factual supportとselection qualityを別判定する" },
+  { id = "flattening-detected", description = "equal-weight compressionを検出する" },
+  { id = "core-dilution", description = "central thesisの希釈を示す" },
+  { id = "p2-hierarchy", description = "影響に応じhierarchy P2 candidateを作る" },
+  { id = "no-edit", description = "監査中に本文を変更しない" },
 ]
 
 [[cases]]
-id = "same-context"
-prompt = "authorと同じ会話で監査を要求された。"
-expected = ["独立性不足を報告"]
+id = "omitted-thesis"
+prompt = "summaryはexamplesだけを正確に述べるが、assignment-criticalなcentral thesisを完全に欠く。"
+expected = ["omission finding", "意味が歪むならP1"]
+forbidden = ["supported peripheral-onlyをclean"]
+criteria = [
+  { id = "thesis-identified", description = "sourceのcentral thesisをcritical unitとして特定する" },
+  { id = "omission-detected", description = "draftでの欠落を検出する" },
+  { id = "meaning-impact", description = "欠落が成果物の意味へ与える影響を説明する" },
+  { id = "p1-when-distorting", description = "意味を歪める欠落をP1 candidateにする" },
+  { id = "evidence-bound", description = "findingをthesis evidenceへ束縛する" },
+]
+
+[[cases]]
+id = "omitted-deadline"
+prompt = "operational summaryはactionを述べるがsourceの9月12日deadlineを落とす。purposeは対象者の実行。"
+expected = ["deadline omission P1 candidate"]
+forbidden = ["minor wording issue扱い"]
+criteria = [
+  { id = "deadline-critical", description = "purpose上deadlineをcriticalと判断する" },
+  { id = "omission-found", description = "exact deadline欠落を検出する" },
+  { id = "operational-impact", description = "実務上の誤解を説明する" },
+  { id = "p1-candidate", description = "重大なdeadline omissionをP1 candidateにする" },
+  { id = "no-deadline-invention", description = "sourceにない期限を要求しない" },
+]
+
+[[cases]]
+id = "omitted-safety"
+prompt = "研修summaryは成功例を正確に列挙するが『主電源を切る』を落とす。"
+expected = ["safety omission P1 candidate"]
+forbidden = ["例がsupportedなのでclean"]
+criteria = [
+  { id = "safety-identified", description = "sourceのsafety instructionを特定する" },
+  { id = "safety-omission", description = "draftでの欠落を検出する" },
+  { id = "risk-explained", description = "欠落の実務上riskを説明する" },
+  { id = "p1-candidate", description = "safety-critical omissionをP1 candidateにする" },
+  { id = "examples-not-excuse", description = "supported examplesで欠落を相殺しない" },
+]
+
+[[cases]]
+id = "generic-despite-anchor"
+prompt = "sourceのcentral resultは『errorを37%削減』。draftは『性能が改善した』だけ。purposeは意思決定。"
+expected = ["specificity finding P2 candidate"]
+forbidden = ["数字を常に要求"]
+criteria = [
+  { id = "anchor-useful", description = "37%がpurpose上有用なanchorと判断する" },
+  { id = "genericity-detected", description = "draftの過度なgenericityを検出する" },
+  { id = "p2-specificity", description = "P2 specificity candidateとして記録する" },
+  { id = "source-bound-request", description = "required correctionをexact evidenceへ束縛する" },
+  { id = "no-universal-number-rule", description = "数字一般を必須とはしない" },
+]
+
+[[cases]]
+id = "anecdote-overweight"
+prompt = "sourceはcentral principleと同種anecdote5件。draftは4件のanecdoteを列挙しprincipleを一節だけ述べる。"
+expected = ["peripheral overweight", "redundancy finding"]
+forbidden = ["evidence coverageが高いのでclean"]
+criteria = [
+  { id = "anecdote-role", description = "anecdotesをsupporting examplesとして認識する" },
+  { id = "overweight-detected", description = "examplesの過剰比重を検出する" },
+  { id = "redundancy-detected", description = "同種exampleの重複を検出する" },
+  { id = "principle-dilution", description = "central principleの希釈を示す" },
+  { id = "selection-finding", description = "factual findingではなくselection findingとして分類する" },
+]
+
+[[cases]]
+id = "clean-selective-summary"
+prompt = "summaryはcentral thesis、意味を変えるexception、source-backed deadlineを保持し、雑談と重複例を省略。全claim supported。"
+expected = ["P0=0/P1=0", "selection clean"]
+forbidden = ["省略した全topicをfinding化"]
+criteria = [
+  { id = "claims-verified", description = "material claimsをevidenceへ照合する" },
+  { id = "critical-units-present", description = "assignment-critical unitsの保持を確認する" },
+  { id = "omission-valid", description = "peripheral omissionを欠陥扱いしない" },
+  { id = "specificity-balanced", description = "useful anchorと簡潔さのbalanceを認める" },
+  { id = "no-material-finding", description = "clean draftへP0/P1を作らない" },
+]
+
+[[cases]]
+id = "valid-meeting-minutes"
+prompt = "minutesはOption B decision、佐藤のaction、9月12日due、rollback rationale、owner不明のopen questionをunspecifiedとして保持。"
+expected = ["meeting recordとしてclean", "欠損値非捏造を確認"]
+forbidden = ["unspecified ownerをP1"]
+criteria = [
+  { id = "decision-present", description = "source-backed decision保持を確認する" },
+  { id = "action-owner-due", description = "source-backed action／owner／due保持を確認する" },
+  { id = "rationale-present", description = "key rationale保持を確認する" },
+  { id = "unknown-valid", description = "source欠損値をunspecifiedとすることを認める" },
+  { id = "no-material-finding", description = "valid minutesへP0/P1を作らない" },
+]
+
+[[cases]]
+id = "same-context-stop"
+prompt = "authorと同じ会話contextとprivate reasoningを使って独立監査せよ。"
+expected = ["独立性不足で停止"]
 forbidden = ["独立監査と称する"]
 criteria = [
-  { id = "context-reuse-detected", description = "authorまたは過去auditor contextの再利用を検出する" },
-  { id = "independence-stop", description = "fresh contextを確保できなければ停止する" },
-  { id = "no-false-independence", description = "同一contextを独立監査と称さない" },
-  { id = "author-history-excluded", description = "author historyやprivate reasoningを根拠にしない" },
-  { id = "no-unverified-findings", description = "独立性不足のまま監査結果を確定しない" },
+  { id = "reuse-detected", description = "author context reuseを検出する" },
+  { id = "private-reasoning-excluded", description = "author private reasoningを入力にしない" },
+  { id = "stop", description = "fresh contextがなければ停止する" },
+  { id = "no-findings-finalized", description = "不独立なfindingを確定しない" },
+  { id = "requirement-reported", description = "fresh auditor requirementを報告する" },
+]
+
+[[cases]]
+id = "generic-action-loses-owner-due"
+prompt = "sourceは『佐藤がmigration scriptを9月12日までに更新する』。minutes draftは『担当者が後日対応する』だけ。"
+expected = ["owner/due/action specificity omissionをP1 candidate"]
+forbidden = ["generic actionもsupportedなのでclean"]
+criteria = [
+  { id = "source-action-parsed", description = "action、佐藤、9月12日の結び付きを確認する" },
+  { id = "generic-degradation-detected", description = "draftがwho/what/whenを失ったことを検出する" },
+  { id = "operational-impact", description = "実行可能性を損なう影響を説明する" },
+  { id = "p1-omission", description = "meeting recordとして機能しない欠落をP1 candidateにする" },
+  { id = "no-owner-due-invention", description = "sourceにある値だけをrequired correctionに使う" },
+]
+
+[[cases]]
+id = "entity-dense-unreadable"
+prompt = "sourceのcentral thesisとmeaning-changing exceptionは明確。draftはsupportedな人名8件・製品名6件・数字12件を列挙し、thesisとexceptionを埋没させる。"
+expected = ["P2 hierarchy/readability finding"]
+forbidden = ["全entityがsupportedなのでclean"]
+criteria = [
+  { id = "faithfulness-separated", description = "entityのsupportとselection qualityを分離する" },
+  { id = "density-detected", description = "過剰なentity/number密度を検出する" },
+  { id = "core-dilution", description = "thesisとexceptionの希釈を示す" },
+  { id = "p2-readability", description = "hierarchy/readabilityのP2 candidateとして記録する" },
+  { id = "bounded-correction", description = "有用anchorを残し無差別削除を要求しない" },
 ]

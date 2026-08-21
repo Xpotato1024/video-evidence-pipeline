@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import re
 import subprocess
 import sys
@@ -9,7 +10,7 @@ import tempfile
 import tomllib
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
@@ -587,6 +588,11 @@ class RepositoryValidator:
             ):
                 self.add("SKILL_ENTRY_INVALID", relative, f"invalid required fields: {entry!r}")
                 continue
+            resource_binding = self._validate_skill_resources(
+                registry_path=relative,
+                skill_path=skill_path,
+                declarations=entry.get("resources"),
+            )
             if sid in ids:
                 self.add("SKILL_ID_DUPLICATE", relative, sid)
             ids.add(sid)
@@ -603,15 +609,8 @@ class RepositoryValidator:
                     skill_path,
                     "explicit-only Skill must not auto-trigger",
                 )
-            if lifecycle == "draft":
-                if entry.get("automatic_trigger") is not False:
-                    self.add("DRAFT_SKILL_TRIGGER", skill_path, "draft Skill must not auto-trigger")
-                if side_effect != "instruction-only":
-                    self.add(
-                        "DRAFT_SKILL_SIDE_EFFECT",
-                        skill_path,
-                        "draft Skill must be instruction-only",
-                    )
+            if lifecycle == "draft" and entry.get("automatic_trigger") is not False:
+                self.add("DRAFT_SKILL_TRIGGER", skill_path, "draft Skill must not auto-trigger")
             if skill_path not in self.tracked_files or not (self.root / skill_path).is_file():
                 self.add("SKILL_PATH_MISSING", skill_path, sid)
                 continue
@@ -651,7 +650,101 @@ class RepositoryValidator:
                     result_path=result_path,
                     evaluation=evaluation,
                     promotion_threshold=promotion_threshold,
+                    resource_bundle_fingerprint=resource_binding[0],
+                    resource_hashes=resource_binding[1],
                 )
+
+    def _validate_skill_resources(
+        self,
+        *,
+        registry_path: str,
+        skill_path: str,
+        declarations: object,
+    ) -> tuple[str, dict[str, str]]:
+        manifest: list[dict[str, str]] = []
+        commit_hashes: dict[str, str] = {}
+        if not isinstance(declarations, list):
+            self.add(
+                "SKILL_RESOURCE_MANIFEST_INVALID",
+                registry_path,
+                f"{skill_path} resources must be an explicit array",
+            )
+            declarations = []
+        seen: list[str] = []
+        skill_root = PurePosixPath(skill_path).parent
+        allowed_types = {
+            "references": "reference",
+            "scripts": "script",
+            "assets": "asset",
+        }
+        for declaration in declarations:
+            if not isinstance(declaration, dict) or set(declaration) != {"path", "type"}:
+                self.add(
+                    "SKILL_RESOURCE_MANIFEST_INVALID",
+                    registry_path,
+                    f"{skill_path} has an invalid resource declaration",
+                )
+                continue
+            relative_path = declaration.get("path")
+            resource_type = declaration.get("type")
+            if not isinstance(relative_path, str) or not isinstance(resource_type, str):
+                self.add("SKILL_RESOURCE_MANIFEST_INVALID", registry_path, skill_path)
+                continue
+            pure = PurePosixPath(relative_path)
+            if (
+                pure.is_absolute()
+                or str(pure) != relative_path
+                or "\\" in relative_path
+                or any(part in {"", ".", ".."} or part.startswith(".") for part in pure.parts)
+                or not pure.parts
+                or allowed_types.get(pure.parts[0]) != resource_type
+            ):
+                self.add(
+                    "SKILL_RESOURCE_PATH_INVALID",
+                    registry_path,
+                    f"{skill_path}: {relative_path}",
+                )
+                continue
+            seen.append(relative_path)
+            repository_relative = (skill_root / pure).as_posix()
+            target = self.root / repository_relative
+            if repository_relative not in self.tracked_files or not target.is_file():
+                self.add("SKILL_RESOURCE_MISSING", repository_relative, skill_path)
+                continue
+            sha256 = hashlib.sha256(target.read_bytes()).hexdigest()
+            commit_hashes[repository_relative] = sha256
+            manifest.append(
+                {"relative_path": relative_path, "sha256": sha256, "type": resource_type}
+            )
+        if seen != sorted(set(seen)):
+            self.add(
+                "SKILL_RESOURCE_MANIFEST_INVALID",
+                registry_path,
+                f"{skill_path} resource paths must be sorted and unique",
+            )
+        discovered = {
+            path
+            for path in self.tracked_files
+            if any(
+                path.startswith(f"{skill_root.as_posix()}/{directory}/")
+                for directory in allowed_types
+            )
+        }
+        if discovered != set(commit_hashes):
+            self.add(
+                "SKILL_RESOURCE_UNDECLARED",
+                skill_path,
+                "bundled resource files and registry declarations differ",
+            )
+        manifest.sort(key=lambda item: item["relative_path"])
+        payload = json.dumps(
+            manifest,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest(), commit_hashes
 
     def _validate_skill_result(
         self,
@@ -664,6 +757,8 @@ class RepositoryValidator:
         result_path: str,
         evaluation: dict[str, Any],
         promotion_threshold: object,
+        resource_bundle_fingerprint: str,
+        resource_hashes: dict[str, str],
     ) -> None:
         path = self.root / result_path
         if result_path not in self.tracked_files or not path.is_file():
@@ -681,6 +776,7 @@ class RepositoryValidator:
             "skill_content_sha256",
             "eval_definition_path",
             "eval_definition_sha256",
+            "resource_bundle_fingerprint",
             "evaluated_commit_sha",
             "evaluated_at",
             "evaluator_identity",
@@ -713,8 +809,10 @@ class RepositoryValidator:
         if (
             not SHA256_RE.fullmatch(result["skill_content_sha256"])
             or not SHA256_RE.fullmatch(result["eval_definition_sha256"])
+            or not SHA256_RE.fullmatch(result["resource_bundle_fingerprint"])
             or result["skill_content_sha256"] != current_skill_sha
             or result["eval_definition_sha256"] != current_eval_sha
+            or result["resource_bundle_fingerprint"] != resource_bundle_fingerprint
         ):
             self.add(
                 "SKILL_EVAL_RESULT_STALE",
@@ -733,6 +831,7 @@ class RepositoryValidator:
             {
                 skill_path: result["skill_content_sha256"],
                 eval_path: result["eval_definition_sha256"],
+                **resource_hashes,
             },
         ):
             self.add(
