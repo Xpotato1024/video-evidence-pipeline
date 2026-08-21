@@ -37,6 +37,7 @@ from video_evidence_pipeline.domain.transcription import TranscriptManifest, Tra
 from video_evidence_pipeline.errors import VepError, integrity_error, state_error
 from video_evidence_pipeline.semantic.skills import (
     load_skill_snapshot,
+    require_pending_semantic_request_importable,
     same_skill_snapshot_except_lifecycle,
     validate_import_skill,
 )
@@ -350,7 +351,7 @@ def prepare_refinement_request(
     if job.supporting_inputs:
         prepare_supporting_inputs(workspace, job)
     if workspace.refinement_request_json.exists():
-        # A committed refinement validates the frozen request; pending imports keep the live gate.
+        # Validate stored bytes against deterministic inputs without rewriting the frozen Skill.
         stored = _load_stored_refinement_request(
             workspace,
             job,
@@ -358,8 +359,15 @@ def prepare_refinement_request(
             raw_manifest,
             raw_segments,
             deep=deep,
-            enforce_current_skill=not workspace.refinement_manifest_json.exists(),
+            enforce_current_skill=False,
         )
+        if not workspace.refinement_manifest_json.exists():
+            require_pending_semantic_request_importable(
+                workspace,
+                stored.skill,
+                allowed=REFINEMENT_SKILLS,
+                expected_skill_id="refine-video-transcript",
+            )
         return RefinementPrepareResult(stored, reused=True)
     request = _expected_request(
         workspace,
@@ -383,9 +391,15 @@ def load_refinement_request(
     *,
     deep: bool = False,
 ) -> RefinementRequestManifest:
-    return prepare_refinement_request(
-        workspace, job, media_manifest, raw_manifest, raw_segments, deep=deep
-    ).request
+    return _load_stored_refinement_request(
+        workspace,
+        job,
+        media_manifest,
+        raw_manifest,
+        raw_segments,
+        deep=deep,
+        enforce_current_skill=False,
+    )
 
 
 def _fixture_identity(response: RefinementResponseManifest) -> bool:

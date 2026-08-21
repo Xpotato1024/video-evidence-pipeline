@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Annotated, Literal, Self
 
 from pydantic import Field, StringConstraints, field_validator, model_validator
@@ -98,3 +99,22 @@ class SkillSnapshot(StrictModel):
         ):
             raise ValueError("new active Skill snapshots require promotion evidence")
         return self
+
+
+class PendingSemanticRequestStatus(StrEnum):
+    """Production-import eligibility of an uncommitted semantic request."""
+
+    CURRENT = "current"
+    LEGACY_UNBOUND = "legacy-unbound"
+    STALE_SKILL = "stale-skill"
+    INVALID = "invalid"
+
+
+class PendingSemanticRequestAssessment(StrictModel):
+    """Read-only classification shared by prepare and operator guidance."""
+
+    status: PendingSemanticRequestStatus
+    import_eligible: bool
+    migration_required: bool
+    reason_code: str = Field(pattern=r"^[A-Z][A-Z0-9_]*$")
+    reason: str = Field(min_length=1, max_length=512)

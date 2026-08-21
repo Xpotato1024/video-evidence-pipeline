@@ -75,10 +75,14 @@ from video_evidence_pipeline.delivery import (
 from video_evidence_pipeline.domain.artifacts import ArtifactRef, artifact_file_matches
 from video_evidence_pipeline.domain.authoring import (
     AuditDisposition,
+    AuditRequestManifest,
+    AuthoringRequestManifest,
     FixedEvidenceBundle,
+    RevisionRequestManifest,
 )
 from video_evidence_pipeline.domain.authorization import AuthorizationRecord
 from video_evidence_pipeline.domain.delivery import ReviewerIdentity
+from video_evidence_pipeline.domain.evidence import EvidenceRequestManifest
 from video_evidence_pipeline.domain.job import (
     AssignmentSpec,
     JobSpec,
@@ -99,6 +103,8 @@ from video_evidence_pipeline.domain.length import CharacterLengthConstraint
 from video_evidence_pipeline.domain.manifests import SourceManifest, StageManifest
 from video_evidence_pipeline.domain.media import NormalizationConfig
 from video_evidence_pipeline.domain.recovery import RecoveryManifest
+from video_evidence_pipeline.domain.refinement import RefinementRequestManifest
+from video_evidence_pipeline.domain.semantic import PendingSemanticRequestStatus
 from video_evidence_pipeline.domain.serialization import fingerprint
 from video_evidence_pipeline.domain.state import JobState
 from video_evidence_pipeline.domain.supporting import SupportingInputManifest
@@ -157,7 +163,10 @@ from video_evidence_pipeline.search import (
     build_index,
     search_index,
 )
-from video_evidence_pipeline.semantic.skills import load_skill_snapshot
+from video_evidence_pipeline.semantic.skills import (
+    classify_pending_semantic_request,
+    load_skill_snapshot,
+)
 from video_evidence_pipeline.storage.atomic import (
     atomic_copy_exclusive,
     atomic_write_json,
@@ -3202,31 +3211,135 @@ def _guide_semantic_paths(
     draft_version: str | None = None,
 ) -> dict[str, str]:
     repository_root = workspace.jobs_root.parent.parent
-    if operation == "refine_prepare":
-        request = workspace.refinement_request_json
-        schema = "refinement-response-manifest.schema.json"
-    elif operation == "evidence_prepare":
-        request = workspace.evidence_request_json
-        schema = "evidence-response-manifest.schema.json"
-    elif operation == "author_prepare":
-        request = workspace.safe_path("authoring/requests/author-v001.json")
-        schema = "authoring-response-manifest.schema.json"
-    elif operation == "audit_prepare":
-        version = draft_version or "v001"
-        request = workspace.safe_path(f"authoring/requests/audit-{version}.json")
-        schema = "audit-response-manifest.schema.json"
-    elif operation == "revision_prepare":
-        current = int((draft_version or "v001")[1:])
-        request = workspace.safe_path(f"authoring/requests/revision-v{current + 1:03d}.json")
-        schema = "revision-response-manifest.schema.json"
-    else:  # pragma: no cover - caller is a closed state planner
-        raise ValueError("not a semantic prepare operation")
+    request = _guide_semantic_request_path(
+        workspace,
+        operation=operation,
+        draft_version=draft_version,
+    )
+    schema = {
+        "refine_prepare": "refinement-response-manifest.schema.json",
+        "evidence_prepare": "evidence-response-manifest.schema.json",
+        "author_prepare": "authoring-response-manifest.schema.json",
+        "audit_prepare": "audit-response-manifest.schema.json",
+        "revision_prepare": "revision-response-manifest.schema.json",
+    }[operation]
     return {
         "request_path": str(request.resolve()),
         "skill_path": str(
             (repository_root / ".agents" / "skills" / skill_id / "SKILL.md").resolve()
         ),
         "response_schema_path": str((repository_root / "schemas" / schema).resolve()),
+    }
+
+
+def _guide_semantic_request_path(
+    workspace: JobWorkspace,
+    *,
+    operation: str,
+    draft_version: str | None = None,
+) -> Path:
+    if operation == "refine_prepare":
+        request = workspace.refinement_request_json
+    elif operation == "evidence_prepare":
+        request = workspace.evidence_request_json
+    elif operation == "author_prepare":
+        request = workspace.safe_path("authoring/requests/author-v001.json")
+    elif operation == "audit_prepare":
+        version = draft_version or "v001"
+        request = workspace.safe_path(f"authoring/requests/audit-{version}.json")
+    elif operation == "revision_prepare":
+        current = int((draft_version or "v001")[1:])
+        request = workspace.safe_path(f"authoring/requests/revision-v{current + 1:03d}.json")
+    else:  # pragma: no cover - caller is a closed state planner
+        raise ValueError("not a semantic prepare operation")
+    return request
+
+
+_GUIDE_REQUEST_MODELS = {
+    "refine_prepare": RefinementRequestManifest,
+    "evidence_prepare": EvidenceRequestManifest,
+    "author_prepare": AuthoringRequestManifest,
+    "audit_prepare": AuditRequestManifest,
+    "revision_prepare": RevisionRequestManifest,
+}
+
+
+def _guide_pending_semantic_request(
+    workspace: JobWorkspace,
+    *,
+    operation: str,
+    skill_id: str,
+    draft_version: str | None,
+) -> dict[str, Any] | None:
+    """Classify an existing pending request without preparing or rewriting it."""
+
+    request_path = _guide_semantic_request_path(
+        workspace,
+        operation=operation,
+        draft_version=draft_version,
+    )
+    if not request_path.exists():
+        return None
+    try:
+        request = read_json_model(
+            request_path,
+            _GUIDE_REQUEST_MODELS[operation],
+            code="SEMANTIC_REQUEST_INVALID",
+        )
+    except VepError as exc:
+        return {
+            "status": "integrity-error",
+            "next_operation": None,
+            "reason": f"{exc.code}: pending semantic request is invalid",
+            "command": None,
+            "side_effects": _guide_side_effects(),
+            "request_path": str(request_path.resolve()),
+            "pending_request_status": PendingSemanticRequestStatus.INVALID.value,
+            "import_eligible": False,
+            "migration_required": False,
+        }
+    assessment = classify_pending_semantic_request(
+        workspace,
+        request.skill,
+        allowed=_GUIDE_ALLOWED_SKILLS_BY_OPERATION[operation],
+        expected_skill_id=skill_id,
+    )
+    if assessment.import_eligible:
+        return {
+            "pending_request_status": assessment.status.value,
+            "import_eligible": True,
+            "migration_required": False,
+        }
+    result = {
+        "request_path": str(request_path.resolve()),
+        "pending_request_status": assessment.status.value,
+        "import_eligible": False,
+        "migration_required": assessment.migration_required,
+    }
+    if not assessment.migration_required:
+        return {
+            **result,
+            "status": "integrity-error",
+            "next_operation": None,
+            "reason": f"{assessment.reason_code}: {assessment.reason}",
+            "command": None,
+            "side_effects": _guide_side_effects(),
+        }
+    return {
+        **result,
+        "status": "migration-required",
+        "next_operation": "recover",
+        "reason": (
+            f"{assessment.reason_code}: existing semantic request cannot be imported under "
+            "the current frozen Skill contract; preserve the parent and recover from its "
+            "verified transcript"
+        ),
+        "command": (
+            f'vep job recover "{workspace.root}" <new-job-id> --confirm --basis <basis> '
+            "--child-spec <job.yaml>"
+        ),
+        "side_effects": _guide_side_effects(workspace_write=True),
+        "reuses_verified_transcript": True,
     }
 
 
@@ -3361,6 +3474,14 @@ def _guide_operation(
         )
         if blocked is not None:
             return blocked
+        pending = _guide_pending_semantic_request(
+            workspace,
+            operation=operation,
+            skill_id=skill_id,
+            draft_version=draft_version,
+        )
+        if pending is not None and "status" in pending:
+            return pending
         return {
             "status": "ready",
             "next_operation": operation,
@@ -3370,6 +3491,7 @@ def _guide_operation(
             "semantic_exchange_external_api_allowed": (
                 status.get("authorization", {}).get("allow_external_api") is True
             ),
+            **(pending or {}),
             **_guide_semantic_paths(
                 workspace,
                 operation=operation,

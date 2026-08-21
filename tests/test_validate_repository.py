@@ -306,17 +306,17 @@ def test_duplicate_canonical_and_secret_fail(tmp_path: Path) -> None:
     assert "SECRET_PATTERN" in codes
 
 
-def test_draft_skill_side_effect_fails(tmp_path: Path) -> None:
+def test_draft_workspace_write_skill_remains_explicit_only(tmp_path: Path) -> None:
     tracked = make_valid_repo(tmp_path)
     skill_system = tmp_path / ".agents/skill-system.toml"
     text = skill_system.read_text(encoding="utf-8").replace(
         'lifecycle = "active"\nautomatic_trigger = false\nside_effect_policy = "read-only"',
-        'lifecycle = "draft"\nautomatic_trigger = true\nside_effect_policy = "workspace-write"',
+        'lifecycle = "draft"\nautomatic_trigger = false\nside_effect_policy = "workspace-write"',
     )
     skill_system.write_text(text, encoding="utf-8")
     codes = finding_codes(tmp_path, tracked)
-    assert "DRAFT_SKILL_TRIGGER" in codes
-    assert "DRAFT_SKILL_SIDE_EFFECT" in codes
+    assert "DRAFT_SKILL_TRIGGER" not in codes
+    assert "DRAFT_SKILL_SIDE_EFFECT" not in codes
 
 
 def test_active_skill_requires_evaluation_result(tmp_path: Path) -> None:

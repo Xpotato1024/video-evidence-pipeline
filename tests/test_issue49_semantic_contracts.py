@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import tomllib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -40,14 +41,16 @@ from video_evidence_pipeline.domain.refinement import (
     RefinementResponseManifest,
     RefinerIdentity,
 )
-from video_evidence_pipeline.domain.semantic import SkillSnapshot
-from video_evidence_pipeline.domain.serialization import fingerprint
+from video_evidence_pipeline.domain.semantic import PendingSemanticRequestStatus, SkillSnapshot
+from video_evidence_pipeline.domain.serialization import fingerprint, pretty_json_bytes
 from video_evidence_pipeline.domain.transcription import TranscriptionConfig
 from video_evidence_pipeline.errors import ExitCode, VepError
 from video_evidence_pipeline.evidence import pipeline as evidence_pipeline
 from video_evidence_pipeline.media.normalization import transcript_primary_normalization_fingerprint
 from video_evidence_pipeline.semantic.skills import (
+    classify_pending_semantic_request,
     load_skill_snapshot,
+    require_pending_semantic_request_importable,
     same_skill_snapshot_except_lifecycle,
 )
 from video_evidence_pipeline.storage.layout import JobWorkspace
@@ -359,6 +362,68 @@ def test_authoring_reexports_the_single_common_skill_snapshot_type() -> None:
     assert authoring_loader is load_skill_snapshot
 
 
+def test_operator_authority_is_workspace_write_while_semantic_skills_are_instruction_only() -> None:
+    root = Path(__file__).parents[1]
+    registry = tomllib.loads((root / ".agents" / "skill-system.toml").read_text(encoding="utf-8"))
+    policies = {entry["id"]: entry["side_effect_policy"] for entry in registry["skills"]}
+
+    assert policies["run-video-evidence-job"] == "workspace-write"
+    for skill_id in (
+        "refine-video-transcript",
+        "analyze-video-evidence",
+        "draft-video-summary",
+        "draft-video-report",
+        "independent-content-audit",
+        "revise-from-audit",
+    ):
+        assert policies[skill_id] == "instruction-only"
+
+
+def test_pending_request_classifier_distinguishes_current_legacy_and_stale(
+    tmp_path: Path,
+) -> None:
+    workspace = _active_stage_workspace(tmp_path, "analyze-video-evidence")
+    current = load_skill_snapshot(
+        workspace,
+        "analyze-video-evidence",
+        allowed=evidence_pipeline.EVIDENCE_SKILLS,
+    )
+    legacy = classify_pending_semantic_request(
+        workspace,
+        None,
+        allowed=evidence_pipeline.EVIDENCE_SKILLS,
+        expected_skill_id="analyze-video-evidence",
+    )
+    importable = classify_pending_semantic_request(
+        workspace,
+        current,
+        allowed=evidence_pipeline.EVIDENCE_SKILLS,
+        expected_skill_id="analyze-video-evidence",
+    )
+    stale = classify_pending_semantic_request(
+        workspace,
+        current.model_copy(update={"content_sha256": "f" * 64}),
+        allowed=evidence_pipeline.EVIDENCE_SKILLS,
+        expected_skill_id="analyze-video-evidence",
+    )
+
+    assert legacy.status is PendingSemanticRequestStatus.LEGACY_UNBOUND
+    assert legacy.migration_required is True
+    assert importable.status is PendingSemanticRequestStatus.CURRENT
+    assert importable.import_eligible is True
+    assert stale.status is PendingSemanticRequestStatus.STALE_SKILL
+    assert stale.migration_required is True
+    with pytest.raises(VepError) as error:
+        require_pending_semantic_request_importable(
+            workspace,
+            stale_skill := current.model_copy(update={"content_sha256": "e" * 64}),
+            allowed=evidence_pipeline.EVIDENCE_SKILLS,
+            expected_skill_id="analyze-video-evidence",
+        )
+    assert stale_skill.content_sha256 == "e" * 64
+    assert error.value.code == "SEMANTIC_REQUEST_MIGRATION_REQUIRED"
+
+
 def test_resource_bytes_and_manifest_are_bound_to_snapshot(tmp_path: Path) -> None:
     workspace = _draft_skill_repository(
         tmp_path,
@@ -499,6 +564,66 @@ def test_new_semantic_import_rejects_legacy_request_without_skill(
         )
 
     assert error.value.code == error_code
+
+
+@pytest.mark.parametrize("stage", ["refinement", "evidence"])
+def test_prepare_refuses_to_reuse_legacy_pending_request(tmp_path: Path, stage: str) -> None:
+    if stage == "refinement":
+        workspace, job, media, transcript, request, _response = _refinement_exchange(tmp_path)
+        legacy = refinement_pipeline._expected_request(
+            workspace,
+            job,
+            media,
+            transcript.transcript_manifest,
+            transcript.segments,
+            created_at=request.created_at,
+            bind_skill=False,
+            frozen_skill=None,
+        )
+        workspace.refinement_request_json.write_bytes(pretty_json_bytes(legacy))
+
+        def prepare() -> object:
+            return refinement_pipeline.prepare_refinement_request(
+                workspace,
+                job,
+                media,
+                transcript.transcript_manifest,
+                transcript.segments,
+            )
+    else:
+        workspace, job, media, transcript, request, _response = _evidence_exchange(tmp_path)
+        legacy = evidence_pipeline._expected_request(
+            workspace,
+            job,
+            media,
+            transcript.transcript_manifest,
+            transcript.segments,
+            created_at=request.created_at,
+            bind_skill=False,
+            frozen_skill=None,
+        )
+        workspace.evidence_request_json.write_bytes(pretty_json_bytes(legacy))
+
+        def prepare() -> object:
+            return evidence_pipeline.prepare_evidence_request(
+                workspace,
+                job,
+                media,
+                transcript.transcript_manifest,
+                transcript.segments,
+            )
+
+    before = pretty_json_bytes(legacy)
+    with pytest.raises(VepError) as error:
+        prepare()
+
+    assert error.value.code == "SEMANTIC_REQUEST_MIGRATION_REQUIRED"
+    request_path = (
+        workspace.refinement_request_json
+        if stage == "refinement"
+        else workspace.evidence_request_json
+    )
+    assert request_path.read_bytes() == before
 
 
 @pytest.mark.parametrize(

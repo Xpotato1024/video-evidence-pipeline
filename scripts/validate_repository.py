@@ -609,15 +609,8 @@ class RepositoryValidator:
                     skill_path,
                     "explicit-only Skill must not auto-trigger",
                 )
-            if lifecycle == "draft":
-                if entry.get("automatic_trigger") is not False:
-                    self.add("DRAFT_SKILL_TRIGGER", skill_path, "draft Skill must not auto-trigger")
-                if side_effect != "instruction-only":
-                    self.add(
-                        "DRAFT_SKILL_SIDE_EFFECT",
-                        skill_path,
-                        "draft Skill must be instruction-only",
-                    )
+            if lifecycle == "draft" and entry.get("automatic_trigger") is not False:
+                self.add("DRAFT_SKILL_TRIGGER", skill_path, "draft Skill must not auto-trigger")
             if skill_path not in self.tracked_files or not (self.root / skill_path).is_file():
                 self.add("SKILL_PATH_MISSING", skill_path, sid)
                 continue

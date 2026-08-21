@@ -87,6 +87,7 @@ from video_evidence_pipeline.domain.state import JobState
 from video_evidence_pipeline.errors import integrity_error, state_error
 from video_evidence_pipeline.semantic.skills import (
     load_skill_snapshot,
+    require_pending_semantic_request_importable,
     validate_import_skill,
 )
 from video_evidence_pipeline.storage.atomic import (
@@ -1173,6 +1174,13 @@ def prepare_authoring_request(
             or request.skill.skill_id != skill_id
         ):
             raise integrity_error("AUTHORING_REQUEST_STALE", "authoring request is stale")
+        if not _draft_manifest_path(workspace, "v001").exists():
+            require_pending_semantic_request_importable(
+                workspace,
+                request.skill,
+                allowed=_AUTHOR_SKILLS,
+                expected_skill_id=skill_id,
+            )
         return AuthoringPrepareResult(request=request, reused=True)
     skill = load_skill_snapshot(workspace, skill_id, allowed=_AUTHOR_SKILLS)
     provisional = AuthoringRequestManifest(
@@ -1985,6 +1993,13 @@ def prepare_audit_request(
             or request.output_constraints != _constraints(job, fixed)
         ):
             raise integrity_error("AUDIT_REQUEST_STALE", "audit request is stale")
+        if not _audit_manifest_path(workspace, draft.manifest.draft_version).exists():
+            require_pending_semantic_request_importable(
+                workspace,
+                request.skill,
+                allowed=_AUDIT_SKILLS,
+                expected_skill_id=skill_id,
+            )
         return AuditPrepareResult(request=request, reused=True)
     skill = load_skill_snapshot(workspace, skill_id, allowed=_AUDIT_SKILLS)
     provisional = AuditRequestManifest(
@@ -2895,6 +2910,13 @@ def prepare_revision_request(
             or request.skill.skill_id != skill_id
         ):
             raise integrity_error("REVISION_REQUEST_STALE", "revision request is stale")
+        if not _draft_manifest_path(workspace, next_version).exists():
+            require_pending_semantic_request_importable(
+                workspace,
+                request.skill,
+                allowed=_REVISION_SKILLS,
+                expected_skill_id=skill_id,
+            )
         return RevisionPrepareResult(request=request, reused=True)
     skill = load_skill_snapshot(workspace, skill_id, allowed=_REVISION_SKILLS)
     provisional = RevisionRequestManifest(

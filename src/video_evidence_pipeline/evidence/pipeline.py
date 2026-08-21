@@ -59,6 +59,7 @@ from video_evidence_pipeline.domain.transcription import TranscriptManifest, Tra
 from video_evidence_pipeline.errors import integrity_error, state_error
 from video_evidence_pipeline.semantic.skills import (
     load_skill_snapshot,
+    require_pending_semantic_request_importable,
     same_skill_snapshot_except_lifecycle,
     validate_import_skill,
 )
@@ -536,7 +537,7 @@ def prepare_evidence_request(
     deep: bool = False,
 ) -> EvidencePrepareResult:
     if workspace.evidence_request_json.exists():
-        # A committed evidence bundle validates its frozen request; pending imports keep the live gate.
+        # Validate stored bytes against deterministic inputs without rewriting the frozen Skill.
         stored = _load_stored_evidence_request(
             workspace,
             job,
@@ -544,8 +545,15 @@ def prepare_evidence_request(
             transcript_manifest,
             segments,
             deep=deep,
-            enforce_current_skill=not workspace.evidence_manifest_json.exists(),
+            enforce_current_skill=False,
         )
+        if not workspace.evidence_manifest_json.exists():
+            require_pending_semantic_request_importable(
+                workspace,
+                stored.skill,
+                allowed=EVIDENCE_SKILLS,
+                expected_skill_id="analyze-video-evidence",
+            )
         return EvidencePrepareResult(stored, reused=True)
     request = _expected_request(
         workspace,
@@ -587,7 +595,7 @@ def load_evidence_request(
         transcript_manifest,
         segments,
         deep=deep,
-        enforce_current_skill=not workspace.evidence_manifest_json.exists(),
+        enforce_current_skill=False,
     )
 
 

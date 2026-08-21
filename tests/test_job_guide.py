@@ -16,6 +16,10 @@ from video_evidence_pipeline.application import (
     job_guide,
 )
 from video_evidence_pipeline.domain.job import PrimaryInputKind, SourceKind
+from video_evidence_pipeline.domain.semantic import (
+    PendingSemanticRequestAssessment,
+    PendingSemanticRequestStatus,
+)
 from video_evidence_pipeline.domain.state import JobState
 
 
@@ -321,6 +325,165 @@ def test_semantic_prepare_side_effects_exclude_later_external_api_capability(
     assert authorized["side_effects"]["external_api_possible"] is False
     assert denied["semantic_exchange_external_api_allowed"] is False
     assert authorized["semantic_exchange_external_api_allowed"] is True
+
+
+@pytest.mark.parametrize(
+    ("state", "operation", "skill_id", "draft_version"),
+    [
+        (JobState.TRANSCRIBED, "refine_prepare", "refine-video-transcript", None),
+        (JobState.TRANSCRIPT_REFINED, "evidence_prepare", "analyze-video-evidence", None),
+        (JobState.EVIDENCE_READY, "author_prepare", "draft-video-report", None),
+        (JobState.DRAFTED, "audit_prepare", "independent-content-audit", "v001"),
+        (JobState.REVISION_REQUIRED, "revision_prepare", "revise-from-audit", "v001"),
+    ],
+)
+def test_guide_routes_stale_pending_requests_to_transcript_recovery_without_reprocessing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    state: JobState,
+    operation: str,
+    skill_id: str,
+    draft_version: str | None,
+) -> None:
+    workspace, job = _created_workspace(tmp_path)
+    request_path = application._guide_semantic_request_path(
+        workspace,
+        operation=operation,
+        draft_version=draft_version,
+    )
+    request_path.parent.mkdir(parents=True, exist_ok=True)
+    request_path.write_bytes(b"synthetic frozen request")
+    before = (request_path.read_bytes(), request_path.stat().st_mtime_ns)
+    monkeypatch.setattr(
+        application,
+        "load_skill_snapshot",
+        lambda *_args, **_kwargs: SimpleNamespace(lifecycle="active"),
+    )
+    monkeypatch.setattr(
+        application,
+        "read_json_model",
+        lambda *_args, **_kwargs: SimpleNamespace(skill=SimpleNamespace(skill_id=skill_id)),
+    )
+    monkeypatch.setattr(
+        application,
+        "classify_pending_semantic_request",
+        lambda *_args, **_kwargs: PendingSemanticRequestAssessment(
+            status=PendingSemanticRequestStatus.STALE_SKILL,
+            import_eligible=False,
+            migration_required=True,
+            reason_code="SKILL_SNAPSHOT_STALE",
+            reason="synthetic stale snapshot",
+        ),
+    )
+
+    result = _guide_operation(
+        workspace,
+        job,
+        [],
+        state,
+        {"authoring_integrity": {"draft_version": draft_version}},
+    )
+
+    assert result["status"] == "migration-required"
+    assert result["next_operation"] == "recover"
+    assert result["pending_request_status"] == "stale-skill"
+    assert result["import_eligible"] is False
+    assert result["migration_required"] is True
+    assert "skill_path" not in result
+    assert result["reuses_verified_transcript"] is True
+    assert result["side_effects"] == {
+        "network_acquisition": False,
+        "normalization": False,
+        "ffmpeg": False,
+        "asr": False,
+        "model_provision": False,
+        "external_api_possible": False,
+        "workspace_write": True,
+    }
+    assert (request_path.read_bytes(), request_path.stat().st_mtime_ns) == before
+
+
+@pytest.mark.parametrize(
+    ("state", "operation"),
+    [
+        (JobState.TRANSCRIBED, "refine_prepare"),
+        (JobState.TRANSCRIPT_REFINED, "evidence_prepare"),
+    ],
+)
+def test_guide_routes_pre_skill_pending_requests_to_migration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    state: JobState,
+    operation: str,
+) -> None:
+    workspace, job = _created_workspace(tmp_path)
+    path = application._guide_semantic_request_path(
+        workspace,
+        operation=operation,
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"legacy request")
+    monkeypatch.setattr(
+        application,
+        "load_skill_snapshot",
+        lambda *_args, **_kwargs: SimpleNamespace(lifecycle="active"),
+    )
+    monkeypatch.setattr(
+        application,
+        "read_json_model",
+        lambda *_args, **_kwargs: SimpleNamespace(skill=None),
+    )
+
+    result = _guide_operation(workspace, job, [], state, {})
+
+    assert result["status"] == "migration-required"
+    assert result["pending_request_status"] == "legacy-unbound"
+    assert result["next_operation"] == "recover"
+    assert "skill_path" not in result
+
+
+def test_guide_keeps_current_skill_bound_pending_request_on_normal_route(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, job = _created_workspace(tmp_path)
+    path = application._guide_semantic_request_path(
+        workspace,
+        operation="author_prepare",
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"current request")
+    monkeypatch.setattr(
+        application,
+        "load_skill_snapshot",
+        lambda *_args, **_kwargs: SimpleNamespace(lifecycle="active"),
+    )
+    monkeypatch.setattr(
+        application,
+        "read_json_model",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            skill=SimpleNamespace(skill_id="draft-video-report")
+        ),
+    )
+    monkeypatch.setattr(
+        application,
+        "classify_pending_semantic_request",
+        lambda *_args, **_kwargs: PendingSemanticRequestAssessment(
+            status=PendingSemanticRequestStatus.CURRENT,
+            import_eligible=True,
+            migration_required=False,
+            reason_code="SEMANTIC_REQUEST_IMPORTABLE",
+            reason="synthetic current snapshot",
+        ),
+    )
+
+    result = _guide_operation(workspace, job, [], JobState.EVIDENCE_READY, {})
+
+    assert result["status"] == "ready"
+    assert result["next_operation"] == "author_prepare"
+    assert result["pending_request_status"] == "current"
+    assert result["import_eligible"] is True
+    assert result["migration_required"] is False
+    assert Path(result["skill_path"]).is_absolute()
 
 
 def test_integrity_error_does_not_invent_a_repair(

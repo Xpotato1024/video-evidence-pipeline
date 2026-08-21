@@ -10,7 +10,12 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
 from video_evidence_pipeline.domain.hashing import sha256_bytes
-from video_evidence_pipeline.domain.semantic import SkillResourceSnapshot, SkillSnapshot
+from video_evidence_pipeline.domain.semantic import (
+    PendingSemanticRequestAssessment,
+    PendingSemanticRequestStatus,
+    SkillResourceSnapshot,
+    SkillSnapshot,
+)
 from video_evidence_pipeline.domain.serialization import fingerprint
 from video_evidence_pipeline.errors import VepError, integrity_error, state_error
 
@@ -338,3 +343,92 @@ def validate_import_skill(
             "DRAFT_SKILL_FORBIDDEN",
             "draft Skill output is not allowed on a production import route",
         )
+
+
+def classify_pending_semantic_request(
+    workspace: WorkspaceWithJobsRoot,
+    skill: SkillSnapshot | None,
+    *,
+    allowed: frozenset[str],
+    expected_skill_id: str,
+) -> PendingSemanticRequestAssessment:
+    """Classify an uncommitted request without changing it or the workspace."""
+
+    if skill is None:
+        return PendingSemanticRequestAssessment(
+            status=PendingSemanticRequestStatus.LEGACY_UNBOUND,
+            import_eligible=False,
+            migration_required=True,
+            reason_code="SEMANTIC_REQUEST_SKILL_REQUIRED",
+            reason="the pending legacy request has no frozen Skill binding",
+        )
+    if skill.skill_id != expected_skill_id:
+        return PendingSemanticRequestAssessment(
+            status=PendingSemanticRequestStatus.STALE_SKILL,
+            import_eligible=False,
+            migration_required=True,
+            reason_code="SEMANTIC_REQUEST_SKILL_ROUTE_STALE",
+            reason="the pending request is bound to a different stage Skill",
+        )
+    try:
+        current = load_skill_snapshot(workspace, expected_skill_id, allowed=allowed)
+    except VepError as exc:
+        code = "SKILL_SNAPSHOT_STALE" if exc.code == "SKILL_EVAL_RESULT_INVALID" else exc.code
+        return PendingSemanticRequestAssessment(
+            status=PendingSemanticRequestStatus.INVALID,
+            import_eligible=False,
+            migration_required=False,
+            reason_code=code,
+            reason="current production Skill eligibility could not be verified",
+        )
+    if current.lifecycle != "active":
+        return PendingSemanticRequestAssessment(
+            status=PendingSemanticRequestStatus.INVALID,
+            import_eligible=False,
+            migration_required=False,
+            reason_code="DRAFT_SKILL_FORBIDDEN",
+            reason="the current stage Skill is not active for production import",
+        )
+    if not same_skill_snapshot_except_lifecycle(skill, current):
+        return PendingSemanticRequestAssessment(
+            status=PendingSemanticRequestStatus.STALE_SKILL,
+            import_eligible=False,
+            migration_required=True,
+            reason_code="SKILL_SNAPSHOT_STALE",
+            reason="the pending request is bound to an older Skill snapshot",
+        )
+    return PendingSemanticRequestAssessment(
+        status=PendingSemanticRequestStatus.CURRENT,
+        import_eligible=True,
+        migration_required=False,
+        reason_code="SEMANTIC_REQUEST_IMPORTABLE",
+        reason="the pending request is bound to the current active Skill",
+    )
+
+
+def require_pending_semantic_request_importable(
+    workspace: WorkspaceWithJobsRoot,
+    skill: SkillSnapshot | None,
+    *,
+    allowed: frozenset[str],
+    expected_skill_id: str,
+) -> PendingSemanticRequestAssessment:
+    """Fail before reuse when a pending request cannot pass production import."""
+
+    assessment = classify_pending_semantic_request(
+        workspace,
+        skill,
+        allowed=allowed,
+        expected_skill_id=expected_skill_id,
+    )
+    if assessment.import_eligible:
+        return assessment
+    if assessment.migration_required:
+        raise state_error(
+            "SEMANTIC_REQUEST_MIGRATION_REQUIRED",
+            f"{assessment.status.value}: {assessment.reason}; recover a child from the verified transcript",
+        )
+    raise integrity_error(
+        assessment.reason_code,
+        assessment.reason,
+    )
