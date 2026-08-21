@@ -1537,6 +1537,18 @@ def import_transcript_refinement_job(
                     "refinement response does not match the committed bundle",
                 )
             return existing
+        current_request = load_refinement_request(
+            workspace,
+            job,
+            media_manifest,
+            transcription.transcript_manifest,
+            transcription.segments,
+        )
+        if current_request != request:
+            raise state_error(
+                "REFINEMENT_SNAPSHOT_STALE",
+                "refinement request changed before publication",
+            )
         result = publish_refinement(
             workspace,
             job,

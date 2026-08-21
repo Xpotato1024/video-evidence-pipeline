@@ -377,6 +377,28 @@ def evidence_request_fingerprint(
     return fingerprint(payload)
 
 
+def _evidence_request_fingerprint(value: EvidenceRequestManifest) -> str:
+    """Recompute the historical request identity without rehashing source artifacts."""
+
+    payload = value.model_dump(
+        mode="json",
+        exclude={"schema_version", "request_fingerprint", "created_at"},
+    )
+    payload["analyzer_contract"] = value.analyzer_contract.model_dump(
+        mode="json", exclude_none=True
+    )
+    payload["implementation_version"] = EVIDENCE_IMPLEMENTATION_VERSION
+    return fingerprint(payload)
+
+
+def _validate_evidence_request_fingerprint(value: EvidenceRequestManifest) -> None:
+    if value.request_fingerprint != _evidence_request_fingerprint(value):
+        raise integrity_error(
+            "EVIDENCE_REQUEST_INVALID",
+            "evidence request fingerprint is inconsistent",
+        )
+
+
 def _expected_request(
     workspace: JobWorkspace,
     job: JobSpec,
@@ -508,6 +530,7 @@ def _load_stored_evidence_request(
         maximum_bytes=_MAXIMUM_REQUEST_BYTES,
         code="EVIDENCE_REQUEST_INVALID",
     )
+    _validate_evidence_request_fingerprint(stored)
     expected = _expected_request(
         workspace,
         job,

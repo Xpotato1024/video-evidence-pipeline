@@ -118,7 +118,7 @@ pending requestだけはcurrent production import契約へread-only分類しま�
 
 deterministic executorは、stageごとに少なくとも次を検証します。
 
-- request fingerprintとjob／upstream artifactの一致
+- request自己fingerprintは通常のprepare／import／publication境界で常に再計算し、job／upstream artifactとのbindingも検証（large artifactのbyte再hashはdeep validation）
 - response schemaのstrict validation、UTF-8、サイズ上限、未知field拒否
 - Skill snapshotのID、content、eval、実行mode、許可されたlifecycle
 - SourceRefのID、timestamp、artifact hash、supporting-input identity

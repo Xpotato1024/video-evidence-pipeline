@@ -1134,6 +1134,15 @@ def _request_fingerprint(value: BaseModel) -> str:
     if isinstance(constraints, dict) and constraints.get("length") is None:
         constraints.pop("length", None)
         constraints.pop("effective_length", None)
+    evidence_request = payload.get("fixed_evidence", {}).get("evidence_request")
+    if isinstance(evidence_request, dict):
+        analyzer_contract = evidence_request.get("analyzer_contract")
+        source_contract = value.fixed_evidence.evidence_request.analyzer_contract
+        if (
+            isinstance(analyzer_contract, dict)
+            and "atomic_proposition_contract" not in source_contract.model_fields_set
+        ):
+            analyzer_contract.pop("atomic_proposition_contract", None)
     return fingerprint(payload)
 
 
@@ -1147,8 +1156,17 @@ def _request_fingerprint_matches(value: _AuthoringRequestManifest) -> bool:
 
 
 def _validate_request_fingerprint(value: _AuthoringRequestManifest, *, deep: bool = False) -> None:
-    if deep and not _request_fingerprint_matches(value):
-        raise integrity_error("AUTHORING_REQUEST_INVALID", "request fingerprint is inconsistent")
+    """Validate the small machine contract on every path; deep remains artifact-oriented."""
+
+    del deep
+    if _request_fingerprint_matches(value):
+        return
+    code = {
+        AuthoringRequestManifest: "AUTHORING_REQUEST_INVALID",
+        AuditRequestManifest: "AUDIT_REQUEST_INVALID",
+        RevisionRequestManifest: "REVISION_REQUEST_INVALID",
+    }[type(value)]
+    raise integrity_error(code, "request fingerprint is inconsistent")
 
 
 def prepare_authoring_request(

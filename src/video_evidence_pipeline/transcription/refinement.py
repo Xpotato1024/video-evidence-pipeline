@@ -244,6 +244,25 @@ def refinement_request_fingerprint(
     return fingerprint(payload)
 
 
+def _refinement_request_fingerprint(value: RefinementRequestManifest) -> str:
+    """Recompute the historical request identity without hashing large artifacts."""
+
+    payload = value.model_dump(
+        mode="json",
+        exclude={"schema_version", "request_fingerprint", "created_at"},
+    )
+    payload["implementation_version"] = REFINEMENT_IMPLEMENTATION_VERSION
+    return fingerprint(payload)
+
+
+def _validate_refinement_request_fingerprint(value: RefinementRequestManifest) -> None:
+    if value.request_fingerprint != _refinement_request_fingerprint(value):
+        raise integrity_error(
+            "REFINEMENT_REQUEST_INVALID",
+            "refinement request fingerprint is inconsistent",
+        )
+
+
 def _expected_request(
     workspace: JobWorkspace,
     job: JobSpec,
@@ -323,6 +342,7 @@ def _load_stored_refinement_request(
         RefinementRequestManifest,
         code="REFINEMENT_REQUEST_INVALID",
     )
+    _validate_refinement_request_fingerprint(stored)
     expected = _expected_request(
         workspace,
         job,
