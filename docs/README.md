@@ -37,6 +37,17 @@ related_documents:
 - [`operations/ai-exchange.md`](operations/ai-exchange.md): request／Skill／response schemaの運用契約
 - [`concepts/semantic-quality.md`](concepts/semantic-quality.md): source-backedなselection／faithfulness方針
 
+## Diagram maintenance
+
+READMEの図は[`diagrams/`](diagrams/)内のMermaid `.mmd` sourceを正本とし、
+[`assets/`](assets/)内の生成済みSVGを表示します。図を変更した場合はrepository rootで
+次を実行し、`.mmd`と対応する`.svg`を一緒にcommitしてください。
+
+```bash
+npx --yes @mermaid-js/mermaid-cli@11.16.0 -i docs/diagrams/overall-pipeline.mmd -o docs/assets/overall-pipeline.svg -t neutral -b white
+npx --yes @mermaid-js/mermaid-cli@11.16.0 -i docs/diagrams/trust-boundary.mmd -o docs/assets/trust-boundary.svg -t neutral -b white
+```
+
 ## Governance
 
 - [`governance/document-governance.md`](governance/document-governance.md): canonical／historical

@@ -1,0 +1,15 @@
+flowchart TD
+    subgraph Semantic[Semantic exchange]
+        R[Fixed request]
+        S[Frozen Skill snapshot]
+        X[Response schema]
+        AI[Semantic AI runner]
+        R --> AI
+        S --> AI
+        X --> AI
+    end
+    AI -->|provider-neutral response only| V[Deterministic executor]
+    V -->|strict schema, refs, fingerprints, length checks| W[(Canonical workspace)]
+    W --> A[Independent audit]
+    H[Human] -->|review target SHA + explicit approval| W
+    AI -.->|no direct canonical write| W

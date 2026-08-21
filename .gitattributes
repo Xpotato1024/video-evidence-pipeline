@@ -7,3 +7,5 @@
 *.yaml text eol=lf
 *.yml text eol=lf
 *.md text eol=lf
+*.mmd text eol=lf
+*.svg text eol=lf

@@ -128,21 +128,7 @@ upgrade後に未完了の古いsemantic requestがcurrent Skill contractと互�
 
 ## How it works
 
-```mermaid
-flowchart LR
-    A[Explicit authorization] --> B[Acquire immutable source]
-    B --> C[Normalize media or accept supplied transcript]
-    C --> D[Caption-first transcript / gap-bounded ASR]
-    D --> E[Bounded transcript refinement]
-    E --> F[Evidence + ambiguity ledger]
-    F --> G[Salience selection + draft]
-    G --> H[Independent audit]
-    H -->|P0/P1 found| I[Bounded revision]
-    I --> H
-    H -->|P0=0 and P1=0| J[HUMAN_REVIEW_READY]
-    J --> K[Human approval]
-    K --> L[Markdown export]
-```
+![Overall pipeline](docs/assets/overall-pipeline.svg)
 
 主な状態は次の順序で進みます。
 
@@ -152,23 +138,7 @@ material findingが残る場合は`REVISION_REQUIRED → DRAFTED → AUDITED`を
 
 ### Trust boundary: deterministic executor vs semantic AI
 
-```mermaid
-flowchart LR
-    subgraph Semantic[Semantic exchange]
-        R[Fixed request]
-        S[Frozen Skill snapshot]
-        X[Response schema]
-        AI[Semantic AI runner]
-        R --> AI
-        S --> AI
-        X --> AI
-    end
-    AI -->|provider-neutral response only| V[Deterministic executor]
-    V -->|strict schema, refs, fingerprints, length checks| W[(Canonical workspace)]
-    W --> A[Independent audit]
-    H[Human] -->|review target SHA + explicit approval| W
-    AI -.->|no direct canonical write| W
-```
+![Trust boundary between semantic AI and deterministic executor](docs/assets/trust-boundary.svg)
 
 この境界により、semantic qualityの判断と、path・hash・schema・state transition・atomic writeの決定論的検証を分離します。AI exchangeの入力・出力・停止条件は[`AI exchange operations`](docs/operations/ai-exchange.md)、研究に基づくselection方針は[`Semantic quality`](docs/concepts/semantic-quality.md)を参照してください。
 
