@@ -75,14 +75,10 @@ from video_evidence_pipeline.delivery import (
 from video_evidence_pipeline.domain.artifacts import ArtifactRef, artifact_file_matches
 from video_evidence_pipeline.domain.authoring import (
     AuditDisposition,
-    AuditRequestManifest,
-    AuthoringRequestManifest,
     FixedEvidenceBundle,
-    RevisionRequestManifest,
 )
 from video_evidence_pipeline.domain.authorization import AuthorizationRecord
 from video_evidence_pipeline.domain.delivery import ReviewerIdentity
-from video_evidence_pipeline.domain.evidence import EvidenceRequestManifest
 from video_evidence_pipeline.domain.job import (
     AssignmentSpec,
     JobSpec,
@@ -103,7 +99,6 @@ from video_evidence_pipeline.domain.length import CharacterLengthConstraint
 from video_evidence_pipeline.domain.manifests import SourceManifest, StageManifest
 from video_evidence_pipeline.domain.media import NormalizationConfig
 from video_evidence_pipeline.domain.recovery import RecoveryManifest
-from video_evidence_pipeline.domain.refinement import RefinementRequestManifest
 from video_evidence_pipeline.domain.semantic import PendingSemanticRequestStatus
 from video_evidence_pipeline.domain.serialization import fingerprint
 from video_evidence_pipeline.domain.state import JobState
@@ -3255,17 +3250,74 @@ def _guide_semantic_request_path(
     return request
 
 
-_GUIDE_REQUEST_MODELS = {
-    "refine_prepare": RefinementRequestManifest,
-    "evidence_prepare": EvidenceRequestManifest,
-    "author_prepare": AuthoringRequestManifest,
-    "audit_prepare": AuditRequestManifest,
-    "revision_prepare": RevisionRequestManifest,
-}
+def _guide_validated_pending_request(
+    workspace: JobWorkspace,
+    job: JobSpec,
+    *,
+    operation: str,
+) -> Any:
+    """Read and validate one pending request against canonical upstream artifacts."""
+
+    if operation in {"refine_prepare", "evidence_prepare"}:
+        raw = verify_acquired_bundle(workspace, job)
+        media = load_normalization_result(workspace, job, raw)
+        transcription = load_transcription_result(
+            workspace,
+            job,
+            media.media_manifest,
+        )
+        if operation == "refine_prepare":
+            return load_refinement_request(
+                workspace,
+                job,
+                media.media_manifest,
+                transcription.transcript_manifest,
+                transcription.segments,
+            )
+        transcript_manifest = transcription.transcript_manifest
+        segments = transcription.segments
+        if requires_transcript_refinement(job):
+            refinement = load_refinement_result(
+                workspace,
+                job,
+                media.media_manifest,
+                transcription.transcript_manifest,
+                transcription.segments,
+            )
+            transcript_manifest = evidence_transcript_projection(
+                transcription.transcript_manifest,
+                refinement,
+            )
+            segments = refinement.segments
+        return load_evidence_request(
+            workspace,
+            job,
+            media.media_manifest,
+            transcript_manifest,
+            segments,
+        )
+    fixed = _load_fixed_evidence(workspace, job)
+    if operation == "author_prepare":
+        return load_authoring_request(workspace, job, fixed)
+    history = _load_authoring_history(workspace, job, fixed)
+    if not history:
+        raise integrity_error("DRAFT_HISTORY_INVALID", "draft history is absent")
+    if operation == "audit_prepare":
+        return load_audit_request(workspace, job, fixed, history[-1][0])
+    if operation == "revision_prepare":
+        target = history[-1]
+        if target[1] is None and target[0].manifest.revision_count > 0 and len(history) > 1:
+            target = history[-2]
+        draft, audit = target
+        if audit is None:
+            raise integrity_error("AUDIT_BUNDLE_INVALID", "revision audit is absent")
+        return load_revision_request(workspace, job, fixed, draft, audit)
+    raise ValueError("not a semantic prepare operation")  # pragma: no cover
 
 
 def _guide_pending_semantic_request(
     workspace: JobWorkspace,
+    job: JobSpec,
     *,
     operation: str,
     skill_id: str,
@@ -3281,10 +3333,10 @@ def _guide_pending_semantic_request(
     if not request_path.exists():
         return None
     try:
-        request = read_json_model(
-            request_path,
-            _GUIDE_REQUEST_MODELS[operation],
-            code="SEMANTIC_REQUEST_INVALID",
+        request = _guide_validated_pending_request(
+            workspace,
+            job,
+            operation=operation,
         )
     except VepError as exc:
         return {
@@ -3476,6 +3528,7 @@ def _guide_operation(
             return blocked
         pending = _guide_pending_semantic_request(
             workspace,
+            job,
             operation=operation,
             skill_id=skill_id,
             draft_version=draft_version,

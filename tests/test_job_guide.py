@@ -361,7 +361,7 @@ def test_guide_routes_stale_pending_requests_to_transcript_recovery_without_repr
     )
     monkeypatch.setattr(
         application,
-        "read_json_model",
+        "_guide_validated_pending_request",
         lambda *_args, **_kwargs: SimpleNamespace(skill=SimpleNamespace(skill_id=skill_id)),
     )
     monkeypatch.setattr(
@@ -430,7 +430,7 @@ def test_guide_routes_pre_skill_pending_requests_to_migration(
     )
     monkeypatch.setattr(
         application,
-        "read_json_model",
+        "_guide_validated_pending_request",
         lambda *_args, **_kwargs: SimpleNamespace(skill=None),
     )
 
@@ -459,7 +459,7 @@ def test_guide_keeps_current_skill_bound_pending_request_on_normal_route(
     )
     monkeypatch.setattr(
         application,
-        "read_json_model",
+        "_guide_validated_pending_request",
         lambda *_args, **_kwargs: SimpleNamespace(
             skill=SimpleNamespace(skill_id="draft-video-report")
         ),
@@ -484,6 +484,47 @@ def test_guide_keeps_current_skill_bound_pending_request_on_normal_route(
     assert result["import_eligible"] is True
     assert result["migration_required"] is False
     assert Path(result["skill_path"]).is_absolute()
+
+
+def test_guide_rejects_pending_request_with_invalid_deterministic_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, job = _created_workspace(tmp_path)
+    path = application._guide_semantic_request_path(
+        workspace,
+        operation="evidence_prepare",
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"schema-valid but upstream-stale request")
+    before = (path.read_bytes(), path.stat().st_mtime_ns)
+    monkeypatch.setattr(
+        application,
+        "load_skill_snapshot",
+        lambda *_args, **_kwargs: SimpleNamespace(lifecycle="active"),
+    )
+
+    def reject_stale_binding(*_args: object, **_kwargs: object) -> object:
+        raise application.state_error(
+            "EVIDENCE_REQUEST_STALE",
+            "synthetic request belongs to another canonical input",
+        )
+
+    monkeypatch.setattr(
+        application,
+        "_guide_validated_pending_request",
+        reject_stale_binding,
+    )
+
+    result = _guide_operation(workspace, job, [], JobState.TRANSCRIPT_REFINED, {})
+
+    assert result["status"] == "integrity-error"
+    assert result["next_operation"] is None
+    assert result["pending_request_status"] == "invalid"
+    assert result["import_eligible"] is False
+    assert result["migration_required"] is False
+    assert result["reason"].startswith("EVIDENCE_REQUEST_STALE")
+    assert "skill_path" not in result
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
 
 
 def test_integrity_error_does_not_invent_a_repair(
