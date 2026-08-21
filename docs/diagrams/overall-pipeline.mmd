@@ -1,0 +1,13 @@
+flowchart LR
+    A[Explicit authorization] --> B[Acquire immutable source]
+    B --> C[Normalize media or accept supplied transcript]
+    C --> D[Caption-first transcript / gap-bounded ASR]
+    D --> E[Bounded transcript refinement]
+    E --> F[Evidence + ambiguity ledger]
+    F --> G[Salience selection + draft]
+    G --> H[Independent audit]
+    H -->|P0/P1 found| I[Bounded revision]
+    I --> H
+    H -->|P0=0 and P1=0| J[HUMAN_REVIEW_READY]
+    J --> K[Human approval]
+    K --> L[Markdown export]

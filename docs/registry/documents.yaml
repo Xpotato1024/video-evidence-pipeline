@@ -200,6 +200,24 @@ documents:
   owners:
   - Xpotato1024
   metadata_mode: front-matter
+- document_id: VEP-DIAGRAM-OVERALL-PIPELINE
+  path: docs/diagrams/overall-pipeline.mmd
+  document_type: diagram-source
+  status: active
+  canonical: true
+  canonical_for: overall-pipeline-diagram-source
+  owners:
+  - Xpotato1024
+  metadata_mode: non-markdown
+- document_id: VEP-DIAGRAM-TRUST-BOUNDARY
+  path: docs/diagrams/trust-boundary.mmd
+  document_type: diagram-source
+  status: active
+  canonical: true
+  canonical_for: trust-boundary-diagram-source
+  owners:
+  - Xpotato1024
+  metadata_mode: non-markdown
 - document_id: VEP-DOC-REGISTRY
   path: docs/registry/documents.yaml
   document_type: document-registry
