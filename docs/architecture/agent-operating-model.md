@@ -50,7 +50,8 @@ adapterは自動検出の互換層であり、共通規則を弱めません。
 active Skillは`repository-sot-audit`に加え、`refine-video-transcript`、
 `analyze-video-evidence`、`draft-video-report`、`draft-video-summary`、
 `independent-content-audit`、`revise-from-audit`、`run-video-evidence-job`です。後者7つは
-明示選択専用（`automatic_trigger = false`）かつ`instruction-only`で、各result evidenceは
+明示選択専用（`automatic_trigger = false`）です。semantic responseを担う6 Skillは`instruction-only`、
+deterministic public CLIを選択・実行する`run-video-evidence-job`は`workspace-write`で、各result evidenceは
 Skill本文SHA、resource bundle fingerprint、eval定義SHA、評価対象commit、case別結果、P0/P1=0、
 owner reviewへ束縛されています。`prepare-human-review`はdraft／explicit-onlyのままです。
 refinement／evidence／authoring／audit／revisionの`external_exchange` public response importは

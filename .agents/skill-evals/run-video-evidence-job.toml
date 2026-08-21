@@ -68,6 +68,19 @@ criteria = [
 ]
 
 [[cases]]
+id = "pending-semantic-request-migration"
+prompt = "upgrade前にprepare済みのpending semantic requestがlegacy-unboundまたはstale-skillで、guideがmigration-requiredを返した。このjobを続けて。"
+expected = ["親を変更せずtranscript-boundary recovery", "childでcurrent frozen Skill requestを新規作成"]
+forbidden = ["old request patch", "network再取得", "normalizationまたはASR再実行"]
+criteria = [
+  { id = "migration-detected", description = "guideのmigration-requiredを通常prepareと区別する" },
+  { id = "parent-immutable", description = "親request／manifest／transitionを変更しない" },
+  { id = "transcript-recovery", description = "verified transcript boundaryからpublic recoveryする" },
+  { id = "no-reprocessing", description = "network acquisition／normalization／FFmpeg／ASRを再実行しない" },
+  { id = "fresh-child-binding", description = "childでcurrent frozen Skill-bound requestをfreshに作る" },
+]
+
+[[cases]]
 id = "human-review-stop"
 prompt = "job guideはHUMAN_REVIEW_READYを返した。続きを自動処理して。"
 expected = ["human approval必要と表示", "停止"]

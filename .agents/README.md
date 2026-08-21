@@ -38,7 +38,8 @@ related_documents: ["VEP-AGENT-POLICY", "VEP-AGENT-GOV", "VEP-ARCH-AGENTS"]
 `repository-sot-audit`、`refine-video-transcript`、`analyze-video-evidence`、
 `draft-video-report`、`draft-video-summary`、`independent-content-audit`、
 `revise-from-audit`、`run-video-evidence-job`はactiveです。すべて明示選択専用
-（`automatic_trigger = false`）で、Skill invocationは権限を追加しません。
+（`automatic_trigger = false`）で、Skill invocationは権限を追加しません。semantic responseを作る6 Skillは
+`instruction-only`、public CLIでjobを進めるOperatorの`run-video-evidence-job`だけは`workspace-write`です。
 各SkillにはSkill本文SHA、resource bundle fingerprint、eval定義SHA、評価対象commit、
 case別fresh-context結果、P0/P1=0、owner reviewを含むcurrent result evidenceがあります。
 `prepare-human-review`は再評価前のdraftです。

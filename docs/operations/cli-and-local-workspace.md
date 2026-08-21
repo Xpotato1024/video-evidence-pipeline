@@ -388,8 +388,9 @@ provider-neutralな`external_exchange` public refinement／evidence／author／a
 対応Skillの`lifecycle = "active"`を必須とします。現行のactive semantic／operator Skillは
 `refine-video-transcript`、`analyze-video-evidence`、`draft-video-report`、
 `draft-video-summary`、`independent-content-audit`、`revise-from-audit`、
-`run-video-evidence-job`です。すべて明示選択専用（`automatic_trigger = false`）かつ
-`instruction-only`で、invocationは権限を追加しません。`prepare-human-review`はdraftのままproduction
+`run-video-evidence-job`です。すべて明示選択専用（`automatic_trigger = false`）で、invocationは権限を追加しません。
+semantic response Skillは`instruction-only`、許可済みpublic CLIでjob workspaceを進めるOperatorの
+`run-video-evidence-job`だけは`workspace-write`です。`prepare-human-review`はdraftのままproduction
 routeのallowlistに含めません。allowlist内のSkillがdraftなら`DRAFT_SKILL_FORBIDDEN`で停止します。
 fixture identityを許可する経路はrepository test内部だけです。human-review bundleは承認対象hashと監査／差分を整理する
 `is_approval: false`のpackageです。
@@ -397,6 +398,8 @@ requestへ保存したSkill snapshotはimmutableです。現在の同一content�
 pending production importを許可し、その他の変更は`SKILL_SNAPSHOT_STALE`で拒否します。completed historyの
 validate／statusはmutableな現在Skillへ再結合しません。完成済みのauthor／audit／revision importを同一responseで
 再実行する場合も、保存済みrequestとcanonical responseの完全一致を検証したうえで現在Skillの再適格性判定を行いません。
+一方、未完了requestがSkill未束縛またはstaleなら通常prepareへ戻さず、親bytesを維持したままverified transcriptから
+child jobへrecoverし、childでcurrent Skill-bound semantic requestを作り直します。
 
 ## Human approval／Markdown export
 

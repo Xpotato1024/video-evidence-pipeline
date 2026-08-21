@@ -155,6 +155,8 @@ uv run vep job recover .local/jobs/media-report changed-assignment \
 
 recoveryはsource、normalization、raw transcript、宣言済みsupporting inputだけを再利用し、childを`TRANSCRIBED`から開始します。既存のdraft／audit／approvalをsemantic shortcutとして引き継がず、新しいevidence、author、auditを作ります。親workspaceの上書き、再取得、不要な再ASRは行いません。
 
+upgrade前にprepare済みで未完了のsemantic requestが現在のfrozen Skill contractへimportできない場合も、同じ境界を使います。`vep job guide`が`migration-required`を返したら古いrequestをpatchせず、表示された`vep job recover ... --child-spec ...`でverified transcriptからchildを作り、semantic stageだけをcurrent Skillで再開します。
+
 ## 6. Human reviewとexport
 
 `HUMAN_REVIEW_READY`は承認済みを意味しません。reviewerはbundle内のdraft、evidence、監査、要件、target SHAを確認し、次を明示してからapprovalします。

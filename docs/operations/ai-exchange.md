@@ -110,7 +110,9 @@ uv run vep job guide WORKSPACE
 - 必要な`request_path`、`skill_path`、`response_schema_path`
 - network、FFmpeg、ASR、external API、workspace writeのside-effect分類
 
-guideはrequest、artifact、transition、manifestを新規生成しません。stateが不明、上流artifactが不整合、Skillがdraft／staleの場合は、成功経路を推測せず停止理由を示します。
+guideはrequest、artifact、transition、manifestを新規生成しません。stateが不明、上流artifactが不整合、current Skillがdraft／invalidの場合は、成功経路を推測せず停止理由を示します。
+
+pending requestだけはcurrent production import契約へread-only分類します。`current`なら通常のprepare／importを案内し、Skill bindingがない`legacy-unbound`または古いsnapshotの`stale-skill`なら`migration-required`とします。親requestを上書きせず、verified transcriptからchildをrecoverしてcurrent Skill-bound requestをfreshに作ります。recovery guidanceのnetwork acquisition、normalization、FFmpeg、ASR、model provisionはすべてfalseです。completed artifactは保存済みfrozen requestで検証し、current Skill driftをmigration理由にしません。
 
 ## Import invariants
 
@@ -140,7 +142,8 @@ deterministic executorは、stageごとに少なくとも次を検証します�
 
 次の状態では、runnerの再試行で契約を弱めず、原因を修正してから同じrequestへ戻ります。
 
-- `SKILL_SNAPSHOT_STALE`、`DRAFT_SKILL_FORBIDDEN`
+- pending requestの`SEMANTIC_REQUEST_MIGRATION_REQUIRED`（親をpatchせずtranscript-boundary recovery）
+- current Skillの`SKILL_SNAPSHOT_STALE`、`DRAFT_SKILL_FORBIDDEN`
 - `FIXTURE_ANALYZER_FORBIDDEN`、`EXTERNAL_API_NOT_AUTHORIZED`
 - request／response fingerprint mismatch、unknown field、invalid SourceRef
 - `ARTIFACT_INTEGRITY_FAILED`、`APPROVAL_STALE`、immutable sourceの変更

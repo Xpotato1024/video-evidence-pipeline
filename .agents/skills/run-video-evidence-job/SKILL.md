@@ -10,6 +10,10 @@ description: 短い利用者要求から既存VEP jobを発見し、公開CLIと
 user authorizationとdeterministic executorのpublic operationが許可する場合だけ実行する。manifest、transition、
 canonical artifactをAIが直接編集しない。
 
+registryの`workspace-write`は、Operatorが許可済みpublic CLIを通じてprivate job workspaceを進行できることを示す。
+AIによるdirect write、network／external API認可、human approvalを意味しない。semantic responseを作る各stage Skillは
+引き続き`instruction-only`である。
+
 ## Use when
 
 - 「この動画を300字でまとめて」「議事録を作って」「このjobの続きを処理して」のような短い要求からVEPを進めるとき
@@ -42,6 +46,8 @@ canonical artifactをAIが直接編集しない。
 4. missing authorization、network policy、external API可能性、model provisioning、write side effectを表示し、不足を推測しない。
 5. guideが示す1つのpublic operationだけを選ぶ。manifestやtransitionを手編集しない。
 6. completed transcriptが有効ならacquisition／normalization／ASRを繰り返さない。transcript-boundary recoveryはeligibleなpublic recovery operationだけを使う。
+   guideがpending requestを`legacy-unbound`または`stale-skill`として`migration-required`にした場合、親requestを変更せず、
+   verified transcriptからchild jobをrecoverし、childでcurrent frozen Skill-bound requestを新規作成する。
 7. semantic `prepare`が返すfrozen request、stage-specific Skill、response schemaをAIへ渡し、responseをdeterministic `import`へ戻す。
 8. refinementは`refine-video-transcript`、evidenceは`analyze-video-evidence`、authoringはstrict task mapping、auditはfresh contextの`independent-content-audit`、revisionは`revise-from-audit`へ委ねる。各Skillのsemantic rulesをこのSkillで再実装しない。
 9. audit contextをauthor／revisionへ再利用せず、P0/P1があれば許可されたbounded revisionを行う。解消不能ならstopして人間へ報告する。
@@ -52,12 +58,14 @@ canonical artifactをAIが直接編集しない。
 - `EXPORTED`: completeとして追加操作しない。
 - `HUMAN_REVIEW_READY`: human approval待ちとして停止する。
 - `BLOCKED`: guideが具体的なrecovery eligibilityを示す場合だけ案内し、repairを捏造しない。
+- `migration-required`: pending semantic requestをpatchせず、guideが示すtranscript-boundary recoveryでchildへ移る。
 - integrity error: public validation結果を報告し、manifest修正やartifact差替えを提案しない。
 
 ## Validation
 
 - next operationがguide、effective state、authorizationと一致する
 - valid artifact reuseにより不要なacquisition／normalization／ASRを行っていない
+- pending legacy／stale requestのmigrationで親bytesが不変かつchildだけがcurrent Skillへbindされる
 - semantic responseがfrozen stage Skillとdeterministic importを経由する
 - authoringとauditのcontextが独立し、AIがhuman approvalをしていない
 - manifest、transition、canonical artifactへのdirect editがない
