@@ -517,9 +517,47 @@ def approve(
 @app.command("export")
 def export_delivery(
     workspace: Path,
+    export_format: Annotated[str, typer.Option("--format")] = "markdown",
+    destination: Annotated[Path | None, typer.Option("--destination")] = None,
+    confirm_private_export: Annotated[bool, typer.Option("--confirm-private-export")] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    result = _run(lambda: export_job(workspace), json_output=json_output)
+    if export_format == "study-bundle":
+        from video_evidence_pipeline.application import export_study_bundle_job
+
+        def archive():
+            if destination is None:
+                raise configuration_error(
+                    "STUDY_BUNDLE_DESTINATION_REQUIRED", "study-bundle requires --destination"
+                )
+            return export_study_bundle_job(
+                workspace, destination, confirm_private_export=confirm_private_export
+            )
+
+        bundle = _run(archive, json_output=json_output)
+        _emit(
+            {
+                "ok": True,
+                "job_id": bundle.manifest.job_id,
+                "format": "study-bundle",
+                "archive_status": "complete",
+                "destination": str(bundle.destination),
+                "bundle_fingerprint": bundle.manifest.bundle_fingerprint,
+                "file_count": len(bundle.manifest.files),
+                "reused": bundle.reused,
+            },
+            json_output=json_output,
+        )
+        return
+
+    def markdown():
+        if export_format != "markdown" or destination is not None or confirm_private_export:
+            raise configuration_error(
+                "EXPORT_OPTIONS_INVALID", "unsupported format or options for Markdown export"
+            )
+        return export_job(workspace)
+
+    result = _run(markdown, json_output=json_output)
     _emit(
         {
             "ok": True,
@@ -1186,3 +1224,26 @@ def schema_check(
 
 if __name__ == "__main__":
     app()
+
+
+@app.command("bundle-validate")
+def bundle_validate(
+    bundle: Path,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Check a standalone study-bundle without its source workspace."""
+    from video_evidence_pipeline.delivery.study_bundle import validate_study_bundle
+
+    manifest = _run(lambda: validate_study_bundle(bundle), json_output=json_output)
+    _emit(
+        {
+            "ok": True,
+            "format": manifest.format,
+            "job_id": manifest.job_id,
+            "bundle_fingerprint": manifest.bundle_fingerprint,
+            "file_count": len(manifest.files),
+            "input_media_included": False,
+            "runtime_replay_supported": False,
+        },
+        json_output=json_output,
+    )

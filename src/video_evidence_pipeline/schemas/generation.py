@@ -87,6 +87,7 @@ from video_evidence_pipeline.domain.search import (
     SearchIndexMetadata,
     SearchResult,
 )
+from video_evidence_pipeline.domain.study_bundle import StudyBundleManifest, StudySourceIndex
 from video_evidence_pipeline.domain.supporting import SupportingInputManifest
 from video_evidence_pipeline.domain.transcription import (
     AsrSegment,
@@ -112,6 +113,8 @@ SCHEMA_VERSION = "1.0"
 SCHEMA_BASE_ID = "https://schemas.video-evidence-pipeline.local/v1"
 
 SCHEMA_MODELS: dict[str, type[BaseModel]] = {
+    "study-bundle-manifest.schema.json": StudyBundleManifest,
+    "study-source-index.schema.json": StudySourceIndex,
     "job-spec.schema.json": JobSpec,
     "character-length-constraint.schema.json": CharacterLengthConstraint,
     "effective-character-length-constraint.schema.json": EffectiveCharacterLengthConstraint,

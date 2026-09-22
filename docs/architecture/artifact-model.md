@@ -32,6 +32,8 @@ related_documents: ["VEP-ARCH-PIPELINE", "VEP-ARCH-STATE", "VEP-ARCH-TRUST", "VE
 
 ## 2. Artifact class
 
+下表のGit管理はVEP開発リポジトリ内の扱いを示します。利用者が明示認可した別の非公開学習リポジトリには、[study-bundle](../operations/study-bundle.md)形式の保存用成果物を格納できます。これはworkspaceのGit管理や入力A/Vの保存を意味しません。
+
 | Class | 例 | Mutable | Git管理 |
 |---|---|---:|---:|
 | source | original video, original captions | No | No |

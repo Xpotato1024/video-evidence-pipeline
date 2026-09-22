@@ -371,3 +371,12 @@ documents:
   owners:
   - Xpotato1024
   metadata_mode: front-matter
+- document_id: VEP-OPS-STUDY-BUNDLE
+  path: docs/operations/study-bundle.md
+  document_type: operations
+  status: active
+  canonical: true
+  canonical_for: study-bundle-export
+  owners:
+  - Xpotato1024
+  metadata_mode: front-matter

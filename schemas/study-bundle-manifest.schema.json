@@ -1,0 +1,154 @@
+{
+  "$defs": {
+    "StudyBundleFile": {
+      "additionalProperties": false,
+      "properties": {
+        "relative_path": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "title": "Relative Path",
+          "type": "string"
+        },
+        "sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size_bytes": {
+          "maximum": 8796093022208,
+          "minimum": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "relative_path",
+        "sha256",
+        "size_bytes"
+      ],
+      "title": "StudyBundleFile",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/study-bundle-manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "approval_identity_cryptographically_verified": {
+      "const": false,
+      "default": false,
+      "title": "Approval Identity Cryptographically Verified",
+      "type": "boolean"
+    },
+    "approval_record_sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Approval Record Sha256",
+      "type": "string"
+    },
+    "approved_at": {
+      "format": "date-time",
+      "title": "Approved At",
+      "type": "string"
+    },
+    "approved_draft_sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Approved Draft Sha256",
+      "type": "string"
+    },
+    "bundle_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Bundle Fingerprint",
+      "type": "string"
+    },
+    "entrypoints": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Entrypoints",
+      "type": "object"
+    },
+    "files": {
+      "items": {
+        "$ref": "#/$defs/StudyBundleFile"
+      },
+      "maxItems": 10000,
+      "minItems": 1,
+      "title": "Files",
+      "type": "array"
+    },
+    "format": {
+      "const": "study-bundle",
+      "default": "study-bundle",
+      "title": "Format",
+      "type": "string"
+    },
+    "input_media_included": {
+      "const": false,
+      "default": false,
+      "title": "Input Media Included",
+      "type": "boolean"
+    },
+    "job_id": {
+      "maxLength": 63,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+      "title": "Job Id",
+      "type": "string"
+    },
+    "omitted_source_artifacts": {
+      "items": {
+        "$ref": "#/$defs/StudyBundleFile"
+      },
+      "maxItems": 10000,
+      "title": "Omitted Source Artifacts",
+      "type": "array"
+    },
+    "runtime_replay_supported": {
+      "const": false,
+      "default": false,
+      "title": "Runtime Replay Supported",
+      "type": "boolean"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "source_job_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Source Job Fingerprint",
+      "type": "string"
+    },
+    "vep_version": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Vep Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "job_id",
+    "source_job_fingerprint",
+    "vep_version",
+    "approval_record_sha256",
+    "approved_draft_sha256",
+    "approved_at",
+    "entrypoints",
+    "files",
+    "bundle_fingerprint"
+  ],
+  "title": "StudyBundleManifest",
+  "type": "object",
+  "x-schema-version": "1.0"
+}
