@@ -31,8 +31,9 @@ VEPの出力は「AIが書いた文章」だけではありません。source、
 - source refsに結び付いたevidence、ambiguity、private search cache
 - draft、独立audit、bounded revision、human-review package
 - 人間承認後のbyte-exact Markdown export
+- 別端末へ持ち運べるstudy-bundle export（要約・文字起こし・根拠・補助資料・監査・承認、入力A/Vなし）
 
-VEPは実データをGitへ追加しません。workspaceはprivate local stateであり、Cookie、token、署名付きURL、実動画、音声、字幕、transcript、evidence response、ユーザー成果物をcommitしないでください。
+VEPはGit操作を実行せず、実データをVEP開発リポジトリへ追加しません。workspaceはprivate local stateであり、Cookie、token、署名付きURL、実動画、音声、字幕、transcript、evidence response、ユーザー成果物をVEP開発リポジトリへcommitしないでください。利用者の明示許可がある別の非公開学習リポジトリには、[study-bundle](docs/operations/study-bundle.md)を保存できます。
 
 ### Non-goals and unsupported boundaries
 
@@ -173,6 +174,8 @@ material findingが残る場合は`REVISION_REQUIRED → DRAFTED → AUDITED`を
 provider identity、locator、credentialの扱いは[`Network acquisition operations`](docs/operations/network-acquisition.md)が正本です。対応表の`Supported`はadapterの存在を示すだけで、provider側のdownload許可やDRM解除を意味しません。
 
 ## Advanced links
+
+- [Portable study-bundle](docs/operations/study-bundle.md): 非公開学習リポジトリへの保存とオフライン検証
 
 - [Getting started](docs/getting-started.md): transcript最短経路とmedia経路の手順
 - [AI exchange operations](docs/operations/ai-exchange.md): request／Skill／response schema、import、停止条件

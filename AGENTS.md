@@ -13,7 +13,7 @@ SKILL_REGISTRY: `.agents/skill-system.toml`
 必須事項:
 
 - 認可されていない動画を取得しない。
-- Cookie、token、署名付きURL、実動画、音声、字幕、抽出フレーム、ユーザー成果物をコミットしない。
+- Cookie、token、署名付きURL、実動画、音声、字幕、抽出フレーム、ユーザー成果物をVEP開発リポジトリへコミットしない。別の認可済み非公開リポジトリへのstudy-bundle保存は`.agents/policy.md`と`docs/operations/study-bundle.md`に従う。
 - raw sourceを上書きしない。未実行・不明・低確度を推測で補完しない。
 - authoringとindependent auditを同一コンテキストで完結させない。
 - Issue-first、Draft PR、明示依頼なしのReady化／merge／Issue closeを行わない。

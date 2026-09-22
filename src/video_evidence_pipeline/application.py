@@ -3923,3 +3923,33 @@ def job_status(path: Path) -> tuple[dict[str, Any], int]:
         },
         exit_code,
     )
+
+
+def export_study_bundle_job(path: Path, destination: Path, *, confirm_private_export: bool = False):
+    """Export an archival view without altering job state or creating approval."""
+    from video_evidence_pipeline.delivery.study_bundle import publish_study_bundle
+
+    if not confirm_private_export:
+        raise state_error(
+            "STUDY_BUNDLE_CONFIRMATION_REQUIRED",
+            "private data export requires explicit confirmation",
+        )
+    workspace = JobWorkspace.open(path)
+    with exclusive_append_lock(workspace.transitions_jsonl):
+        workspace, job, transitions, state = _load_context(path)
+        if state not in {JobState.HUMAN_APPROVED, JobState.EXPORTED}:
+            raise state_error(
+                "STATE_GATE_FAILED", "job must be HUMAN_APPROVED before study-bundle export"
+            )
+        if job.output.format != "markdown":
+            raise configuration_error(
+                "EXPORT_FORMAT_NOT_IMPLEMENTED",
+                "study-bundle requires an approved Markdown deliverable",
+            )
+        _require_current_authorization(job, transitions, _authorization(workspace))
+        fixed, history, review = _load_authoring_state_integrity(workspace, job, state, deep=True)
+        draft, audit = history[-1]
+        if audit is None or review is None:
+            raise integrity_error("APPROVAL_STALE", "approval upstream is incomplete")
+        approval = load_approval(workspace, job, draft, audit, review, deep=True)
+        return publish_study_bundle(workspace, job, fixed, history, review, approval, destination)

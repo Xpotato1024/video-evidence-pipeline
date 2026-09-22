@@ -413,3 +413,17 @@ human-review bindingを再検証してから`HUMAN_APPROVED`へ進めます。
 binary bytesのままcontent-addressed `final.md`へcopyし、package／primary manifestを公開してから`EXPORTED`へ進めます。
 承認後のdraft／audit／human-review／ledger改変は`APPROVAL_STALE`、unsupported formatはstructured errorで拒否します。
 同一承認の再実行は全artifactを検証して再利用し、ledger、artifact、transitionを重複させません。
+
+## Portable study-bundle archival output
+
+Approved Markdown jobs may also be archived without changing their job spec or lifecycle state:
+
+```text
+vep export WORKSPACE --format study-bundle --destination /private/archive/R001 --confirm-private-export --json
+vep bundle-validate /private/archive/R001 --json
+```
+
+The destination must be outside the VEP repository, its parent must exist, and existing differing
+contents are never overwritten. See [Portable study-bundle export](study-bundle.md) for the exact
+payload, privacy boundary, human-approval requirement, standalone verification and interruption behavior.
+This output retains derived evidence for another machine; it is not a resumable job or a copy of input A/V.

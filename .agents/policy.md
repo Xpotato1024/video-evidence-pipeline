@@ -35,7 +35,8 @@ related_documents: ["VEP-AGENT-GOV", "VEP-ARCH-AGENTS", "VEP-GOV-DOCUMENTS", "VE
 - 利用権限が確認されていないURLや動画を取得しない。
 - 技術的に取得可能であることを利用許諾と解釈しない。
 - Cookie、Authorization credential、API token、署名付きURLを保存・表示・コミットしない。
-- 実動画、音声、字幕、フレーム、文字起こし、課題成果物をGitへ追加しない。
+- 実動画、音声、字幕、フレーム、文字起こし、課題成果物をVEPの開発Gitリポジトリへ追加しない。
+- 利用者が明示許可したstudy-bundleは、別の認可済み非公開学習リポジトリに保存できる。VEP workspace全体や入力A/Vを含めず、認証情報を除外する。保存許可は人間承認や外部AI送信の許可とは別であり、VEPはGit操作を自動実行しない。
 - 外部AI API送信は、jobで明示許可された場合のみ行う。
 - raw sourceはimmutableとし、派生成果物で上書きしない。
 

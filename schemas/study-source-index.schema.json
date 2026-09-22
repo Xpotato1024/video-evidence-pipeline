@@ -1,0 +1,114 @@
+{
+  "$defs": {
+    "SourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "content_sha256": {
+          "description": "Transcript-record semantic fingerprint or canonical frame artifact SHA-256",
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "end_ms": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Ms"
+        },
+        "kind": {
+          "$ref": "#/$defs/SourceRefKind"
+        },
+        "ref_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Ref Id",
+          "type": "string"
+        },
+        "start_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Ms"
+        }
+      },
+      "required": [
+        "kind",
+        "ref_id",
+        "content_sha256"
+      ],
+      "title": "SourceRef",
+      "type": "object"
+    },
+    "SourceRefKind": {
+      "enum": [
+        "transcript_segment",
+        "frame",
+        "approved_artifact",
+        "pdf_text",
+        "pdf_page",
+        "image",
+        "notes"
+      ],
+      "title": "SourceRefKind",
+      "type": "string"
+    },
+    "StudySourceBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "relative_path": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "title": "Relative Path",
+          "type": "string"
+        },
+        "source_ref": {
+          "$ref": "#/$defs/SourceRef"
+        }
+      },
+      "required": [
+        "source_ref",
+        "relative_path"
+      ],
+      "title": "StudySourceBinding",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/study-source-index.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "bindings": {
+      "items": {
+        "$ref": "#/$defs/StudySourceBinding"
+      },
+      "maxItems": 200000,
+      "title": "Bindings",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "title": "StudySourceIndex",
+  "type": "object",
+  "x-schema-version": "1.0"
+}
