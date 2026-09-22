@@ -51,6 +51,7 @@ from video_evidence_pipeline.domain.job import (
     SupportingInputKind,
     SupportingInputSpec,
     load_job_yaml,
+    primary_input_kind,
 )
 from video_evidence_pipeline.domain.transcription import (
     MAXIMUM_ASR_WORKER_REQUEST_BYTES,
@@ -686,11 +687,17 @@ def transcribe(
 
     opened = JobWorkspace.open(workspace)
     repository_root = opened.jobs_root.parent.parent
+    job = load_job_yaml(opened.job_yaml)
+    backend_override = (
+        None
+        if primary_input_kind(job) is PrimaryInputKind.TRANSCRIPT
+        else ContainerAsrBackend(repository_root, config)
+    )
     result = _run(
         lambda: transcribe_job(
             workspace,
             config,
-            backend_override=ContainerAsrBackend(repository_root, config),
+            backend_override=backend_override,
         ),
         json_output=json_output,
     )

@@ -58,6 +58,7 @@ from video_evidence_pipeline.domain.job import (
     AssignmentSpec,
     JobSpec,
     OutputSpec,
+    PrimaryInputKind,
     SourceKind,
     SourceSpec,
 )
@@ -620,6 +621,50 @@ def test_public_transcribe_full_caption_does_not_probe_docker(
 
     assert result.exit_code == 0
     assert json.loads(result.stdout)["state"] == JobState.TRANSCRIBED.value
+    assert not repository.joinpath(".local/models").exists()
+
+
+def test_public_transcribe_supplied_transcript_does_not_construct_asr_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = tmp_path / "supplied-transcript-cli"
+    repository.mkdir()
+    source = repository / "supplied.txt"
+    source.write_text("第一段落。\n\n第二段落。\n", encoding="utf-8")
+    workspace, _job_value = initialize_job(
+        repository,
+        job_id="supplied-transcript-without-asr",
+        source_kind=SourceKind.LOCAL_FILE,
+        source=str(source),
+        task_type="report",
+        language="ja",
+        output_format="markdown",
+        primary_input=PrimaryInputKind.TRANSCRIPT,
+    )
+    authorize_job(
+        workspace.root,
+        confirm=True,
+        basis="authorized synthetic supplied transcript",
+        allow_local_processing=True,
+        allow_external_api=False,
+        confirmer_identity="pytest",
+    )
+    acquire_job(workspace.root)
+    normalize_job(workspace.root)
+    monkeypatch.setattr(
+        container_module,
+        "ContainerAsrBackend",
+        lambda *_args, **_kwargs: pytest.fail(
+            "supplied transcript CLI must not construct an ASR backend"
+        ),
+    )
+
+    result = CliRunner().invoke(app, ["transcribe", str(workspace.root), "--json"])
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["state"] == JobState.TRANSCRIBED.value
+    assert payload["sources"] == ["supplied"]
     assert not repository.joinpath(".local/models").exists()
 
 
