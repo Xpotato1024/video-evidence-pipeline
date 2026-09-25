@@ -1,15 +1,15 @@
 schema_version = "1.0"
 skill_id = "repository-sot-audit"
 skill_path = ".agents/skills/repository-sot-audit/SKILL.md"
-skill_content_sha256 = "d94c1c4b9e0274c75df8aed9c4815271f805891521d3c7095cb1045ba90fefd6"
+skill_content_sha256 = "8815dc15d9f98489e1b948711e1e7cf1a300fb0b5be43fa89e71ccbc65d805ca"
 eval_definition_path = ".agents/skill-evals/repository-sot-audit.toml"
-eval_definition_sha256 = "8da7e5956e3773cc52916204f20960754a0cef1a5ad7046b14814002e29f60bf"
+eval_definition_sha256 = "37693273ed59fefd83c876b404cf2df8b18a5f314872db26c3ef8eb17175bcaf"
 resource_bundle_fingerprint = "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
-evaluated_commit_sha = "b4e098b73b3a4d53f6e3d6e2ca3c4d9ec14c2442"
-evaluated_at = "2026-08-19T22:34:53Z"
-evaluator_identity = "OpenAI Codex GPT-5.6 Sol"
-evaluator_method = "binary criteria, synthetic validator fixture, and required repository gates"
-finding_summary = "P0=0; P1=0; normal host sync excludes the ASR container group and the read-only audit contract remains valid"
+evaluated_commit_sha = "13aa05fd5e95db28ef5b3e972c5397ce409cc164"
+evaluated_at = "2026-09-25T14:57:56.175Z"
+evaluator_identity = "ChatGPT current implementation session; runtime model identity not independently observed"
+evaluator_method = "instruction-contract self-review plus 26 deterministic synthetic repository-validator tests; not independent model dispatch"
+finding_summary = "P0=0; P1=0 in the reviewed workflow scope; preserves read-only and secret boundaries while allowing conditional evidence reuse and failed-step recovery"
 side_effect_policy = "read-only"
 total_score = 10
 maximum_score = 10
@@ -27,8 +27,8 @@ required_artifacts = [
 [owner_review]
 owner = "Xpotato1024"
 approved = true
-method = "explicit_task_authorization"
-reviewed_at = "2026-08-19T22:34:53Z"
+method = "explicit_task_authorization: user requested repository-local workflow and Skill changes; not a separate human content audit"
+reviewed_at = "2026-09-25T14:57:56.175Z"
 
 [[case_results]]
 case_id = "valid-repository"
@@ -36,12 +36,12 @@ result = "pass"
 score = 5
 maximum_score = 5
 forbidden_observed = false
-evidence = ["required full suite completed on the evaluated implementation", "repository validator, schema, lint, format, lock, and diff gates passed"]
+evidence = ["26 synthetic repository-validator tests passed using the existing Python environment", "contract review covers valid evidence reuse, scoped environment recovery, and no unconditional full-suite rerun"]
 criteria = [
   { id = "canonical-sot-read", passed = true, evidence = "documents registry and applicable canonical documents were read" },
-  { id = "validator-run", passed = true, evidence = "scripts/validate_repository.py exited successfully" },
-  { id = "tests-run", passed = true, evidence = "required FFmpeg suite completed" },
-  { id = "exact-status", passed = true, evidence = "pass and platform-skip counts were recorded" },
+  { id = "validator-run", passed = true, evidence = "test_valid_fixture_passes executed the repository validator on a valid synthetic repository; whole-repository final validation is recorded separately" },
+  { id = "tests-run", passed = true, evidence = "tests/test_validate_repository.py: 26 passed; unrelated FFmpeg and live-media E2E were not rerun" },
+  { id = "exact-status", passed = true, evidence = "26 passed, exit 0; reused and Not Run remain distinct; actual model dispatch and live E2E were not run" },
   { id = "restricted-data-avoided", passed = true, evidence = "synthetic fixtures only; no real media or credential was opened" },
 ]
 
@@ -56,6 +56,6 @@ criteria = [
   { id = "secret-fail-closed", passed = true, evidence = "synthetic secret fixture produced SECRET_PATTERN" },
   { id = "secret-not-echoed", passed = true, evidence = "Skill contract forbids replaying the detected value" },
   { id = "location-reported", passed = true, evidence = "repository findings retain the affected path" },
-  { id = "no-mutation", passed = true, evidence = "audit execution was read-only" },
+  { id = "no-mutation", passed = true, evidence = "Skill remains read-only for the target repository; synthetic fixture writes were isolated to task-owned temporary paths" },
   { id = "severity-reported", passed = true, evidence = "finding was reported as a validation failure" },
 ]
