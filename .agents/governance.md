@@ -79,3 +79,7 @@ LF content bytesを対象とし、評価対象commitがcurrent `HEAD`のancestor
 
 AI固有の入口は共通ポリシーを上書きしません。vendor固有機能を利用する場合も、Skill ID、
 入力bundle、出力contract、side effectを共通形式で記録します。
+
+## 8. 開発運用の継承
+
+`.agents/policy.md`の担当・検証再利用・部分復旧を各Skillにも適用する。repository開発のレビューと、生成物に対するfrozen request / fresh-context auditを混同しない。productのimport・receipt・承認に必要なidentityは維持し、不完全responseを手作業で成功stateへ変更しない。参照だけによる追加Skill実行や無関係な全件検証を要求しない。

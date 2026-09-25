@@ -1,5 +1,11 @@
 # Repository instructions
 
+## 実装・検証・レビューの運用
+
+通常実装は実装担当（既定Sol）が検証・修正まで一貫して担当し、Astraは重要な設計判断と必要な独立レビューに絞る。モデル名は推奨であり、Codexのユーザー設定と上位instructionに従って柔軟に割り当てる。
+
+有効な同条件の検証は再利用し、不完全レビューは不足部分を補完する。環境障害は失敗箇所から再開する。全面実操作E2Eはリリース前の統合段階、変更に必要な検証はその場で行う。関連Skillから古い担当指定・追加の全面再実行義務を持ち込まない。条件・独立性・権限境界の正本は[実行ワークフロー](.agents/policy.md)。
+
 CANONICAL_AGENT_POLICY: `.agents/policy.md`  
 SKILL_REGISTRY: `.agents/skill-system.toml`
 
@@ -19,15 +25,6 @@ SKILL_REGISTRY: `.agents/skill-system.toml`
 - Issue-first、Draft PR、明示依頼なしのReady化／merge／Issue closeを行わない。
 - 文書追加・移動・正本性・`metadata_mode`変更時は文書台帳を同じPRで更新する。
 - registry-only文書へ汎用YAML front matterを追加しない。
-- 変更前後に次を実行する。
-
-```bash
-uv sync --locked
-uv run ruff check src scripts tests
-uv run ruff format --check src scripts tests
-uv run pytest -q
-uv run vep schema check
-uv run python scripts/validate_repository.py --root .
-```
+- 変更範囲とfailure modeに必要な検証を選ぶ。具体的な選択・証拠再利用・環境障害からの再開は`.agents/policy.md`を正とし、変更前後の全件再実行を要求しない。
 
 Skillは明示的に選択し、`lifecycle = "draft"`のSkillを実運用として実行しないでください。
