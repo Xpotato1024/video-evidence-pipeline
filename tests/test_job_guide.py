@@ -647,3 +647,9 @@ def test_prepare_cli_reports_frozen_exchange_paths(
     assert Path(payload["request_path"]).as_posix().endswith(request_suffix)
     assert Path(payload["skill_path"]).name == "SKILL.md"
     assert Path(payload["response_schema_path"]).name == schema_name
+    structured_schema_path = Path(payload["structured_output_schema_path"])
+    assert structured_schema_path.name == schema_name
+    assert structured_schema_path.is_file()
+    structured_schema = json.loads(structured_schema_path.read_text(encoding="utf-8"))
+    assert structured_schema["additionalProperties"] is False
+    assert structured_schema["required"] == sorted(structured_schema["properties"])
