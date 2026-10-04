@@ -69,11 +69,13 @@ uv run vep transcribe "$WORKSPACE"
 
 | Stage | Prepare | runnerへ渡すもの | Import |
 | --- | --- | --- | --- |
-| Refinement | `vep refine prepare WORKSPACE --json` | `request_path`、`skill_path`、`response_schema_path` | `vep refine import WORKSPACE --response RESPONSE` |
-| Evidence | `vep evidence prepare WORKSPACE --json` | `request_path`、`skill_path`、`response_schema_path` | `vep evidence import WORKSPACE --response RESPONSE` |
-| Author | `vep author prepare WORKSPACE --skill draft-video-summary --json` | `request_path`、`skill_path`、`response_schema_path` | `vep author import WORKSPACE --response RESPONSE` |
-| Audit | `vep audit prepare WORKSPACE --skill independent-content-audit --json` | `request_path`、`skill_path`、`response_schema_path` | `vep audit import WORKSPACE --response RESPONSE` |
-| Revision | `vep revision prepare WORKSPACE --skill revise-from-audit --json` | `request_path`、`skill_path`、`response_schema_path` | `vep revision import WORKSPACE --response RESPONSE` |
+| Refinement | `vep refine prepare WORKSPACE --json` | `request_path`、`skill_path`、schema path | `vep refine import WORKSPACE --response RESPONSE` |
+| Evidence | `vep evidence prepare WORKSPACE --json` | `request_path`、`skill_path`、schema path | `vep evidence import WORKSPACE --response RESPONSE` |
+| Author | `vep author prepare WORKSPACE --skill draft-video-summary --json` | `request_path`、`skill_path`、schema path | `vep author import WORKSPACE --response RESPONSE` |
+| Audit | `vep audit prepare WORKSPACE --skill independent-content-audit --json` | `request_path`、`skill_path`、schema path | `vep audit import WORKSPACE --response RESPONSE` |
+| Revision | `vep revision prepare WORKSPACE --skill revise-from-audit --json` | `request_path`、`skill_path`、schema path | `vep revision import WORKSPACE --response RESPONSE` |
+
+通常のrunnerにはcanonical `response_schema_path`を渡します。OpenAI/Codex Structured Outputsのように全object propertyの`required`列挙を要求するrunnerでは、同じprepare出力の`structured_output_schema_path`を生成制約に使います。どちらの経路でもimportはcanonical VEP validatorで再検証されるため、runner互換schemaによって受理条件が緩和されることはありません。
 
 明示したprimary inputを使う新規jobでは、raw transcriptをimmutableに保ったままrefinement responseを別artifactとしてimportします。その後にEvidenceを作り、private search cacheを構築します。
 
@@ -82,7 +84,7 @@ uv run vep refine prepare "$WORKSPACE" --json
 uv run vep refine import "$WORKSPACE" \
   --response /absolute/path/to/refinement-response.json
 uv run vep evidence prepare "$WORKSPACE" --json
-# 表示されたrequest_path + skill_path + response_schema_pathをrunnerへ渡す
+# Structured Outputs runnerなら structured_output_schema_path、その他は response_schema_path を使う
 uv run vep evidence import "$WORKSPACE" \
   --response /absolute/path/to/evidence-response.json
 uv run vep index build "$WORKSPACE"
@@ -93,7 +95,7 @@ AuthoringではSkill snapshotも同じexchangeへ渡します。
 ```bash
 uv run vep author prepare "$WORKSPACE" \
   --skill draft-video-summary --json
-# request_path + skill_path + response_schema_pathを同じrunner invocationへ渡す
+# request_path + skill_path + 適切なschema pathを同じrunner invocationへ渡す
 uv run vep author import "$WORKSPACE" \
   --response /absolute/path/to/author-response.json
 ```

@@ -230,16 +230,22 @@ def _semantic_exchange_paths(
     skill_id: str,
     response_schema: str,
 ) -> dict[str, str]:
+    from video_evidence_pipeline.schemas.structured_output import export_structured_output_schema
     from video_evidence_pipeline.storage.layout import JobWorkspace
 
     workspace = JobWorkspace.open(workspace_path)
     repository_root = workspace.jobs_root.parent.parent
+    structured_schema = export_structured_output_schema(
+        response_schema,
+        workspace.safe_path(f"semantic/structured-output-schemas/{response_schema}"),
+    )
     return {
         "request_path": str(workspace.safe_path(request_path).resolve()),
         "skill_path": str(
             (repository_root / ".agents" / "skills" / skill_id / "SKILL.md").resolve()
         ),
         "response_schema_path": str((repository_root / "schemas" / response_schema).resolve()),
+        "structured_output_schema_path": str(structured_schema.resolve()),
     }
 
 

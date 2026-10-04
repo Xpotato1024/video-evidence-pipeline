@@ -29,10 +29,11 @@ related_documents:
 | --- | --- | --- |
 | `request_path` | assignment、evidence、source refs、ambiguity、要求された出力条件を固定した入力 | VEPがcanonical fingerprintを計算し、対象jobとbindする |
 | `skill_path` | stageに束ねられたrepository-local Skillのsnapshotを示す入力 | fuzzy matchingをせず、productionではactiveかつ許可済みのSkillだけを使う |
-| `response_schema_path` | stageごとのresponse JSON Schemaを示す入力 | import前にstrict validationし、未知fieldやfixture形状を受け入れない |
+| `response_schema_path` | stageごとのcanonical response JSON Schemaを示す入力 | VEP import前のstrict validationに使い、未知fieldやfixture形状を受け入れない |
+| `structured_output_schema_path` | Structured Outputs runner向けに、全object propertyをrequired化した厳格な生成用schema | private job workspaceへ決定論的に生成する。canonical import schemaや受理条件は変更しない |
 | `response` | runnerが作ったprovider-neutralな提案 | response pathは外部private pathでよいが、検証済みbytesだけをcanonical artifactへ公開する |
 
-`prepare --json`の出力をそのままrunnerへのhandoffに使ってください。`request_path`、`skill_path`、`response_schema_path`を推測したり、別jobのrequestと混ぜたりしません。各semantic stageは、対応するSkill snapshotを同じexchangeへ束ねます。
+`prepare --json`の出力をそのままrunnerへのhandoffに使ってください。`request_path`、`skill_path`、`response_schema_path`を推測したり、別jobのrequestと混ぜたりしません。OpenAI/Codexなど、全object propertyの`required`列挙を要求するStructured Outputs runnerでは`structured_output_schema_path`を生成制約に使います。生成後のresponseは従来どおりcanonical `response_schema_path`相当のVEP validatorでimport時に再検証されます。各semantic stageは、対応するSkill snapshotを同じexchangeへ束ねます。
 
 ## Prepare → run → import
 
@@ -41,9 +42,11 @@ flowchart LR
     P[vep ... prepare --json] --> Q[request_path]
     P --> S[skill_path]
     P --> X[response_schema_path]
+    P --> XO[structured_output_schema_path]
     Q --> R[Semantic runner]
     S --> R
     X --> R
+    XO --> R
     R --> O[Provider-neutral response]
     O --> I[vep ... import --response PATH]
     I --> V[Strict deterministic validation]
