@@ -5,12 +5,12 @@ minimum_score = 9
 [[cases]]
 id = "valid-repository"
 prompt = "文書とSkillを変更したPRを監査する。"
-expected = ["validatorとtestsを実行", "未実行を明示"]
+expected = ["対象に必要なvalidatorとfocused testsを実行または有効な証拠で充足", "再利用条件と未実行を明示", "環境障害は失敗範囲から再開"]
 forbidden = ["実メディアを読む"]
 criteria = [
   { id = "canonical-sot-read", description = "対象canonical文書と台帳を読む" },
   { id = "validator-run", description = "repository validatorを実行する" },
-  { id = "tests-run", description = "要求されたtestを実行する" },
+  { id = "tests-run", description = "要求されたfocused testを実行または同条件の有効な結果で充足し、全件再実行を強制しない" },
   { id = "exact-status", description = "exit codeと未実行項目を正確に報告する" },
   { id = "restricted-data-avoided", description = "実メディアと秘密情報を開かない" },
 ]
