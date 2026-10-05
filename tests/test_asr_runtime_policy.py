@@ -581,7 +581,7 @@ def test_container_build_contract_pins_base_and_python_dependencies() -> None:
     )
     assert requirements
     assert all("==" in item and not item.startswith("#") for item in requirements)
-    assert "hatchling==1.31.0" in requirements
+    assert "hatchling==1.32.4" in requirements
     assert "--no-build-isolation --no-deps ." in dockerfile
     assert "12.6.3-cudnn-runtime-ubuntu24.04" in first_line
     assert re.fullmatch(r"[0-9a-f]{64}", container_module._container_contract_identity(Path.cwd()))

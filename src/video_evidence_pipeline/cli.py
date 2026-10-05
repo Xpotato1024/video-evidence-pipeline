@@ -154,9 +154,9 @@ class StructuredTyper(typer.Typer):
         parser_error = None
         try:
             return super().__call__(*args, standalone_mode=False, **kwargs)
-        except click.exceptions.Exit as exc:
+        except typer.Exit as exc:
             exit_code = exc.exit_code
-        except (click.ClickException, click.exceptions.Abort) as exc:
+        except (click.ClickException, typer.Abort) as exc:
             parser_error = exc
         if exit_code is not None:
             raise SystemExit(exit_code)
