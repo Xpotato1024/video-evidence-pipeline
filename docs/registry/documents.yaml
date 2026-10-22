@@ -29,6 +29,15 @@ rules:
   - canonical_for
   - owners
 documents:
+- document_id: VEP-OPS-INSTALLATION
+  path: docs/operations/installation-and-updates.md
+  document_type: operations
+  status: active
+  canonical: true
+  canonical_for: installation-and-updates
+  owners:
+  - Xpotato1024
+  metadata_mode: registry-only
 - document_id: VEP-ADR-INDEX
   path: docs/decisions/README.md
   document_type: decision-index

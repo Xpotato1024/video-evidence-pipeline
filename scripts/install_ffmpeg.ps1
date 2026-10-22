@@ -2,6 +2,7 @@
 param(
     [switch]$VerifyOnly,
     [switch]$AddToUserPath,
+    [switch]$SetUserEnvironment,
     [string]$ArchivePath
 )
 
@@ -12,7 +13,7 @@ $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $manifestPath = Join-Path $repositoryRoot "tools\ffmpeg-toolchain.json"
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 
-if ($VerifyOnly -and ($AddToUserPath -or $ArchivePath)) {
+if ($VerifyOnly -and ($AddToUserPath -or $SetUserEnvironment -or $ArchivePath)) {
     throw "-VerifyOnly cannot be combined with installation options"
 }
 
@@ -23,6 +24,25 @@ if ($manifest.schema_version -ne "1.0" -or $manifest.platform -ne "windows-amd64
 $relativeRoot = $manifest.install.windows_user_local_relative_root -replace "/", "\"
 $installRoot = Join-Path $env:LOCALAPPDATA $relativeRoot
 $binDir = Join-Path $installRoot $manifest.install.bin_relative_path
+
+function Get-Sha256 {
+    param([Parameter(Mandatory)][string]$Path)
+
+    # Use the framework primitive directly: some Windows PowerShell 5.1
+    # installations cannot autoload the Get-FileHash script module.
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $algorithm = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $digest = $algorithm.ComputeHash($stream)
+        } finally {
+            $algorithm.Dispose()
+        }
+        return [System.BitConverter]::ToString($digest).Replace("-", "").ToLowerInvariant()
+    } finally {
+        $stream.Dispose()
+    }
+}
 
 function Assert-RegularFile {
     param([Parameter(Mandatory)][string]$Path)
@@ -62,7 +82,7 @@ function Assert-InstalledToolchain {
         $path = Join-Path $binDir $tool.filename
         Assert-RegularFile -Path $path
 
-        $actualHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+        $actualHash = Get-Sha256 -Path $path
         if ($actualHash -ne $tool.sha256) {
             throw "Installed $toolName SHA-256 does not match the pinned manifest"
         }
@@ -126,7 +146,7 @@ try {
         } else {
             Invoke-WebRequest -Uri $manifest.archive.url -OutFile $archivePath
         }
-        $archiveHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $archiveHash = Get-Sha256 -Path $archivePath
         if ($archiveHash -ne $manifest.archive.sha256) {
             throw "Downloaded FFmpeg archive SHA-256 does not match the pinned manifest"
         }
@@ -139,7 +159,7 @@ try {
             $tool = $manifest.executables.$toolName
             $sourcePath = Join-Path $sourceBinDir $tool.filename
             Assert-RegularFile -Path $sourcePath
-            $actualHash = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
+            $actualHash = Get-Sha256 -Path $sourcePath
             if ($actualHash -ne $tool.sha256) {
                 throw "Extracted $toolName SHA-256 does not match the pinned manifest"
             }
@@ -154,12 +174,19 @@ try {
     if ($VerifyOnly) {
         Write-Output "Pinned FFmpeg toolchain verification passed."
     } else {
-        Ensure-UserToolchainEnvironment
+        if ($SetUserEnvironment -or $AddToUserPath) {
+            Ensure-UserToolchainEnvironment
+        }
         if ($AddToUserPath) {
             Ensure-UserPath
             Write-Output "Pinned FFmpeg toolchain installation passed. Restart the shell before using PATH-based commands."
         } else {
-            Write-Output "Pinned FFmpeg toolchain installation passed. VEP_FFMPEG_BIN_DIR is the runtime selection; User PATH was unchanged."
+            $escapedBinDir = $binDir.Replace("'", "''")
+            Write-Output "Pinned FFmpeg toolchain installation passed. For this PowerShell session run:"
+            Write-Output "`$env:VEP_FFMPEG_BIN_DIR = '$escapedBinDir'"
+            if (-not $SetUserEnvironment) {
+                Write-Output "User environment unchanged. -SetUserEnvironment opts into persistent VEP_FFMPEG_BIN_DIR."
+            }
         }
     }
 } finally {

@@ -18,6 +18,38 @@ env:
   PYTHON_VERSION: "3.12"
 
 jobs:
+  installation:
+    name: installation (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv python install "${{ env.PYTHON_VERSION }}"
+      - run: uv sync --locked --no-dev
+      - run: uv run --no-sync vep doctor --json
+      - name: Build and install complete source bundle
+        run: |
+          uv run --no-sync python scripts/build_source_bundle.py --output dist
+          $record = Get-Content dist/source-bundle.json -Raw | ConvertFrom-Json
+          Expand-Archive -LiteralPath (Join-Path dist $record.archive) -DestinationPath .local/bundle
+          $bundle = (Get-ChildItem .local/bundle -Directory | Select-Object -First 1).FullName
+          uv sync --locked --no-dev --project "$bundle"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          uv run --no-sync --project "$bundle" vep doctor --repository-root "$bundle" --json
+
   lint:
     name: lint
     runs-on: ubuntu-24.04

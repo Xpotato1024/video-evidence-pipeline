@@ -305,6 +305,33 @@ def main(
     """Operate local video evidence jobs."""
 
 
+@app.command("doctor")
+def doctor(
+    repository_root: Annotated[Path, typer.Option("--repository-root")] = Path("."),
+    media: Annotated[
+        bool, typer.Option("--media", help="Also probe local FFmpeg capabilities.")
+    ] = False,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Check this source installation without changing jobs or downloading tools."""
+    from video_evidence_pipeline.diagnostics import diagnose_installation
+
+    report = diagnose_installation(repository_root, media=media)
+    if json_output:
+        _emit(report, json_output=True)
+    else:
+        typer.echo(f"VEP {report['vep_version']} installation checks ({report['mode']})")
+        for check in report["checks"]:
+            if check["ok"]:
+                typer.echo(f"OK {check['name']}")
+            else:
+                typer.echo(f"FAIL {check['name']}: {check['code']} — {check['remedy']}")
+        typer.echo(f"Lock SHA-256: {report['lock_sha256'] or 'unavailable'}")
+        typer.echo(f"ASR: {report['asr']}")
+    if not report["ok"]:
+        raise typer.Exit(code=2)
+
+
 @job_app.command("init")
 def job_init(
     job_id: str,

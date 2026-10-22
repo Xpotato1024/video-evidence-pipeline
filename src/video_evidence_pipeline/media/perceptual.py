@@ -6,6 +6,7 @@ import math
 import stat
 import struct
 import zlib
+from collections.abc import Iterator
 from pathlib import Path
 
 from video_evidence_pipeline.errors import integrity_error
@@ -25,7 +26,45 @@ def _paeth(left: int, above: int, upper_left: int) -> int:
     return upper_left
 
 
-def _decode_png_grayscale(payload: bytes, *, maximum_pixels: int) -> tuple[int, int, bytes]:
+def _png_scanlines(compressed: bytearray, row_size: int, height: int) -> Iterator[bytearray]:
+    """Inflate one bounded row at a time, checking the complete zlib stream."""
+    decompressor = zlib.decompressobj()
+    offset = 0
+    pending: bytes | memoryview = b""
+
+    def take(limit: int) -> bytes:
+        nonlocal offset, pending
+        if not pending and offset < len(compressed):
+            pending = memoryview(compressed)[offset : offset + 64 * 1024]
+            offset += len(pending)
+        if not pending:
+            raise integrity_error("FRAME_IMAGE_INVALID", "PNG decoded size is invalid")
+        output = decompressor.decompress(pending, limit)
+        pending = decompressor.unconsumed_tail
+        return output
+
+    try:
+        for _ in range(height):
+            scanline = bytearray()
+            while len(scanline) < row_size:
+                if decompressor.eof:
+                    raise integrity_error("FRAME_IMAGE_INVALID", "PNG decoded size is invalid")
+                scanline.extend(take(row_size - len(scanline)))
+            yield scanline
+        # Consume the trailer with a one-byte overflow guard. No extra pixel,
+        # concatenated stream or trailing compressed data may be accepted.
+        while not decompressor.eof:
+            if take(1):
+                raise integrity_error("FRAME_IMAGE_INVALID", "PNG decoded size is invalid")
+        if pending or decompressor.unused_data or offset != len(compressed):
+            raise integrity_error("FRAME_IMAGE_INVALID", "PNG decoded size is invalid")
+    except zlib.error:
+        raise integrity_error("FRAME_IMAGE_INVALID", "PNG payload is malformed") from None
+
+
+def _decode_png_grayscale(
+    payload: bytes, *, maximum_pixels: int, sample_size: tuple[int, int] | None = None
+) -> tuple[int, int, bytes]:
     if not payload.startswith(_PNG_SIGNATURE):
         raise integrity_error("FRAME_IMAGE_INVALID", "extracted frame is not a PNG image")
     offset = len(_PNG_SIGNATURE)
@@ -69,31 +108,22 @@ def _decode_png_grayscale(payload: bytes, *, maximum_pixels: int) -> tuple[int, 
         raise integrity_error("FRAME_IMAGE_INVALID", "PNG structure is incomplete")
     channels = {0: 1, 2: 3, 4: 2, 6: 4}[color_type]
     row_bytes = width * channels
-    expected_size = height * (row_bytes + 1)
-    try:
-        decompressor = zlib.decompressobj()
-        decoded = decompressor.decompress(bytes(compressed), expected_size + 1)
-    except zlib.error:
-        raise integrity_error("FRAME_IMAGE_INVALID", "PNG payload is malformed") from None
-    if (
-        len(decoded) != expected_size
-        or not decompressor.eof
-        or decompressor.unconsumed_tail
-        or decompressor.unused_data
-    ):
-        raise integrity_error("FRAME_IMAGE_INVALID", "PNG decoded size is invalid")
-    grayscale = bytearray(width * height)
+    output_width, output_height = sample_size or (width, height)
+    # Reconstruct every row (including unsampled rows used by PNG filters), but
+    # convert only the exact nearest-neighbour pixels consumed by the pHash.
+    columns = [min(width - 1, column * width // output_width) for column in range(output_width)]
+    rows: dict[int, list[int]] = {}
+    for row in range(output_height):
+        rows.setdefault(min(height - 1, row * height // output_height), []).append(row)
+    grayscale = bytearray(output_width * output_height)
     previous = bytearray(row_bytes)
-    decoded_offset = 0
-    output_offset = 0
-    for _row in range(height):
-        filter_type = decoded[decoded_offset]
-        decoded_offset += 1
-        current = bytearray(decoded[decoded_offset : decoded_offset + row_bytes])
-        decoded_offset += row_bytes
+    for _row, scanline in enumerate(_png_scanlines(compressed, row_bytes + 1, height)):
+        filter_type = scanline[0]
+        current = scanline[1:]
         if filter_type > 4:
             raise integrity_error("FRAME_IMAGE_INVALID", "PNG row filter is invalid")
-        for index in range(row_bytes):
+        # Filter 0 already contains reconstructed bytes; avoid a Python loop.
+        for index in range(row_bytes) if filter_type else ():
             left = current[index - channels] if index >= channels else 0
             above = previous[index]
             upper_left = previous[index - channels] if index >= channels else 0
@@ -105,17 +135,20 @@ def _decode_png_grayscale(payload: bytes, *, maximum_pixels: int) -> tuple[int, 
                 current[index] = (current[index] + ((left + above) // 2)) & 0xFF
             elif filter_type == 4:
                 current[index] = (current[index] + _paeth(left, above, upper_left)) & 0xFF
-        for column in range(width):
+        sample = bytearray()
+        for column in columns if _row in rows else ():
             pixel = column * channels
             if color_type in {0, 4}:
                 luminance = current[pixel]
             else:
                 red, green, blue = current[pixel : pixel + 3]
                 luminance = (299 * red + 587 * green + 114 * blue + 500) // 1000
-            grayscale[output_offset] = luminance
-            output_offset += 1
+            sample.append(luminance)
+        for output_row in rows.get(_row, ()):
+            output_offset = output_row * output_width
+            grayscale[output_offset : output_offset + output_width] = sample
         previous = current
-    return width, height, bytes(grayscale)
+    return output_width, output_height, bytes(grayscale)
 
 
 def _resize_nearest(
@@ -153,7 +186,9 @@ def perceptual_hash_png(path: Path, *, maximum_bytes: int, maximum_pixels: int) 
         raise integrity_error("FRAME_IMAGE_INVALID", "extracted frame could not be read") from None
     if len(payload) != size:
         raise integrity_error("FRAME_IMAGE_INVALID", "extracted frame changed while being read")
-    width, height, grayscale = _decode_png_grayscale(payload, maximum_pixels=maximum_pixels)
+    width, height, grayscale = _decode_png_grayscale(
+        payload, maximum_pixels=maximum_pixels, sample_size=(32, 32)
+    )
     values = _resize_nearest(
         grayscale,
         width,
