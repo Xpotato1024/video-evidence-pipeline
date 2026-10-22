@@ -78,6 +78,46 @@ def _install_root(local_app_data: Path) -> Path:
     return local_app_data / relative
 
 
+@pytest.mark.parametrize(
+    ("options", "expected_changes"),
+    [
+        ((), []),
+        (("-SetUserEnvironment",), ["saved-selection"]),
+        (("-AddToUserPath",), ["saved-selection", "saved-path"]),
+    ],
+)
+def test_installer_persistence_requires_explicit_opt_in(tmp_path, options, expected_changes):
+    """Exercise the install completion flow without ever writing User settings."""
+    if os.name != "nt" or shutil.which("powershell.exe") is None:
+        pytest.skip("Windows PowerShell is required")
+    installer = INSTALLER_PATH.read_text(encoding="utf-8")
+    completion = "$temporaryRoot = $null" + installer.split("$temporaryRoot = $null", 1)[1]
+    root = str(tmp_path).replace("'", "''")
+    harness = tmp_path / "completion.ps1"
+    harness.write_text(
+        "param([switch]$VerifyOnly, [switch]$AddToUserPath, [switch]$SetUserEnvironment)\n"
+        "$ErrorActionPreference = 'Stop'\n"
+        f"$installRoot = '{root}'\n$binDir = '{root}'\n"
+        "function Assert-InstalledToolchain {}\n"
+        "function Ensure-UserToolchainEnvironment { Write-Output 'saved-selection' }\n"
+        "function Ensure-UserPath { Write-Output 'saved-path' }\n" + completion,
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-File", str(harness), *options],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    changes = [line for line in result.stdout.splitlines() if line.startswith("saved-")]
+    assert changes == expected_changes
+    if not options:
+        assert "$env:VEP_FFMPEG_BIN_DIR = '" in result.stdout
+        assert "User environment unchanged" in result.stdout
+
+
 WINDOWS_POWERSHELL = pytest.mark.skipif(
     os.name != "nt" or shutil.which("powershell.exe") is None,
     reason="Windows PowerShell is required for installer smoke tests",

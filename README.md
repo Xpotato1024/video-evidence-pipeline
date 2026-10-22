@@ -4,6 +4,13 @@
 
 VEPの出力は「AIが書いた文章」だけではありません。source、transcript、evidence、要件、監査、承認の関係を保存したprivate workspaceから、human reviewへ渡せるMarkdownを生成します。
 
+## Install and check
+
+初回導入は[導入・配布・更新ガイド](docs/operations/installation-and-updates.md)から始めてください。
+承認済みrevisionのrepository一式で `uv sync --locked --no-dev --python 3.12` を実行し、
+`uv run --no-sync vep doctor --json` で確認します。media経路だけ `--media` を追加します。
+supplied transcript経路にFFmpeg・Docker・ASR modelは不要です。wheel単体はrepository資源を含む導入の代替にはなりません。
+
 ## What can I do?
 
 - 認可済みのlocal／network sourceを取得し、raw sourceをimmutableに保つ

@@ -27,8 +27,10 @@ GitHub Actionsで次のcheckを実装し、PRと`main`へのpushで実行しま�
 - `tests`
 - `repository-validation`
 - `asr-container-build`
+- `installation (ubuntu-24.04)` / `installation (windows-2025)`
 
-全jobは`ubuntu-24.04`、Python 3.12、固定したuv version、commit済み`uv.lock`を使用し、
+installationはUbuntu/Windowsのmatrixで完全source bundleの生成・展開・`--no-dev`導入とread-only doctorを確認します。
+その他のjobは`ubuntu-24.04`、全jobはPython 3.12、固定したuv version、commit済み`uv.lock`を使用し、
 `GITHUB_TOKEN`は`contents: read`だけを持ちます。
 通常のhost jobは`uv sync --locked`でruntime + devだけを同期し、ASR container groupを
 hostへ導入しないことをimport discoveryで検査します。container build jobのhost側は

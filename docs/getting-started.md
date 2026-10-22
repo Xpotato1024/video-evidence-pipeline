@@ -23,6 +23,8 @@ related_documents:
 
 ## 1. 用意するもの
 
+初回のclone・固定revision・OS別依存・診断・更新手順は[Installation and updates](operations/installation-and-updates.md)に従ってください。operator環境は `uv sync --locked --no-dev` で用意し、以降の実行例の `uv run` を `uv run --no-sync` として実行するとdev依存の再同期を避けられます。
+
 - Python 3.12とlock済みの`uv`
 - VEPが受け付ける認可済みsource
 - local処理を行う権限の明示確認

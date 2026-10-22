@@ -138,7 +138,8 @@ bytesはimmutableのままですが、SRT／WebVTTのpresentationやcontrol mark
 Windows local execution uses the versioned full build described by
 `tools/ffmpeg-toolchain.json`; `scripts/install_ffmpeg.ps1` verifies the
 archive SHA-256 and both executable SHA-256 values before installation. The
-installer sets `VEP_FFMPEG_BIN_DIR`, and the runner uses that directory before
+installer prints a process-local `VEP_FFMPEG_BIN_DIR` command; persistent selection
+requires `-SetUserEnvironment` or `-AddToUserPath`. The runner uses that directory before
 falling back to PATH. The existing capability discovery and per-run
 executable SHA-256 pin remain mandatory, so an unexpected replacement still
 fails closed.

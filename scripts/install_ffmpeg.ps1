@@ -2,6 +2,7 @@
 param(
     [switch]$VerifyOnly,
     [switch]$AddToUserPath,
+    [switch]$SetUserEnvironment,
     [string]$ArchivePath
 )
 
@@ -12,7 +13,7 @@ $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $manifestPath = Join-Path $repositoryRoot "tools\ffmpeg-toolchain.json"
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 
-if ($VerifyOnly -and ($AddToUserPath -or $ArchivePath)) {
+if ($VerifyOnly -and ($AddToUserPath -or $SetUserEnvironment -or $ArchivePath)) {
     throw "-VerifyOnly cannot be combined with installation options"
 }
 
@@ -154,12 +155,19 @@ try {
     if ($VerifyOnly) {
         Write-Output "Pinned FFmpeg toolchain verification passed."
     } else {
-        Ensure-UserToolchainEnvironment
+        if ($SetUserEnvironment -or $AddToUserPath) {
+            Ensure-UserToolchainEnvironment
+        }
         if ($AddToUserPath) {
             Ensure-UserPath
             Write-Output "Pinned FFmpeg toolchain installation passed. Restart the shell before using PATH-based commands."
         } else {
-            Write-Output "Pinned FFmpeg toolchain installation passed. VEP_FFMPEG_BIN_DIR is the runtime selection; User PATH was unchanged."
+            $escapedBinDir = $binDir.Replace("'", "''")
+            Write-Output "Pinned FFmpeg toolchain installation passed. For this PowerShell session run:"
+            Write-Output "`$env:VEP_FFMPEG_BIN_DIR = '$escapedBinDir'"
+            if (-not $SetUserEnvironment) {
+                Write-Output "User environment unchanged. -SetUserEnvironment opts into persistent VEP_FFMPEG_BIN_DIR."
+            }
         }
     }
 } finally {
