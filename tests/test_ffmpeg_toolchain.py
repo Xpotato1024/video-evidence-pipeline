@@ -35,7 +35,7 @@ def test_ffmpeg_installer_uses_the_manifest_and_no_moving_latest_alias() -> None
 
     assert "tools\\ffmpeg-toolchain.json" in installer
     assert "latest" not in installer.lower()
-    assert "Get-FileHash" in installer
+    assert "System.Security.Cryptography.SHA256" in installer
     assert "Expand-Archive" in installer
     assert "AddToUserPath" in installer
     assert "VEP_FFMPEG_BIN_DIR" in installer
