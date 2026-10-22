@@ -45,6 +45,8 @@ def test_source_bundle_contains_hidden_runtime_contract_and_commit_identity(tmp_
     assert record["sha256"] == hashlib.sha256(archive.read_bytes()).hexdigest()
     assert json.loads((output / "source-bundle.json").read_text()) == record
     with zipfile.ZipFile(archive) as bundle:
+        license_path = f"video-evidence-pipeline-{record['revision']}/LICENSE"
+        assert bundle.read(license_path) == (root / "LICENSE").read_bytes()
         assert any(name.endswith("/.agents/skill-system.toml") for name in bundle.namelist())
         assert not any(".local/" in name or "/.git/" in name for name in bundle.namelist())
     second = build(root, tmp_path / "second")

@@ -16,6 +16,7 @@ import zipfile
 from pathlib import Path
 
 REQUIRED_FILES = (
+    "LICENSE",
     "pyproject.toml",
     "uv.lock",
     "src/video_evidence_pipeline/cli.py",

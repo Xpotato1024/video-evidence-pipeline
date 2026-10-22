@@ -27,7 +27,7 @@ git rev-parse HEAD
 ```
 
 Replace `FULL_REVIEWED_COMMIT_ID` with an owner-approved 40-character commit ID.
-Repository access is required. Do not paste tokens into clone URLs. `uv sync` may
+Public source can be cloned without credentials. Do not paste tokens into clone URLs. `uv sync` may
 download Python and packages; it does not download FFmpeg or an ASR model.
 `--no-dev` avoids installing pytest/ruff on an operator machine. Use
 `uv sync --locked` for development. Keep `--no-sync` on operational `uv run`
@@ -70,7 +70,7 @@ FFmpeg options. ASR image smoke and GPU preflight are separate, explicit command
 The first distribution format is a commit-addressed **source bundle** plus checksum,
 not an all-in-one executable. `python scripts/build_source_bundle.py --output dist`
 requires a clean committed checkout and uses `git archive` of that exact commit.
-It includes tracked repository resources and records commit ID, archive SHA-256
+It includes tracked repository resources and `LICENSE`, and records commit ID, archive SHA-256
 and lock SHA-256 in `source-bundle.json` / `SHA256SUMS`. It contains no environment,
 model, FFmpeg executable or job. Extract it to a new directory, verify the checksum,
 then run the same sync/doctor commands. Git is needed for building, not for running
@@ -81,10 +81,12 @@ an explicit resource-root contract, OS/architecture tests, signing, dependency a
 license inventory, update/rollback design, and a measured reduction in operator cost.
 Do not advertise it as portable simply because `vep --help` works.
 
-As of the baseline inspection (2026-10-22), GitHub has no VEP Release, no LICENSE
-file, and one CI workflow with no deploy/publish job. This work does not assign a
-license, publish a package, tag a version or release binaries. Before owner-approved
-release: choose VEP licensing, separate package/contract versions, review dependency
+VEP source is licensed under [AGPL-3.0-only](../../LICENSE). Keep `LICENSE` with
+distributed source and package metadata. Third-party dependencies retain their own
+terms; VEP's license does not grant rights to redistribute them under AGPL alone.
+As of 2026-10-22, GitHub has no VEP Release, and the CI workflow has no deploy/publish
+job. This work does not publish a package, tag a version or release binaries. Before
+owner-approved release: separate package/contract versions, review dependency
 notices, validate source bundle installation on each claimed OS, run the required
 synthetic E2E and ASR build gate, and publish the reviewed checksums with release notes.
 This is VEP's own CI; study-2026-fall `VEP_REQUIRED` is a downstream policy.
