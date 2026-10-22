@@ -138,6 +138,13 @@ GPU VRAM and full pipeline execution. It cannot substantiate ASR or end-to-end g
 2026-10-22 local comparison against main `6d1244616af34d3091828f47e156b4e4c595698a`,
 Windows x64 / Python 3.12.13, three alternating fresh-process samples per implementation:
 
+Fixtures are deterministic, non-interlaced 8-bit RGB (PNG color type 2), with one
+IDAT stream compressed at zlib's default level. Channel bytes follow a repeating
+arithmetic pattern, not photographic/noisy content. Every row uses the table's
+single filter type. The 1920×1080 filter-0 case favors the direct-copy path; it is
+not a representative video-frame mix or a worst-case filter-4 timing. Alpha,
+palette and alternate bit depths were not benchmarked.
+
 | RGB fixture | Median seconds, old → new | Median process peak RSS MiB, old → new |
 | --- | --- | --- |
 | 320×180, PNG filter 0 | 0.05719 → 0.00945 | 22.73 → 22.30 |
@@ -152,6 +159,13 @@ load/power state were not isolated. No concurrent VEP build/test ran during timi
 Filter 4 still reconstructs every byte in Python. Quality settings, candidate
 selection, timestamps and media output bytes are unchanged. CRC, decoded-length,
 trailing-stream, filter and pixel-count checks remain mandatory.
+
+The existing decoder contract remains non-interlaced 8-bit grayscale, RGB,
+grayscale-alpha and RGBA (types 0/2/4/6). Alpha is ignored for luminance exactly
+as before; this does not introduce alpha compositing. Palette, lower/16-bit depth
+and interlaced PNG remain rejected. Regression tests cover all five filters,
+mixed-filter rows, split IDAT, alpha variation, file/pixel limits and corrupt
+headers/chunks/zlib streams. Unsupported formats are not newly advertised.
 
 Before changing media quality, frame selection, beam size or model, use an agreed
 local fixture and compare the same input, output and quality gates. Never send real

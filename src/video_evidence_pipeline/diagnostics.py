@@ -11,7 +11,7 @@ from typing import Any
 
 from video_evidence_pipeline import __version__
 from video_evidence_pipeline.domain.hashing import sha256_file
-from video_evidence_pipeline.errors import VepError
+from video_evidence_pipeline.errors import VepError, state_error
 from video_evidence_pipeline.semantic.skills import load_skill_snapshot
 
 _SEMANTIC_SKILLS = (
@@ -81,9 +81,13 @@ def diagnose_installation(repository_root: Path, *, media: bool = False) -> dict
     for skill in _SEMANTIC_SKILLS:
         try:
             # Loader only reads: no JobWorkspace is created by this diagnostic.
-            load_skill_snapshot(
+            snapshot = load_skill_snapshot(
                 SimpleNamespace(jobs_root=root / ".local/jobs"), skill, allowed=frozenset({skill})
             )
+            if snapshot.lifecycle != "active":
+                raise state_error(
+                    "DRAFT_SKILL_FORBIDDEN", "semantic Skill must be active for production use"
+                )
         except VepError as exc:
             record(
                 skill,

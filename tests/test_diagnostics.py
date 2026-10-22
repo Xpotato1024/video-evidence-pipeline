@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from typer.testing import CliRunner
 
@@ -62,3 +63,20 @@ def test_doctor_success_json_cli():
     result = CliRunner().invoke(app, ["doctor", "--repository-root", str(ROOT), "--json"])
     assert result.exit_code == 0, result.stdout
     assert json.loads(result.stdout)["ok"]
+
+
+def test_doctor_rejects_draft_skill_even_when_snapshot_loader_accepts_it(monkeypatch):
+    from video_evidence_pipeline import diagnostics
+
+    monkeypatch.setattr(
+        diagnostics,
+        "load_skill_snapshot",
+        lambda *args, **kwargs: SimpleNamespace(lifecycle="draft"),
+    )
+    result = CliRunner().invoke(app, ["doctor", "--repository-root", str(ROOT), "--json"])
+    assert result.exit_code == 2
+    report = json.loads(result.stdout)
+    assert report["ok"] is False
+    failures = [check for check in report["checks"] if not check["ok"]]
+    assert len(failures) == 6
+    assert all(check["code"] == "DRAFT_SKILL_FORBIDDEN" for check in failures)
