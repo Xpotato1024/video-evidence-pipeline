@@ -29,7 +29,7 @@ dev = [
 asr-container = [
   "faster-whisper==1.2.1",
   "hatchling==1.32.4",
-  "huggingface-hub==1.28.0",
+  "huggingface-hub==2.2.0",
 ]
 
 [tool.pytest.ini_options]
