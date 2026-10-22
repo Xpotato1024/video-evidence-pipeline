@@ -17,7 +17,7 @@ WORKDIR /opt/vep
 COPY containers/asr/requirements.lock /tmp/asr-requirements.lock
 RUN python3 -m pip install --break-system-packages --no-cache-dir -r /tmp/asr-requirements.lock
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 COPY config ./config
 RUN python3 -m pip install --break-system-packages --no-cache-dir --no-build-isolation --no-deps .
