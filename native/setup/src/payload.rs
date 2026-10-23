@@ -1,4 +1,4 @@
-use crate::Result;
+use crate::{Result, operation::Operation};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -6,6 +6,7 @@ use std::{
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
+    time::Instant,
 };
 
 pub fn digest(bytes: &[u8]) -> String {
@@ -190,10 +191,21 @@ impl Input {
             root: root.to_path_buf(),
         })
     }
-    pub fn verify_copy(&self, destination: Option<&Path>) -> Result<()> {
+    pub fn verify_copy_with(
+        &self,
+        destination: Option<&Path>,
+        operation: &Operation,
+    ) -> Result<()> {
         // Inventory bounds the only files used by the isolated worker. Unlisted
         // input files are never copied. Immutable release dirs are checked below.
-        for entry in &self.manifest.files {
+        let phase = if destination.is_some() {
+            "STAGE"
+        } else {
+            "VERIFY"
+        };
+        operation.progress(phase, 0, self.manifest.files.len() as u64)?;
+        for (index, entry) in self.manifest.files.iter().enumerate() {
+            operation.check()?;
             let source = self.root.join(&entry.path);
             no_links(&source)?;
             let mut input = fs::File::open(source).map_err(|_| "PAYLOAD_UNAVAILABLE")?;
@@ -219,6 +231,7 @@ impl Input {
             let mut count = 0;
             let mut hash = Sha256::new();
             loop {
+                operation.check()?;
                 let n = input.read(&mut buffer).map_err(|_| "PAYLOAD_UNAVAILABLE")?;
                 if n == 0 {
                     break;
@@ -239,11 +252,21 @@ impl Input {
             if let Some(file) = output {
                 file.sync_all().map_err(|_| "STORAGE_REQUIRED")?;
             }
+            if (index + 1) % 64 == 0 || index + 1 == self.manifest.files.len() {
+                operation.progress(phase, (index + 1) as u64, self.manifest.files.len() as u64)?;
+            }
         }
         Ok(())
     }
-    pub fn verify_installed(&self) -> Result<()> {
-        self.verify_copy(None)?;
+    pub fn verify_installed_with(&self, operation: &Operation) -> Result<()> {
+        self.verify_installed_profile_with(operation).map(|_| ())
+    }
+    pub fn verify_installed_profile_with(&self, operation: &Operation) -> Result<(f64, f64)> {
+        let hash_start = Instant::now();
+        self.verify_copy_with(None, operation)?;
+        let hash_ms = hash_start.elapsed().as_secs_f64() * 1000.0;
+        let inventory_start = Instant::now();
+        operation.progress("INVENTORY", 0, self.manifest.files.len() as u64)?;
         let expected: BTreeSet<_> = self
             .manifest
             .files
@@ -257,8 +280,10 @@ impl Input {
             dir: &Path,
             found: &mut BTreeSet<String>,
             expected_dirs: &BTreeSet<String>,
+            operation: &Operation,
         ) -> Result<()> {
             for child in fs::read_dir(dir).map_err(|_| "PAYLOAD_UNAVAILABLE")? {
+                operation.check()?;
                 let path = child.map_err(|_| "PAYLOAD_UNAVAILABLE")?.path();
                 no_links(&path)?;
                 let relative = path
@@ -271,7 +296,7 @@ impl Input {
                     if !expected_dirs.contains(&relative) {
                         return Err("PAYLOAD_INVENTORY_MISMATCH");
                     }
-                    walk(root, &path, found, expected_dirs)?;
+                    walk(root, &path, found, expected_dirs, operation)?;
                 } else if path.is_file() {
                     found.insert(relative);
                 } else {
@@ -284,11 +309,17 @@ impl Input {
             Ok(())
         }
         let mut found = BTreeSet::new();
-        walk(&self.root, &self.root, &mut found, &expected_dirs)?;
+        walk(
+            &self.root,
+            &self.root,
+            &mut found,
+            &expected_dirs,
+            operation,
+        )?;
         if found != expected {
             return Err("PAYLOAD_INVENTORY_MISMATCH");
         }
-        Ok(())
+        Ok((hash_ms, inventory_start.elapsed().as_secs_f64() * 1000.0))
     }
 }
 

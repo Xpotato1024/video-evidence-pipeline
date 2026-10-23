@@ -1,0 +1,129 @@
+{
+  "schema": "vep.native-gui-evidence.v1",
+  "base_commit": "1a2b9ff9df238d78fea7df60a544d4c181d237f6",
+  "target": "x86_64-pc-windows-msvc",
+  "development_only": true,
+  "publisher_authenticated": false,
+  "binaries": {
+    "normal_engine": {
+      "bytes": 809984,
+      "sha256": "1c7a2a3e2dee27198dcc3dcbb42859ba904a6384e892df5ba31731bb8218d8e6",
+      "imports": [
+        "KERNEL32.dll",
+        "api-ms-win-core-synch-l1-2-0.dll",
+        "ntdll.dll"
+      ]
+    },
+    "normal_gui": {
+      "bytes": 523776,
+      "sha256": "7ecde68704564ceab5b214d7e680b43bc4ba8dd23cd5017a6e3f83e3afbc1cfc",
+      "imports": [
+        "USER32.dll",
+        "KERNEL32.dll",
+        "GDI32.dll",
+        "api-ms-win-core-synch-l1-2-0.dll",
+        "ntdll.dll"
+      ]
+    },
+    "tested_fault_engine": {
+      "bytes": 811520,
+      "sha256": "edbb3be22913ac65f19f3971f11245d6bf2d8b47371f09ac06a3dbf53f98939b",
+      "imports": [
+        "KERNEL32.dll",
+        "api-ms-win-core-synch-l1-2-0.dll",
+        "ntdll.dll"
+      ]
+    },
+    "tested_fault_gui": {
+      "bytes": 524800,
+      "sha256": "f54b1f6ebd5b209997caa795638a6896cd690cb2821343d79e663a7b24d33e78",
+      "imports": [
+        "USER32.dll",
+        "KERNEL32.dll",
+        "GDI32.dll",
+        "api-ms-win-core-synch-l1-2-0.dll",
+        "ntdll.dll"
+      ]
+    }
+  },
+  "source_sha256": {
+    "native/setup/src/bin/vep-setup-gui.rs": "47941b4a3c655d82e71013f56ff0627a3c6cd347a27123a9768127a1d84ed21b",
+    "native/setup/src/candidate.rs": "d6fd0a75ce67dc983cc024b891fc6d689fd57312c5de924c70665b23d5b052c4",
+    "native/setup/src/gui_client.rs": "f7b5c9e7ad06510be5aac17b43878223adbc3587a31e7f46b8d427c6bd77a169",
+    "native/setup/src/gui_windows.rs": "f8b718885425ae378dc2c3d633f70ca398da284a002b34a6b206f8724d107492",
+    "native/setup/src/main.rs": "8a2ae26a0a73d2e9b3b78589355086d062ab517dca3c0b0ef63ff1c21244ef9a",
+    "native/setup/src/operation.rs": "fdfe2a1e3f15fb62f786bf7da8d8d85cbae4bcf7f467d0c1ebc0fb6d278eca85",
+    "native/setup/src/payload.rs": "7c6accee78ae7b10fb6f5f6cc0710c565379601d30d5b75a719d3dad7c1702e8",
+    "native/setup/src/state.rs": "192019805afcc31820b1bf3e72545c783e20ab072a2ed93f4104bffc16af0fa0",
+    "native/setup/build.rs": "c5152b6658e3a4bc6ff6a5e1c8b02635dc2fb3b5d12f8c9f4b662c4539899c93",
+    "native/setup/gui.manifest": "300cbf8d4bb8dea81cd5edcf3c23007b3e785d4bcd702c836970b7887c1f98e1",
+    "native/setup/Cargo.toml": "2d237c19a1d6393108416789308d8c8013d4ad5fa8c8369cc855eca12596e107",
+    "native/setup/Cargo.lock": "fc5132012811d051b3e28c0413e5f62a43ab2223b7b1d7181c88a5a346e42f6d",
+    "native/worker_bootstrap.py": "2e5c2e496733886a3f123b721f21f2af234beea74ae0d0f6362a1b6f564bf7e5",
+    "scripts/profile_native_launch.py": "36ab70ba75835d21dbb2723db003fb3376f270486c33aa03bc42433fa16b2faa",
+    "tests/test_setup_gui.py": "be3633ec36e90bf0c8b5d9ae63e211108fbfecb4ab735a91fe229a9abab143c8",
+    "tests/test_setup_streaming.py": "ac7548aeffc44d2e0aefe12ab5ecd107d6e29ca9e8afd2442c4d2bd0b51d2bf8",
+    "tests/fixtures/setup_protocol_peer.rs": "b2d1b27395f1a9489b0abfa93b5ae48698a4b36e75dc4718f65b7256ed1995c2"
+  },
+  "build": "RUSTFLAGS=\"-C target-feature=+crt-static\" cargo build --release --offline --manifest-path native/setup/Cargo.toml -j 1 (tested fault binaries add --features fault-injection)",
+  "profile_command": "python scripts/profile_native_launch.py --engine ../native-build/setup-gui/release/vep-setup.exe --payload ../native-build/payload-gui-profile --sandbox ../native-tests/profile-phase-final --output ../evidence/native-launch-costs-final.json --samples 5",
+  "rustc": "rustc 1.94.1 (e408947bf 2026-03-25)\nbinary: rustc\ncommit-hash: e408947bfd200af42db322daf0fadfe7e26d3bd1\ncommit-date: 2026-03-25\nhost: x86_64-pc-windows-msvc\nrelease: 1.94.1\nLLVM version: 21.1.8",
+  "tests": {
+    "native-streaming-v1.xml": {
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "107.009"
+    },
+    "native-normal-regressions.xml": {
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "84.377"
+    },
+    "native-gui-final-summary.xml": {
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "47.218"
+    },
+    "native-id-bounds.xml": {
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.147"
+    }
+  },
+  "normal_rust_unit_tests": {
+    "engine": 3,
+    "gui_client": 2
+  },
+  "keyboard": {
+    "schema": "vep.gui-keyboard-smoke.v1",
+    "native_tab_root_to_manifest": true,
+    "native_space_confirmation": true,
+    "tab_confirmation_to_apply": true,
+    "dpi": 96,
+    "screenshot_dimensions": [
+      900,
+      740
+    ],
+    "limits": [
+      "programmatically posted native keys; not physical keyboard or screen-reader certification",
+      "other DPI/monitors not tested; no settings changed",
+      "no apply in screenshot scenario"
+    ]
+  },
+  "scope": [
+    "primary executed tests; independent reviewer read code/results, did not execute",
+    "streaming v1 valid-request regression reused: operation/payload/state logic unchanged; final main adds early invalid-ID rejection only",
+    "normal regression exercises candidate child+grandchild cancellation and old/new pinned jobs",
+    "GUI final summary run includes full private runtime, Japanese path, init/plan/confirmation/update/rollback/cancel/crash/repair/stale-plan and malformed/flooding peer",
+    "no full pytest, real ASR/GPU, standard-user VM, signing or cross-OS/DPI certification",
+    "no push/PR/merge/release/distribution/production installation or persistent settings changes"
+  ]
+}

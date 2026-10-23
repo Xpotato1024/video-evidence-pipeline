@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+import time
 from pathlib import Path
 
 
 def main() -> None:
+    started = time.perf_counter()
     release = Path(__file__).resolve().parent.parent
     # -I -S and the embedded ._pth exclude cwd, user site and PYTHONPATH.
     sys.path[:0] = [str(release / "payload" / "src"), str(release / "packages")]
@@ -18,6 +21,8 @@ def main() -> None:
         RuntimeContext,
         use_runtime,
     )
+
+    imports_finished = time.perf_counter()
 
     path = Path(sys.argv[1])
     if path.stat().st_size > 65536:
@@ -45,9 +50,30 @@ def main() -> None:
         (Path(context["app_root"]), Path(context["state_root"])),
     )
     with use_runtime(runtime):
+        context_finished = time.perf_counter()
         # StructuredTyper may return a nonzero Click exit code in embedded mode.
         # Console entrypoints call sys.exit(app()); preserve that exact contract.
-        raise SystemExit(app(args=sys.argv[2:], prog_name="vep"))
+        try:
+            raise SystemExit(app(args=sys.argv[2:], prog_name="vep"))
+        finally:
+            if os.environ.get("VEP_PROFILE_LAUNCH") == "1":
+                print(
+                    json.dumps(
+                        {
+                            "schema": "vep.launch-profile.v1",
+                            "scope": "worker",
+                            "timings": {
+                                "bootstrap_imports_ms": (imports_finished - started) * 1000,
+                                "context_ms": (context_finished - imports_finished) * 1000,
+                                "cli_dispatch_and_doctor_ms": (
+                                    time.perf_counter() - context_finished
+                                )
+                                * 1000,
+                            },
+                        }
+                    ),
+                    file=sys.stderr,
+                )
 
 
 if __name__ == "__main__":

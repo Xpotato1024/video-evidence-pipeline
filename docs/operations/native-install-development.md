@@ -43,7 +43,7 @@ OS/GUI/保守判断:
 | --- | --- |
 | Rust | MSVC toolchainでWindows x64 build。Serde/SHA-2とその固定transitive依存をCargo.lockで管理。CRT・署名・OS APIの実物確認が必要 |
 | Go | Windows amd64 portable toolchainでbuild。PoCに第三者Go moduleなし。Go runtime/GCを含む。cgoを使うGUIなら別toolchain条件になる |
-| GUI共有 | versioned UTF-8 JSONLのplan/apply/status/errorを同engineへ委譲できる。現実装は1request/process。GUI、progress、取消、accessibilityは未実装 |
+| GUI共有 | versioned UTF-8 JSONLのplan/apply/status/errorを同engineへ委譲。次段階で開発Win32 GUI・opt-in progress/取消を追加。accessibility全体の受入は残る |
 | 保守 | Rustの追加crate/SBOMとOS adapter保守、Goのstrict parser追加、二言語構成のbuild管理を別々に評価。LOCや空mainの速度を保守工数とみなさない |
 | 対応OS | 新engineの動作検証はWindows x64のみ。Rust/Goのcompiler target一覧を製品対応一覧にしない。Linux/macOS/ARMと署名実機は後続gate |
 
@@ -186,6 +186,115 @@ path長設定や既存source codeを変更して隠していない。
 directory深さ/件数、recovery orphan binding、ASR境界、export/上書き保護の指摘を修正した。
 レビュー原本とJUnitはローカル作業領域`evidence/`に保存する。
 
+## 次段階: 起動費用とGUIの信頼境界
+
+2026-10-23、同じlocal branchで継続。起動検証を省かず、`run-profile`を追加した。
+stdoutのdoctor JSONは通常起動と同じで、opt-in時だけnative/workerの時間をstderrへ出す。
+`scripts/profile_native_launch.py`は新規scratchへ導入し、plain/profileを交互・直列で各5回起動する。
+全検証、同じpayload、同じdoctor出力を確認し、別系列でprivate interpreterのnoopを測る。
+memoryはこの分解toolでは測らない。前段のnative親RSSをPythonを含むpeakへ付け替えない。
+
+最初の分離測定はplain/profile中央値3,849.496/3,849.369ms、interpreter noop28.600ms。
+内訳中央値はreceipt/manifest6.814ms、全file hash＋path検査1,292.339ms、
+inventory走査1,171.559ms、context0.435ms、selection1.187ms、sandbox open2.951ms。
+worker wall1,359.134msの**内側**にbootstrap/import974.940ms、context8.588ms、
+CLI dispatch/doctor262.837msがある。native worker wallと子の内訳を二重加算しない。
+残差にはinterpreter起動・bootstrap main前・終了・process制御が含まれ、spawn単独の実測とは呼ばない。
+各中央値の和もtotal中央値と厳密一致するとは限らない。
+旧4.13秒との改善率を主張しない。共有host、warm cache、AV、power stateは隔離していない。
+rawとartifact identityは作業領域`evidence/native-launch-costs-v1.json`に保持する。
+
+| 責務 | 現在必ず行う検証 | 代替できないもの |
+| --- | --- | --- |
+| 導入 | 外部指定manifest hash、target/path/size/count、stageへcopyしながら全hash、stage inventory、candidate doctor、receipt/context、journal/generation/readback | hash指定はpublisher認証ではない。成功receiptは後日のfile不変性を保証しない |
+| 起動 | active/receipt/manifest/context、全file hashとinventory、private Python isolation、jobの版binding | user-writableなfileのmtime/sizeや以前のdoctor成功だけでは改変を除外できない |
+| doctor | runtime/resource整合、必須資源、Skillとpromotion等の意味的な導入診断 | 任意sourceの取得許可、実jobの承認、ASR/model/device readyの証明ではない |
+| GUI | 同releaseのengineを起動し、plan/resultを検査して表示し、人間の確認・取消要求を伝える | trust/署名/導入可否やcopy/activation/repairをGUIで再実装しない |
+
+起動hash/inventoryの重複path検査は今後の調査候補だが、handle相対操作・owner/DACL・
+hardlink/TOCTOU・供給元認証が未完の現在、cacheや既存receiptへ置換しない。
+今回の成果は責務と費用の可視化であり、高速化実績ではない。
+
+### 共通engineの進捗と取消
+
+通常の1request/1result JSONLは維持する。`events:true`を明示したclientだけがprogressとcancelを使う。
+capabilitiesの`streaming_events`でhandshakeし、入力line64KiB、追加入力最大16line/合計1MiB。
+追加の`{"schema":"vep.setup.v1","id":"<同じID>","op":"cancel"}`で協調取消を要求する。
+streamingでのstdin EOFは切断として扱い、通常CLIのEOFを暗黙取消へ変更しない。
+
+copy/hashのchunk間、inventory走査、candidate doctor待機中で取消を確認する。
+selection lock下でgenerationを再照合した後、prepared journalより前のCASを最後の取消点にする。
+取消が先なら`status=cancelled/code=CANCELLED/exit3`。commitが先なら取消を延期して
+replace/readback/journal確定まで終え、実際の最終resultを返す。cancel_ackは結果の確定ではない。
+stage・旧版・dataを取消によって削除しない。再試行は新しいplanで行う。
+
+protocol出力は専用writerと32frame有界queueへ分離し、progress/ackを間引ける。
+critical区間はstdoutやGUIの読取りを待たない。finalは捨てず、全transaction lock解放後に送信を待つ。
+consumer停滞はprocess終了を遅らせ得るが、commitや他のstatus/launchのlockを保持しない。
+候補doctorはWindowsでsuspended spawn→Job割当→resumeし、取消/timeoutで所有する子孫を終了する。
+稼働中の旧版jobを終了する機能ではない。非Windowsの同等process-tree保証は未検証。
+
+### 開発用の薄いWin32 GUI
+
+`native/setup`の`vep-setup-gui.exe`は隣の`vep-setup.exe`をshellなしで起動する。
+標準STATIC/EDIT/BUTTON controlsでroot/manifest/payload/hashを入力し、共通planのroot、release、
+manifest hash、generation、容量、plan_id、開発用・publisher未認証をそのまま確認する。
+checkboxで確認してからapply/rollbackし、入力変更時はplanを無効化する。
+初期化とrepairも対象を確認して共通engineへ委譲する。GUIにfile copy/activation/recovery実装はない。
+
+GUIのline上限64KiB、event channel16frame。ID/連番/final/exit codeを検査し、
+異常EOFや不正protocolではstdout/stdinを閉じてから終了を待ち、別status要求でstateを照会する。
+不明な結果を成功・取消へ推測しない。pending取消はstdin準備前から保存し、準備直後に送る。
+実行中の画面Closeも取消要求として扱い、最終結果を待って閉じる。
+
+新しいGUI crate、WebView、.NET、download、UAC昇格は追加していない。
+Windows USER/GDIと既存Rust依存を使用し、system DLLをpayloadへコピーしない。
+GUI manifestは`asInvoker/uiAccess=false/PerMonitorV2`。これは通常user VM・署名の受入の代わりではない。
+[IsDialogMessage](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-isdialogmessagea)
+によるTab/標準controlのkeyboard処理、DPI変更時のlayout/font再計算を実装する。
+screen-reader全体、異なるDPIの実monitor、Linux/macOS/ARMは別途確認が必要。
+WebView案へ変える場合は[Runtime配布・更新条件](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution)を再評価する。
+追加runtimeのper-user導入可否を、managed端末でも管理者不要という保証へ読み替えない。
+既存Rust/CRT/CPython/wheelのnotices/source/SBOM・署名gateも継続する。
+
+GUI実行検証の初回失敗は削除しない。handshake前にcontrolを操作したtest競合、
+他processのEDITをGetWindowText/SetWindowTextで扱ったtest API誤用を修正し、WM_GETTEXT/WM_SETTEXTへ変更した。
+前者は画面表示前からcontrolをdisableする実装も追加した。
+実payload更新の45秒test期限ではstage2,052/2,298filesで中断し、旧activeとdata保持を確認した。
+同期保存を省かず、後続検証はfresh root・120秒期限で再開する。
+前段のlegacy fixtureの長いpath失敗と短いtemp root再実行も上の記録に保持する。
+最終normal buildの同等出力n=5はplain3,874.649ms/profile3,825.600ms、interpreter noop26.865ms。
+全file hash＋path検査1,290.918ms、inventory1,170.533ms、import971.768ms、
+CLI/doctor261.487ms、worker wall1,346.111ms（子の内訳を含む）。
+[全sampleと条件](../../native/setup/results/windows-x64-20261023/launch-costs.json)、
+[source/artifact identity・build flags・検証範囲](../../native/setup/results/windows-x64-20261023/verification.json)を保存する。
+plain/profile差や旧4.13秒との差を改善率として扱わない。検証を省く変更はない。
+
+normal engine/GUIのexe単体は809,984/523,776 bytes。
+PE importsはengineがKERNEL32/ntdll/API-set、GUIがさらにUSER32/GDI32で、VCRUNTIME importはない。
+これはPython/runtime/notices/署名込みの配布sizeでも、標準user VMの導入実証でもない。
+
+最終GUIは6tests成功（47.25秒）。専用Python実payloadでの導入・更新・rollback、
+CLI plan/result一致、確認前の無変更、入力変更時の再plan、日本語path、起動直後取消、
+after-replace crash→status→確認付きrepair、stale plan、不正JSON/過大出力＋2MiB floodの切断復帰を含む。
+GUIのcallback再入はRefCellで重複する可変参照を避け、再入Closeを保持する。
+summaryは検査済みengine値の表示だけで、raw JSONも参照できる。
+Windows 96DPIのPNGを目視確認し、native Tab(root→manifest)、Spaceでの確認、
+確認欄→実行buttonのTab順をposted keyで確認した。物理keyboard、Narrator、別DPI monitorの認証とは呼ばない。
+
+共通streamingの4tests成功（107.04秒）は出力停滞中のcommit/statusも含む。
+その後の同範囲に影響する変更はないため再利用し、最終mainで追加した空/過長request ID早期拒否は
+別の2casesでbounded error・無変更を確認する。
+normal buildでは実candidateと孫processを生存中handleで保持し、取消後の両方の終了、
+既存jobの版固定・更新・rollback・破損拒否を2testsで確認した（84.40秒）。
+normal Rust unitはengine3件・GUI client2件成功。全pytest成功へ集約しない。
+既存Python処理本体とresource/data codeは前段から変更せず、関係のないsource全回帰は再実行しない。
+
+独立レビューは出力待ちとcommit lockの分離、stdin前取消保存、invalid出力後のpipe閉鎖、
+callback再入・Close guard、plan確認/入力変更、計測の内包関係を確認し、未解消P0/P1/P2は0件。
+reviewerはcode/保存証拠の確認であり、実行担当はprimary。原本は作業領域
+`evidence/native-gui-review.md`、JUnitと画面は同`evidence/`に保持する。
+
 ## 次のgate
 
 - P0: 最終比較のbuild provenance/同等出力を保存済み。署名/GUI/他OS/実payloadの言語比較は残る。
@@ -194,6 +303,6 @@ directory深さ/件数、recovery orphan binding、ASR境界、export/上書き�
   署名済み標準user VM、全fault/disk-full/AV lock/電源断/自己更新/削除の受入が残る。
 - 配布: VEP AGPL対応source/build材料、CPython/wheel/native依存のexact notices/SBOM、
   FFmpeg/ASR/CUDA/model条件、code-sign key/署名を揃える。鍵発行・購入・OS trust/ACL変更・配布は本作業で実行しない。
-- P3/P4: 同engineのGUI、TUF/client/key運用/撤回policy、任意component、Linux/macOS/ARM。
+- P3/P4: 開発GUI以降のaccessibility/OS受入、TUF/client/key運用/撤回policy、任意component、Linux/macOS/ARM。
 
 設計上の方針やローカルの成功を、本番対応・再配布可能・release-readyと読み替えない。

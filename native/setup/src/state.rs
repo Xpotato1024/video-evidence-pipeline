@@ -1,5 +1,6 @@
 use crate::{
     Result,
+    operation::Operation,
     payload::{self, Input},
 };
 use serde::{Deserialize, Serialize};
@@ -232,7 +233,14 @@ impl Sandbox {
     }
     pub fn status(&self) -> Result<Value> {
         let _lock = self.lock("selection")?;
-        Ok(json!({"development_only":true,"active":self.active()?}))
+        let recovery_required = match self.require_clean_journals() {
+            Ok(()) => false,
+            Err("RECOVERY_REQUIRED") => true,
+            Err(code) => return Err(code),
+        };
+        Ok(
+            json!({"development_only":true,"active":self.active()?,"recovery_required":recovery_required}),
+        )
     }
     fn plan_for(&self, input: &Input, active: &Active) -> Result<Value> {
         let body = json!({"schema":"vep.sandbox-plan.v1","root":self.root,"old_generation":active.generation,"release_id":input.manifest.release_id,"manifest_sha256":input.sha256});
@@ -245,7 +253,13 @@ impl Sandbox {
         let _lock = self.lock("selection")?;
         self.plan_for(input, &self.active()?)
     }
-    pub fn apply(&self, input: &Input, expected_plan: &str) -> Result<Value> {
+    pub fn apply_with(
+        &self,
+        input: &Input,
+        expected_plan: &str,
+        operation: &Operation,
+    ) -> Result<Value> {
+        operation.progress("PREPARE", 0, 0)?;
         let _writer = self.lock("writer")?;
         self.require_clean_journals()?;
         let old = {
@@ -262,14 +276,15 @@ impl Sandbox {
         if version.exists() {
             let installed = Input::load(&version.join("release.json"), &version, &input.sha256)
                 .map_err(|_| "RELEASE_ID_CONFLICT")?;
-            installed.verify_installed()?;
+            installed.verify_installed_with(operation)?;
         } else {
             fs::create_dir(&stage).map_err(|_| "STORAGE_REQUIRED")?;
-            input.verify_copy(Some(&stage))?;
+            input.verify_copy_with(Some(&stage), operation)?;
             interrupt("after-copy");
             write_new(&stage.join("release.json"), &input.bytes)?;
             let staged = Input::load(&stage.join("release.json"), &stage, &input.sha256)?;
-            staged.verify_installed()?;
+            staged.verify_installed_with(operation)?;
+            operation.progress("CHECK", 0, 0)?;
             let candidate_context = self
                 .root
                 .join("state/contexts")
@@ -280,7 +295,8 @@ impl Sandbox {
                     &json!({"schema":"vep.runtime-context.v1","release_id":id,"resource_root":stage.join("payload"),"data_root":self.root.join("data"),"bindings_root":self.root.join("state/bindings"),"app_root":self.root.join("app"),"state_root":self.root.join("state")}),
                 )?,
             )?;
-            let mut check = Command::new(stage.join(&input.manifest.python))
+            let mut command = Command::new(stage.join(&input.manifest.python));
+            command
                 .args(["-I", "-B", "-S", "-X", "utf8"])
                 .arg(stage.join("payload/bootstrap.py"))
                 .arg(candidate_context)
@@ -289,12 +305,14 @@ impl Sandbox {
                 .env_remove("PYTHONHOME")
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .map_err(|_| "CANDIDATE_CHECK_FAILED")?;
+                .stderr(Stdio::null());
+            let mut check = crate::candidate::Candidate::spawn(&mut command)?;
             let start = Instant::now();
             loop {
-                match check.try_wait() {
+                if let Err(code) = operation.check() {
+                    return Err(code);
+                }
+                match check.child.try_wait() {
                     Ok(Some(status)) => {
                         if !status.success() {
                             return Err("CANDIDATE_CHECK_FAILED");
@@ -303,14 +321,10 @@ impl Sandbox {
                     }
                     Ok(None) => {}
                     Err(_) => {
-                        let _ = check.kill();
-                        let _ = check.wait();
                         return Err("CANDIDATE_CHECK_FAILED");
                     }
                 }
                 if start.elapsed() > Duration::from_secs(60) {
-                    let _ = check.kill();
-                    let _ = check.wait();
                     return Err("CANDIDATE_CHECK_TIMEOUT");
                 }
                 std::thread::sleep(Duration::from_millis(10));
@@ -343,13 +357,21 @@ impl Sandbox {
         } else {
             write_new(&receipt_path, &receipt_bytes)?;
         }
-        self.activate(old, id, payload::digest(&receipt_bytes), &tx)
+        self.activate(old, id, payload::digest(&receipt_bytes), &tx, operation)
     }
-    fn activate(&self, old: Active, id: &str, receipt_sha256: String, tx: &str) -> Result<Value> {
+    fn activate(
+        &self,
+        old: Active,
+        id: &str,
+        receipt_sha256: String,
+        tx: &str,
+        operation: &Operation,
+    ) -> Result<Value> {
         let _selection = self.lock("selection")?;
         if self.active()? != old {
             return Err("PLAN_STALE");
         }
+        operation.commit()?;
         let new = Active {
             schema: old.schema.clone(),
             generation: old
@@ -387,7 +409,12 @@ impl Sandbox {
             Err("RECOVERY_REQUIRED")
         }
     }
-    fn installed(&self, id: &str) -> Result<(Input, Receipt)> {
+    fn installed_profile(
+        &self,
+        id: &str,
+        operation: &Operation,
+    ) -> Result<(Input, Receipt, Value)> {
+        let metadata_start = Instant::now();
         if !payload::safe_id(id) {
             return Err("INVALID_REQUEST");
         }
@@ -398,7 +425,9 @@ impl Sandbox {
         }
         let root = self.root.join("app/versions").join(id);
         let input = Input::load(&root.join("release.json"), &root, &receipt.manifest_sha256)?;
-        input.verify_installed()?;
+        let metadata_ms = metadata_start.elapsed().as_secs_f64() * 1000.0;
+        let (hash_ms, inventory_ms) = input.verify_installed_profile_with(operation)?;
+        let context_start = Instant::now();
         if payload::digest(&payload::read(
             &self.root.join("state/contexts").join(format!("{id}.json")),
             65536,
@@ -406,12 +435,21 @@ impl Sandbox {
         {
             return Err("STATE_INTEGRITY_FAILED");
         }
-        Ok((input, receipt))
+        Ok((
+            input,
+            receipt,
+            json!({"receipt_manifest_ms":metadata_ms,"all_file_hash_and_paths_ms":hash_ms,"inventory_walk_ms":inventory_ms,"context_check_ms":context_start.elapsed().as_secs_f64()*1000.0}),
+        ))
     }
-    pub fn rollback(&self, id: &str, expected_plan: &str) -> Result<Value> {
+    pub fn rollback_with(
+        &self,
+        id: &str,
+        expected_plan: &str,
+        operation: &Operation,
+    ) -> Result<Value> {
         let _writer = self.lock("writer")?;
         self.require_clean_journals()?;
-        let (input, _) = self.installed(id)?;
+        let (input, _, _) = self.installed_profile(id, operation)?;
         let old = {
             let _selection = self.lock("selection")?;
             self.active()?
@@ -423,7 +461,7 @@ impl Sandbox {
             &self.root.join("state/receipts").join(format!("{id}.json")),
             65536,
         )?;
-        self.activate(old, id, payload::digest(&receipt), &unique())
+        self.activate(old, id, payload::digest(&receipt), &unique(), operation)
     }
     pub fn repair(&self) -> Result<Value> {
         let _writer = self.lock("writer")?;
@@ -458,7 +496,8 @@ impl Sandbox {
             json!({"active":active,"reconciled_journals":recovered,"data_changed":false,"stages_retained":true}),
         )
     }
-    pub fn launch(&self, release: Option<&str>, args: &[OsString]) -> Result<i32> {
+    pub fn launch(&self, release: Option<&str>, args: &[OsString], profile: bool) -> Result<i32> {
+        let selection_start = Instant::now();
         let id = {
             let _selection = self.lock("selection")?;
             let active = self.active()?;
@@ -468,22 +507,36 @@ impl Sandbox {
             id.to_string()
         };
         // All versions are retained, so verification needs no selection lock.
-        let (input, _receipt) = self.installed(&id)?;
+        let selection_ms = selection_start.elapsed().as_secs_f64() * 1000.0;
+        let (input, _receipt, mut timing) = self.installed_profile(&id, &Operation::quiet())?;
         // Versions are never deleted in this phase. GC/lease handoff is gated
         // before any future deletion; updates cannot replace an existing ID.
         let context = self
             .root
             .join("state/contexts")
             .join(format!("{}.json", input.manifest.release_id));
-        let status = Command::new(input.root.join(&input.manifest.python))
+        let worker_start = Instant::now();
+        let mut command = Command::new(input.root.join(&input.manifest.python));
+        command
             .args(["-I", "-B", "-S", "-X", "utf8"])
             .arg(input.root.join("payload/bootstrap.py"))
             .arg(context)
             .args(args)
             .env_remove("PYTHONPATH")
             .env_remove("PYTHONHOME")
-            .status()
-            .map_err(|_| "WORKER_LAUNCH_FAILED")?;
+            .env_remove("VEP_PROFILE_LAUNCH");
+        if profile {
+            command.env("VEP_PROFILE_LAUNCH", "1");
+        }
+        let status = command.status().map_err(|_| "WORKER_LAUNCH_FAILED")?;
+        if profile {
+            timing["selection_ms"] = json!(selection_ms);
+            timing["worker_wall_ms"] = json!(worker_start.elapsed().as_secs_f64() * 1000.0);
+            eprintln!(
+                "{}",
+                json!({"schema":"vep.launch-profile.v1","scope":"native","timings":timing,"child_timings_are_nested":true})
+            );
+        }
         Ok(status.code().unwrap_or(1))
     }
 }
