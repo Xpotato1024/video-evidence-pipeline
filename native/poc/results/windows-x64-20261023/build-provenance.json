@@ -1,0 +1,59 @@
+{
+  "schema": "vep.setup-poc-provenance.v1",
+  "baseline": "791d1dc54dd142b6c821cd70bcfa7941a421be6c",
+  "source_sha256": {
+    "native/poc/rust/Cargo.toml": "578f00cde32ee39efc7d32f147de7452598dda959fe3e9fbf6b9e0e29fecffed",
+    "native/poc/rust/Cargo.lock": "f8f524ce74d9f5e8646be164782738e13ce142ecb951123cea2f74fd5f229318",
+    "native/poc/rust/src/main.rs": "66b06f64a868f2c61736e16b3397b0ff2f762cff5577c63a87540d62969864bb",
+    "native/poc/go/go.mod": "11743770b1503f863b0fbc5fd6060d4f8b77e294bd0c7d046dab52212677b1ed",
+    "native/poc/go/main.go": "e8c98533aee5b93c00dccc8b6657d6a82f711fa84dde944193dfdbc4dad618aa",
+    "scripts/benchmark_setup_poc.py": "59e5be1a9572e718ecde515f99e0a69227ade93b3234d26160e403abfffe0f8c"
+  },
+  "rust": {
+    "compiler": "rustc 1.94.1 (e408947bf 2026-03-25)\nbinary: rustc\ncommit-hash: e408947bfd200af42db322daf0fadfe7e26d3bd1\ncommit-date: 2026-03-25\nhost: x86_64-pc-windows-msvc\nrelease: 1.94.1\nLLVM version: 21.1.8",
+    "cargo": "cargo 1.94.1 (29ea6fb6a 2026-03-24)",
+    "target": "x86_64-pc-windows-msvc",
+    "command": "RUSTFLAGS='-C target-feature=+crt-static' CARGO_TARGET_DIR=<workspace>/native-build/poc-rust-static cargo build --release --offline --manifest-path vep/native/poc/rust/Cargo.toml -j 1",
+    "profile": {
+      "strip": true,
+      "lto": "thin",
+      "codegen-units": 1
+    },
+    "import_table": [
+      "api-ms-win-core-synch-l1-2-0.dll",
+      "KERNEL32.dll",
+      "ntdll.dll"
+    ],
+    "import_check": "MSVC dumpbin /DEPENDENTS; no VCRUNTIME import in this artifact; no clean standard-user VM test"
+  },
+  "go": {
+    "compiler": "go version go1.27.3 windows/amd64",
+    "target": "windows/amd64",
+    "toolchain_archive": {
+      "filename": "go1.27.3.windows-amd64.zip",
+      "os": "windows",
+      "arch": "amd64",
+      "version": "go1.27.3",
+      "sha256": "f26081f438319757f8a1b46d7d0b2c5ec7583d4038e485e0aa725cfde7885fff",
+      "size": 79010309,
+      "kind": "archive"
+    },
+    "command": "cd vep/native/poc/go; GOTOOLCHAIN=local GOTELEMETRY=off GOENV=off GOCACHE=<workspace>/native-build/go-cache GOMODCACHE=<workspace>/native-build/go-mod-cache go build -p 1 -trimpath -ldflags='-s -w' -o <workspace>/native-build/vep-setup-poc-go.exe .",
+    "import_table": [
+      "kernel32.dll"
+    ],
+    "third_party_modules": []
+  },
+  "measurement": {
+    "command": "vep/.venv/Scripts/python.exe vep/scripts/benchmark_setup_poc.py --rust native-build/poc-rust-static/release/vep-setup-poc.exe --go native-build/vep-setup-poc-go.exe --work evidence/setup-poc-clean-20261023 --samples 9",
+    "directory_created_utc": "2026-10-23T03:10:19.362411+00:00",
+    "known_contention": "No local build/test active during final run; reviewers read-only. Other shared-host tasks, AV/cache/power state not isolated.",
+    "excluded_series": {
+      "setup-poc-final-20261023": "Pre-final-blank-line-normalization source series, superseded by rebuilt final exact source identities; no functional changes.",
+      "setup-poc-20261023": "Earlier dynamic-CRT artifact and older direct-Popen collector: not compared as improvement.",
+      "setup-poc-static-20261023": "Contended run overlapped native vertical tests and an unsuccessful in-use-executable compile: excluded from primary comparison."
+    },
+    "equivalence": "Normal fixture stdout and all 18 copied inventories verified by harness. extract is file copy, not archive decompression. Go JSON parser rejection semantics differ from Serde; not safety-equivalent implementations.",
+    "limits": "Unsigned exe sizes only. OS lifetime parent RSS/commit peaks exclude Python child. No video/ASR performance claim, clean cold-cache test, cross-OS/CPU or GUI benchmark."
+  }
+}

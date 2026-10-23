@@ -12,6 +12,7 @@ from pydantic import Field, ValidationError, field_validator, model_validator
 from video_evidence_pipeline.domain import StrictModel, UtcDateTime
 from video_evidence_pipeline.domain.identifiers import Sha256
 from video_evidence_pipeline.errors import configuration_error, integrity_error
+from video_evidence_pipeline.runtime_context import model_root, resource_root
 
 DEFAULT_ASR_PROFILE = "whisper-large-v3"
 PROFILE_REGISTRY_PATH = Path("config/asr-profiles.yaml")
@@ -75,7 +76,7 @@ class AsrModelProvisionManifest(StrictModel):
 
 
 def load_asr_profile_registry(repository_root: Path) -> AsrProfileRegistry:
-    path = repository_root / PROFILE_REGISTRY_PATH
+    path = resource_root(repository_root) / PROFILE_REGISTRY_PATH
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
         return AsrProfileRegistry.model_validate(data)
@@ -130,15 +131,7 @@ def validate_model_runtime_contract(root: Path, profile: AsrProfile | None) -> N
 
 
 def model_storage_directory(repository_root: Path, profile_id: str, profile: AsrProfile) -> Path:
-    return (
-        repository_root
-        / ".local"
-        / "models"
-        / "asr"
-        / profile_id
-        / profile.model_revision
-        / "model"
-    )
+    return model_root(repository_root) / "asr" / profile_id / profile.model_revision / "model"
 
 
 def model_manifest_path(repository_root: Path, profile_id: str, profile: AsrProfile) -> Path:

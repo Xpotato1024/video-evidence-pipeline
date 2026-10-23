@@ -589,7 +589,7 @@ def prepare_transcript(
             )
 
             if config.asr_profile is not None:
-                repository_root = workspace.jobs_root.parent.parent
+                repository_root = workspace.resources_root
                 profile_id, profile = resolve_asr_profile(repository_root, config.asr_profile)
                 provisioned_directory, provision_manifest = require_provisioned_model(
                     repository_root, profile_id, profile

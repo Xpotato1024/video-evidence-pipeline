@@ -82,18 +82,41 @@ def _path_for_commonpath(path: Path) -> Path:
 class JobWorkspace:
     root: Path
     jobs_root: Path
+    resource_root: Path | None = None
+
+    @property
+    def resources_root(self) -> Path:
+        return self.resource_root or self.jobs_root.parent.parent
 
     @classmethod
-    def create(cls, repository_root: Path, job_id: JobId) -> JobWorkspace:
+    def create(
+        cls, repository_root: Path, job_id: JobId, *, jobs_root: Path | None = None
+    ) -> JobWorkspace:
+        from video_evidence_pipeline.runtime_context import current_runtime
+
+        context = current_runtime()
+        if context is not None:
+            repository_root = context.resources.root
+            if jobs_root is not None and jobs_root.resolve() != context.data.jobs_root.resolve():
+                raise configuration_error(
+                    "WORKSPACE_LAYOUT_INVALID",
+                    "installed jobs root must match the runtime data root",
+                )
         repository_root = repository_root.absolute()
-        jobs_root = repository_root / ".local" / "jobs"
+        jobs_root = jobs_root or (
+            context.data.jobs_root if context else repository_root / ".local" / "jobs"
+        )
+        storage_root = jobs_root.parent
         root = jobs_root / job_id
-        _assert_no_links(repository_root, root)
+        _assert_no_links(Path(storage_root.anchor), root)
         _assert_resolved_within(root, jobs_root)
-        local_root = repository_root / ".local"
-        for directory in (local_root, jobs_root):
+        if context is not None and context.binding_path(root).exists():
+            # A failed recovery may have removed only the child it created.
+            # Reuse an identical external binding, never overwrite another one.
+            context.require_binding(root)
+        for directory in (storage_root, jobs_root):
             ensure_private_directory(directory)
-            _assert_no_links(repository_root, directory)
+            _assert_no_links(Path(storage_root.anchor), directory)
         try:
             root.mkdir(mode=PRIVATE_DIRECTORY_MODE, exist_ok=False)
         except FileExistsError as exc:
@@ -103,7 +126,7 @@ class JobWorkspace:
                 "PRIVATE_DIRECTORY_FAILED", "private directory could not be created"
             ) from exc
         enforce_private_directory(root)
-        _assert_no_links(repository_root, root)
+        _assert_no_links(storage_root, root)
         directories = (
             root / "authorization",
             root / "source",
@@ -141,13 +164,25 @@ class JobWorkspace:
         )
         for directory in directories:
             ensure_private_directory(directory)
-            _assert_no_links(repository_root, directory)
-        return cls(root=root, jobs_root=jobs_root)
+            _assert_no_links(storage_root, directory)
+        if context is not None and not context.binding_path(root).exists():
+            from video_evidence_pipeline.domain.serialization import canonical_json_bytes
+            from video_evidence_pipeline.storage.atomic import atomic_write_new_bytes
+
+            atomic_write_new_bytes(
+                context.binding_path(root),
+                canonical_json_bytes(context.binding(root)),
+                private=True,
+            )
+        return cls(root=root, jobs_root=jobs_root, resource_root=repository_root)
 
     @classmethod
     def open(cls, path: Path) -> JobWorkspace:
+        from video_evidence_pipeline.runtime_context import current_runtime
+
+        context = current_runtime()
         root = path.absolute()
-        if root.parent.name != "jobs" or root.parent.parent.name != ".local":
+        if context is None and (root.parent.name != "jobs" or root.parent.parent.name != ".local"):
             raise configuration_error(
                 "WORKSPACE_LAYOUT_INVALID",
                 "job workspace must use the .local/jobs/<job-id> layout",
@@ -155,6 +190,15 @@ class JobWorkspace:
         if not root.is_dir():
             raise io_error("WORKSPACE_NOT_FOUND", "job workspace does not exist")
         jobs_root = root.parent
+        if context is not None:
+            context.require_binding(root)
+            if jobs_root.resolve() != context.data.jobs_root.resolve():
+                raise configuration_error(
+                    "WORKSPACE_LAYOUT_INVALID", "installed job must remain inside its data root"
+                )
+            _assert_no_links(Path(root.anchor), root)
+            _assert_resolved_within(root, context.data.jobs_root)
+            return cls(root=root, jobs_root=jobs_root, resource_root=context.resources.root)
         repository_root = jobs_root.parent.parent
         _assert_no_links(repository_root, root)
         _assert_resolved_within(root, jobs_root)

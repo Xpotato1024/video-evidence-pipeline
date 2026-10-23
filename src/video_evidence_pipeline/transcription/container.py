@@ -418,6 +418,9 @@ def _require_image_identity(docker: str, image: str, repository_root: Path) -> s
 
 
 def build_asr_image(repository_root: Path, profile_id: str | None = None) -> str:
+    from video_evidence_pipeline.runtime_context import require_source_asr
+
+    require_source_asr()
     docker = _docker()
     _selected, profile = resolve_asr_profile(repository_root, profile_id)
     contract_identity = _container_contract_identity(repository_root)
@@ -675,6 +678,9 @@ def run_asr_worker(
     intervals: tuple[TranscriptInterval, ...],
     config: TranscriptionConfig,
 ) -> AsrWorkerResponse:
+    from video_evidence_pipeline.runtime_context import require_source_asr
+
+    require_source_asr()
     selected, profile = resolve_asr_profile(repository_root, config.asr_profile)
     docker = _docker()
     model, provision_manifest = require_provisioned_model(repository_root, selected, profile)
@@ -806,7 +812,7 @@ def run_transcription_container(workspace_path: Path, config: TranscriptionConfi
     from video_evidence_pipeline.storage.layout import JobWorkspace
 
     workspace = JobWorkspace.open(workspace_path)
-    repository_root = workspace.jobs_root.parent.parent
+    repository_root = workspace.resources_root
     result = transcribe_job(
         workspace.root,
         config,
@@ -830,6 +836,9 @@ def run_transcription_container(workspace_path: Path, config: TranscriptionConfi
 
 
 def run_provision_container(repository_root: Path, profile_id: str | None = None) -> str:
+    from video_evidence_pipeline.runtime_context import require_source_asr
+
+    require_source_asr()
     selected, profile = resolve_asr_profile(repository_root, profile_id)
     from video_evidence_pipeline.transcription.provisioning import publish_model_payload
 
@@ -883,6 +892,9 @@ def run_provision_container(repository_root: Path, profile_id: str | None = None
 
 
 def smoke_asr_image(repository_root: Path, profile_id: str | None = None) -> dict[str, Any]:
+    from video_evidence_pipeline.runtime_context import require_source_asr
+
+    require_source_asr()
     docker = _docker()
     _selected, profile = resolve_asr_profile(repository_root, profile_id)
     digest = _require_image_identity(docker, profile.container_image, repository_root)
@@ -968,6 +980,9 @@ def preflight_asr_gpu(
     profile_id: str | None = None,
     device_policy: str = "auto",
 ) -> dict[str, Any]:
+    from video_evidence_pipeline.runtime_context import require_source_asr
+
+    require_source_asr()
     if re.fullmatch(r"(?:auto|cuda|cuda:[0-9]+)", device_policy) is None:
         raise configuration_error(
             "ASR_DEVICE_INVALID", "GPU preflight requires auto, cuda, or cuda:<index>"

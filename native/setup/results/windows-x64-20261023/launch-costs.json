@@ -1,0 +1,234 @@
+{
+  "schema": "vep.launch-costs.v1",
+  "samples": 5,
+  "engine_sha256": "1c7a2a3e2dee27198dcc3dcbb42859ba904a6384e892df5ba31731bb8218d8e6",
+  "manifest_sha256": "08f4fcc0948993bc5f2354e19438ced2f423fb1226076ffd5f10e0bf80d2de3d",
+  "fixture": {
+    "files": 2298,
+    "doctor_outputs_equal": true
+  },
+  "conditions": [
+    "serial alternating fresh processes, all file/hash/inventory checks retained",
+    "shared host, warm OS/AV cache and power state not isolated; no local build/test during samples",
+    "profile instrumentation adds timers/JSON; no cold-cache or speedup claim",
+    "native worker_wall includes all child phases; never sum nested times twice",
+    "worker residual includes interpreter/bootstrap-before-main and exit/control; not direct spawn-only measurement",
+    "interpreter noop is a separate baseline, not a bypassed product launch",
+    "memory not measured by this cost-decomposition tool"
+  ],
+  "median_wall_ms": {
+    "plain": 3874.648900004104,
+    "profile": 3825.60019986704,
+    "interpreter_noop": 26.865100022405386
+  },
+  "raw": {
+    "plain": [
+      {
+        "wall_ms": 3992.51430016011
+      },
+      {
+        "wall_ms": 3805.251299869269
+      },
+      {
+        "wall_ms": 3863.818099955097
+      },
+      {
+        "wall_ms": 3874.648900004104
+      },
+      {
+        "wall_ms": 3899.7072000056505
+      }
+    ],
+    "profile": [
+      {
+        "wall_ms": 3822.728500002995,
+        "phases": [
+          {
+            "elapsed_ms": 2.9886,
+            "schema": "vep.launch-profile.v1",
+            "scope": "sandbox_open"
+          },
+          {
+            "schema": "vep.launch-profile.v1",
+            "scope": "worker",
+            "timings": {
+              "bootstrap_imports_ms": 969.0598000306636,
+              "context_ms": 8.641200140118599,
+              "cli_dispatch_and_doctor_ms": 262.3542998917401
+            }
+          },
+          {
+            "child_timings_are_nested": true,
+            "schema": "vep.launch-profile.v1",
+            "scope": "native",
+            "timings": {
+              "all_file_hash_and_paths_ms": 1281.2639,
+              "context_check_ms": 0.4106,
+              "inventory_walk_ms": 1170.5325,
+              "receipt_manifest_ms": 6.7891,
+              "selection_ms": 1.1794,
+              "worker_wall_ms": 1346.1105
+            }
+          }
+        ]
+      },
+      {
+        "wall_ms": 3810.883400030434,
+        "phases": [
+          {
+            "elapsed_ms": 2.9106,
+            "schema": "vep.launch-profile.v1",
+            "scope": "sandbox_open"
+          },
+          {
+            "schema": "vep.launch-profile.v1",
+            "scope": "worker",
+            "timings": {
+              "bootstrap_imports_ms": 968.3586999308318,
+              "context_ms": 8.338900050148368,
+              "cli_dispatch_and_doctor_ms": 260.7915000990033
+            }
+          },
+          {
+            "child_timings_are_nested": true,
+            "schema": "vep.launch-profile.v1",
+            "scope": "native",
+            "timings": {
+              "all_file_hash_and_paths_ms": 1290.9184,
+              "context_check_ms": 0.41550000000000004,
+              "inventory_walk_ms": 1155.631,
+              "receipt_manifest_ms": 6.7946,
+              "selection_ms": 1.1451,
+              "worker_wall_ms": 1341.2401
+            }
+          }
+        ]
+      },
+      {
+        "wall_ms": 3825.60019986704,
+        "phases": [
+          {
+            "elapsed_ms": 2.9966,
+            "schema": "vep.launch-profile.v1",
+            "scope": "sandbox_open"
+          },
+          {
+            "schema": "vep.launch-profile.v1",
+            "scope": "worker",
+            "timings": {
+              "bootstrap_imports_ms": 971.7677999287844,
+              "context_ms": 8.558300090953708,
+              "cli_dispatch_and_doctor_ms": 261.08530000783503
+            }
+          },
+          {
+            "child_timings_are_nested": true,
+            "schema": "vep.launch-profile.v1",
+            "scope": "native",
+            "timings": {
+              "all_file_hash_and_paths_ms": 1285.7834,
+              "context_check_ms": 0.4504,
+              "inventory_walk_ms": 1170.6133,
+              "receipt_manifest_ms": 6.8194,
+              "selection_ms": 1.1892999999999998,
+              "worker_wall_ms": 1345.9712
+            }
+          }
+        ]
+      },
+      {
+        "wall_ms": 3850.8126998785883,
+        "phases": [
+          {
+            "elapsed_ms": 3.0033999999999996,
+            "schema": "vep.launch-profile.v1",
+            "scope": "sandbox_open"
+          },
+          {
+            "schema": "vep.launch-profile.v1",
+            "scope": "worker",
+            "timings": {
+              "bootstrap_imports_ms": 976.2476999312639,
+              "context_ms": 8.420000085607171,
+              "cli_dispatch_and_doctor_ms": 261.48679992184043
+            }
+          },
+          {
+            "child_timings_are_nested": true,
+            "schema": "vep.launch-profile.v1",
+            "scope": "native",
+            "timings": {
+              "all_file_hash_and_paths_ms": 1306.8804,
+              "context_check_ms": 0.44089999999999996,
+              "inventory_walk_ms": 1169.4433,
+              "receipt_manifest_ms": 6.779999999999999,
+              "selection_ms": 1.1578000000000002,
+              "worker_wall_ms": 1351.3003999999999
+            }
+          }
+        ]
+      },
+      {
+        "wall_ms": 4003.96790006198,
+        "phases": [
+          {
+            "elapsed_ms": 3.0566,
+            "schema": "vep.launch-profile.v1",
+            "scope": "sandbox_open"
+          },
+          {
+            "schema": "vep.launch-profile.v1",
+            "scope": "worker",
+            "timings": {
+              "bootstrap_imports_ms": 999.6780999936163,
+              "context_ms": 8.75500007532537,
+              "cli_dispatch_and_doctor_ms": 271.0124000441283
+            }
+          },
+          {
+            "child_timings_are_nested": true,
+            "schema": "vep.launch-profile.v1",
+            "scope": "native",
+            "timings": {
+              "all_file_hash_and_paths_ms": 1345.5625,
+              "context_check_ms": 0.4777,
+              "inventory_walk_ms": 1229.1646,
+              "receipt_manifest_ms": 6.898,
+              "selection_ms": 1.2097,
+              "worker_wall_ms": 1405.725
+            }
+          }
+        ]
+      }
+    ],
+    "interpreter_noop": [
+      {
+        "wall_ms": 36.473199957981706
+      },
+      {
+        "wall_ms": 26.251000119373202
+      },
+      {
+        "wall_ms": 26.344599900767207
+      },
+      {
+        "wall_ms": 26.865100022405386
+      },
+      {
+        "wall_ms": 27.05719997175038
+      }
+    ]
+  },
+  "median_phases_ms": {
+    "sandbox_open/elapsed_ms": 2.9966,
+    "worker/bootstrap_imports_ms": 971.7677999287844,
+    "worker/context_ms": 8.558300090953708,
+    "worker/cli_dispatch_and_doctor_ms": 261.48679992184043,
+    "native/all_file_hash_and_paths_ms": 1290.9184,
+    "native/context_check_ms": 0.44089999999999996,
+    "native/inventory_walk_ms": 1170.5325,
+    "native/receipt_manifest_ms": 6.7946,
+    "native/selection_ms": 1.1794,
+    "native/worker_wall_ms": 1346.1105
+  }
+}

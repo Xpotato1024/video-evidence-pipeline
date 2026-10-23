@@ -38,7 +38,7 @@ class WorkspaceWithJobsRoot(Protocol):
 
 
 def _repository_root(workspace: WorkspaceWithJobsRoot) -> Path:
-    return workspace.jobs_root.parent.parent
+    return getattr(workspace, "resources_root", workspace.jobs_root.parent.parent)
 
 
 def _read_bounded(path: Path, *, maximum_bytes: int, code: str) -> bytes:
