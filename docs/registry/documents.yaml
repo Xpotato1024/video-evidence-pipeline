@@ -29,6 +29,15 @@ rules:
   - canonical_for
   - owners
 documents:
+- document_id: VEP-OPS-NATIVE-DEVELOPMENT
+  path: docs/operations/native-install-development.md
+  document_type: operations
+  status: draft
+  canonical: false
+  canonical_for: null
+  owners:
+  - Xpotato1024
+  metadata_mode: registry-only
 - document_id: VEP-OPS-INSTALLATION
   path: docs/operations/installation-and-updates.md
   document_type: operations

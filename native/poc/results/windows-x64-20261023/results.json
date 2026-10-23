@@ -1,0 +1,543 @@
+{
+  "schema": "vep.setup-poc-benchmark.v1",
+  "samples": 9,
+  "host": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "machine": "AMD64",
+    "cpu_count": 8,
+    "python": "3.12.13"
+  },
+  "fixture": {
+    "files": 16,
+    "bytes": 4194304,
+    "manifest_sha256": "4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400"
+  },
+  "binaries": {
+    "rust": {
+      "bytes": 481280,
+      "sha256": "8d3b979c43fedcd4d3d240086cb7a5aa47e6110e57e3ea604f462050c57130cb"
+    },
+    "go": {
+      "bytes": 3119616,
+      "sha256": "7b466fe0602c81483975ebfc47003f52118fcfba9c3931ade338b70a7fb2886f"
+    }
+  },
+  "conditions": [
+    "serial alternating fresh processes",
+    "uncontrolled warm OS/AV cache",
+    "shared host; other tasks not isolated; builds completed before measurement",
+    "includes suspended-create/job assignment/thread-resume harness overhead equally",
+    "unsigned developer binaries; no product payload or signature validation",
+    "RSS/commit are OS parent process lifetime peaks; child memory excluded",
+    "launch uses identical system Python -I -S noop; not private-runtime performance",
+    "size is executable only, excluding licenses/runtime/resources; not distribution size"
+  ],
+  "summary": {
+    "capabilities": {
+      "rust": {
+        "elapsed_ms": 37.9654,
+        "parent_peak_rss_bytes": 4845568,
+        "parent_peak_commit_bytes": 761856
+      },
+      "go": {
+        "elapsed_ms": 40.2917,
+        "parent_peak_rss_bytes": 7262208,
+        "parent_peak_commit_bytes": 46174208
+      }
+    },
+    "verify": {
+      "rust": {
+        "elapsed_ms": 54.5021,
+        "parent_peak_rss_bytes": 4931584,
+        "parent_peak_commit_bytes": 765952
+      },
+      "go": {
+        "elapsed_ms": 50.7362,
+        "parent_peak_rss_bytes": 8744960,
+        "parent_peak_commit_bytes": 47312896
+      }
+    },
+    "extract": {
+      "rust": {
+        "elapsed_ms": 66.108,
+        "parent_peak_rss_bytes": 4997120,
+        "parent_peak_commit_bytes": 774144
+      },
+      "go": {
+        "elapsed_ms": 61.5089,
+        "parent_peak_rss_bytes": 8794112,
+        "parent_peak_commit_bytes": 47337472
+      }
+    },
+    "launch": {
+      "rust": {
+        "elapsed_ms": 84.1956,
+        "parent_peak_rss_bytes": 5324800,
+        "parent_peak_commit_bytes": 839680
+      },
+      "go": {
+        "elapsed_ms": 87.1201,
+        "parent_peak_rss_bytes": 8187904,
+        "parent_peak_commit_bytes": 46911488
+      }
+    }
+  },
+  "raw": {
+    "capabilities": {
+      "rust": [
+        {
+          "elapsed_ms": 93.0599,
+          "parent_peak_rss_bytes": 4845568,
+          "parent_peak_commit_bytes": 765952,
+          "stdout": "{\"operations\":[\"capabilities\",\"verify\",\"extract\",\"launch\"],\"schema\":\"vep.poc.v1\"}\n"
+        },
+        {
+          "elapsed_ms": 38.1382,
+          "parent_peak_rss_bytes": 4849664,
+          "parent_peak_commit_bytes": 774144,
+          "stdout": "{\"operations\":[\"capabilities\",\"verify\",\"extract\",\"launch\"],\"schema\":\"vep.poc.v1\"}\n"
+        },
+        {
+          "elapsed_ms": 37.9435,
+          "parent_peak_rss_bytes": 4845568,
+          "parent_peak_commit_bytes": 761856,
+          "stdout": "{\"operations\":[\"capabilities\",\"verify\",\"extract\",\"launch\"],\"schema\":\"vep.poc.v1\"}\n"
+        },
+        {
+          "elapsed_ms": 37.9303,
+          "parent_peak_rss_bytes": 4845568,
+          "parent_peak_commit_bytes": 757760,
+          "stdout": "{\"operations\":[\"capabilities\",\"verify\",\"extract\",\"launch\"],\"schema\":\"vep.poc.v1\"}\n"
+        },
+        {
+          "elapsed_ms": 37.4655,
+          "parent_peak_rss_bytes": 4849664,
+          "parent_peak_commit_bytes": 761856,
+          "stdout": "{\"operations\":[\"capabilities\",\"verify\",\"extract\",\"launch\"],\"schema\":\"vep.poc.v1\"}\n"
+        },
+        {
+          "elapsed_ms": 37.904,
+          "parent_peak_rss_bytes": 4845568,
+          "parent_peak_commit_bytes": 757760,
+          "stdout": "{\"operations\":[\"capabilities\",\"verify\",\"extract\",\"launch\"],\"schema\":\"vep.poc.v1\"}\n"
+        },
+        {
+          "elapsed_ms": 37.9894,
+          "parent_peak_rss_bytes": 4849664,
+          "parent_peak_commit_bytes": 757760,
+          "stdout": "{\"operations\":[\"capabilities\",\"verify\",\"extract\",\"launch\"],\"schema\":\"vep.poc.v1\"}\n"
+        },
+        {
+          "elapsed_ms": 38.0535,
+          "parent_peak_rss_bytes": 4841472,
+          "parent_peak_commit_bytes": 757760,
+          "stdout": "{\"operations\":[\"capabilities\",\"verify\",\"extract\",\"launch\"],\"schema\":\"vep.poc.v1\"}\n"
+        },
+        {
+          "elapsed_ms": 37.9654,
+          "parent_peak_rss_bytes": 4841472,
+          "parent_peak_commit_bytes": 761856,
+          "stdout": "{\"operations\":[\"capabilities\",\"verify\",\"extract\",\"launch\"],\"schema\":\"vep.poc.v1\"}\n"
+        }
+      ],
+      "go": [
+        {
+          "elapsed_ms": 174.8221,
+          "parent_peak_rss_bytes": 7225344,
+          "parent_peak_commit_bytes": 46174208,
+          "stdout": "{\"operations\":[\"capabilities\",\"verify\",\"extract\",\"launch\"],\"schema\":\"vep.poc.v1\"}\n"
+        },
+        {
+          "elapsed_ms": 39.9964,
+          "parent_peak_rss_bytes": 7262208,
+          "parent_peak_commit_bytes": 46174208,
+          "stdout": "{\"operations\":[\"capabilities\",\"verify\",\"extract\",\"launch\"],\"schema\":\"vep.poc.v1\"}\n"
+        },
+        {
+          "elapsed_ms": 40.7741,
+          "parent_peak_rss_bytes": 7225344,
+          "parent_peak_commit_bytes": 46166016,
+          "stdout": "{\"operations\":[\"capabilities\",\"verify\",\"extract\",\"launch\"],\"schema\":\"vep.poc.v1\"}\n"
+        },
+        {
+          "elapsed_ms": 40.3357,
+          "parent_peak_rss_bytes": 7413760,
+          "parent_peak_commit_bytes": 46288896,
+          "stdout": "{\"operations\":[\"capabilities\",\"verify\",\"extract\",\"launch\"],\"schema\":\"vep.poc.v1\"}\n"
+        },
+        {
+          "elapsed_ms": 40.2917,
+          "parent_peak_rss_bytes": 7225344,
+          "parent_peak_commit_bytes": 46161920,
+          "stdout": "{\"operations\":[\"capabilities\",\"verify\",\"extract\",\"launch\"],\"schema\":\"vep.poc.v1\"}\n"
+        },
+        {
+          "elapsed_ms": 40.0622,
+          "parent_peak_rss_bytes": 7274496,
+          "parent_peak_commit_bytes": 46161920,
+          "stdout": "{\"operations\":[\"capabilities\",\"verify\",\"extract\",\"launch\"],\"schema\":\"vep.poc.v1\"}\n"
+        },
+        {
+          "elapsed_ms": 39.9707,
+          "parent_peak_rss_bytes": 7221248,
+          "parent_peak_commit_bytes": 46157824,
+          "stdout": "{\"operations\":[\"capabilities\",\"verify\",\"extract\",\"launch\"],\"schema\":\"vep.poc.v1\"}\n"
+        },
+        {
+          "elapsed_ms": 39.8411,
+          "parent_peak_rss_bytes": 7364608,
+          "parent_peak_commit_bytes": 46284800,
+          "stdout": "{\"operations\":[\"capabilities\",\"verify\",\"extract\",\"launch\"],\"schema\":\"vep.poc.v1\"}\n"
+        },
+        {
+          "elapsed_ms": 40.5949,
+          "parent_peak_rss_bytes": 7413760,
+          "parent_peak_commit_bytes": 46301184,
+          "stdout": "{\"operations\":[\"capabilities\",\"verify\",\"extract\",\"launch\"],\"schema\":\"vep.poc.v1\"}\n"
+        }
+      ]
+    },
+    "verify": {
+      "rust": [
+        {
+          "elapsed_ms": 137.7783,
+          "parent_peak_rss_bytes": 4931584,
+          "parent_peak_commit_bytes": 770048,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 54.5504,
+          "parent_peak_rss_bytes": 4931584,
+          "parent_peak_commit_bytes": 761856,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 54.2221,
+          "parent_peak_rss_bytes": 4931584,
+          "parent_peak_commit_bytes": 757760,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 54.5808,
+          "parent_peak_rss_bytes": 4931584,
+          "parent_peak_commit_bytes": 761856,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 54.253,
+          "parent_peak_rss_bytes": 4931584,
+          "parent_peak_commit_bytes": 770048,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 54.5021,
+          "parent_peak_rss_bytes": 4931584,
+          "parent_peak_commit_bytes": 770048,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 54.2487,
+          "parent_peak_rss_bytes": 4931584,
+          "parent_peak_commit_bytes": 765952,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 54.8228,
+          "parent_peak_rss_bytes": 4931584,
+          "parent_peak_commit_bytes": 765952,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 54.475,
+          "parent_peak_rss_bytes": 4935680,
+          "parent_peak_commit_bytes": 770048,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        }
+      ],
+      "go": [
+        {
+          "elapsed_ms": 53.2608,
+          "parent_peak_rss_bytes": 8904704,
+          "parent_peak_commit_bytes": 47439872,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 50.9256,
+          "parent_peak_rss_bytes": 8687616,
+          "parent_peak_commit_bytes": 47304704,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 50.7844,
+          "parent_peak_rss_bytes": 8691712,
+          "parent_peak_commit_bytes": 47308800,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 50.5958,
+          "parent_peak_rss_bytes": 8757248,
+          "parent_peak_commit_bytes": 47308800,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 50.3005,
+          "parent_peak_rss_bytes": 8871936,
+          "parent_peak_commit_bytes": 47452160,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 50.7362,
+          "parent_peak_rss_bytes": 8740864,
+          "parent_peak_commit_bytes": 47300608,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 50.8095,
+          "parent_peak_rss_bytes": 8749056,
+          "parent_peak_commit_bytes": 47316992,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 50.5754,
+          "parent_peak_rss_bytes": 8691712,
+          "parent_peak_commit_bytes": 47312896,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 50.7191,
+          "parent_peak_rss_bytes": 8744960,
+          "parent_peak_commit_bytes": 47312896,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        }
+      ]
+    },
+    "extract": {
+      "rust": [
+        {
+          "elapsed_ms": 66.4575,
+          "parent_peak_rss_bytes": 4993024,
+          "parent_peak_commit_bytes": 774144,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 67.4914,
+          "parent_peak_rss_bytes": 4997120,
+          "parent_peak_commit_bytes": 782336,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 67.1607,
+          "parent_peak_rss_bytes": 4997120,
+          "parent_peak_commit_bytes": 778240,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 65.7828,
+          "parent_peak_rss_bytes": 4997120,
+          "parent_peak_commit_bytes": 774144,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 66.8371,
+          "parent_peak_rss_bytes": 4997120,
+          "parent_peak_commit_bytes": 774144,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 66.108,
+          "parent_peak_rss_bytes": 4997120,
+          "parent_peak_commit_bytes": 778240,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 65.5566,
+          "parent_peak_rss_bytes": 4997120,
+          "parent_peak_commit_bytes": 778240,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 65.3974,
+          "parent_peak_rss_bytes": 4997120,
+          "parent_peak_commit_bytes": 774144,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 65.8151,
+          "parent_peak_rss_bytes": 4988928,
+          "parent_peak_commit_bytes": 765952,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        }
+      ],
+      "go": [
+        {
+          "elapsed_ms": 61.227,
+          "parent_peak_rss_bytes": 8904704,
+          "parent_peak_commit_bytes": 47472640,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 60.942,
+          "parent_peak_rss_bytes": 8912896,
+          "parent_peak_commit_bytes": 47472640,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 62.3159,
+          "parent_peak_rss_bytes": 8757248,
+          "parent_peak_commit_bytes": 47329280,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 62.6761,
+          "parent_peak_rss_bytes": 8941568,
+          "parent_peak_commit_bytes": 47747072,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 60.9877,
+          "parent_peak_rss_bytes": 8753152,
+          "parent_peak_commit_bytes": 47329280,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 60.9078,
+          "parent_peak_rss_bytes": 8757248,
+          "parent_peak_commit_bytes": 47333376,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 61.9381,
+          "parent_peak_rss_bytes": 8794112,
+          "parent_peak_commit_bytes": 47329280,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 61.5089,
+          "parent_peak_rss_bytes": 8970240,
+          "parent_peak_commit_bytes": 47468544,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 61.9078,
+          "parent_peak_rss_bytes": 8769536,
+          "parent_peak_commit_bytes": 47337472,
+          "stdout": "{\"bytes\":4194304,\"files\":16,\"manifest_sha256\":\"4f160faf458e221cc5abb332234cd5c1559592ab1c03b426fb8fabf907123400\",\"ok\":true}\n"
+        }
+      ]
+    },
+    "launch": {
+      "rust": [
+        {
+          "elapsed_ms": 87.6041,
+          "parent_peak_rss_bytes": 5324800,
+          "parent_peak_commit_bytes": 835584,
+          "stdout": "synthetic-worker\r\n{\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 86.4155,
+          "parent_peak_rss_bytes": 5324800,
+          "parent_peak_commit_bytes": 839680,
+          "stdout": "synthetic-worker\r\n{\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 85.9229,
+          "parent_peak_rss_bytes": 5324800,
+          "parent_peak_commit_bytes": 847872,
+          "stdout": "synthetic-worker\r\n{\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 84.1956,
+          "parent_peak_rss_bytes": 5324800,
+          "parent_peak_commit_bytes": 839680,
+          "stdout": "synthetic-worker\r\n{\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 84.1049,
+          "parent_peak_rss_bytes": 5324800,
+          "parent_peak_commit_bytes": 835584,
+          "stdout": "synthetic-worker\r\n{\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 83.9518,
+          "parent_peak_rss_bytes": 5324800,
+          "parent_peak_commit_bytes": 839680,
+          "stdout": "synthetic-worker\r\n{\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 84.0176,
+          "parent_peak_rss_bytes": 5324800,
+          "parent_peak_commit_bytes": 839680,
+          "stdout": "synthetic-worker\r\n{\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 83.6735,
+          "parent_peak_rss_bytes": 5320704,
+          "parent_peak_commit_bytes": 839680,
+          "stdout": "synthetic-worker\r\n{\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 85.0656,
+          "parent_peak_rss_bytes": 5320704,
+          "parent_peak_commit_bytes": 835584,
+          "stdout": "synthetic-worker\r\n{\"ok\":true}\n"
+        }
+      ],
+      "go": [
+        {
+          "elapsed_ms": 125.6887,
+          "parent_peak_rss_bytes": 8187904,
+          "parent_peak_commit_bytes": 46903296,
+          "stdout": "synthetic-worker\r\n{\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 87.1157,
+          "parent_peak_rss_bytes": 8187904,
+          "parent_peak_commit_bytes": 46915584,
+          "stdout": "synthetic-worker\r\n{\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 88.5985,
+          "parent_peak_rss_bytes": 8192000,
+          "parent_peak_commit_bytes": 46915584,
+          "stdout": "synthetic-worker\r\n{\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 86.9156,
+          "parent_peak_rss_bytes": 8048640,
+          "parent_peak_commit_bytes": 46706688,
+          "stdout": "synthetic-worker\r\n{\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 87.127,
+          "parent_peak_rss_bytes": 8060928,
+          "parent_peak_commit_bytes": 46714880,
+          "stdout": "synthetic-worker\r\n{\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 87.1553,
+          "parent_peak_rss_bytes": 7991296,
+          "parent_peak_commit_bytes": 46714880,
+          "stdout": "synthetic-worker\r\n{\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 86.888,
+          "parent_peak_rss_bytes": 8187904,
+          "parent_peak_commit_bytes": 46915584,
+          "stdout": "synthetic-worker\r\n{\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 87.0754,
+          "parent_peak_rss_bytes": 8183808,
+          "parent_peak_commit_bytes": 46911488,
+          "stdout": "synthetic-worker\r\n{\"ok\":true}\n"
+        },
+        {
+          "elapsed_ms": 87.1201,
+          "parent_peak_rss_bytes": 8192000,
+          "parent_peak_commit_bytes": 46919680,
+          "stdout": "synthetic-worker\r\n{\"ok\":true}\n"
+        }
+      ]
+    }
+  }
+}

@@ -1,5 +1,8 @@
 # Installation, distribution and updates
 
+The experimental native installer/launcher and private runtime are documented in
+[the local development record](native-install-development.md). They are not yet a supported installer or distribution.
+
 ## Install the complete checkout
 
 VEP currently needs `src`, `.agents` (including promotion evidence), `config`, `schemas`,

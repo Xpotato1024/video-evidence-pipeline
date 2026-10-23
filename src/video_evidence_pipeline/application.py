@@ -707,13 +707,17 @@ def recover_job(
         failure_code="RECOVERY_CHILD_LOCK_FAILED",
         failure_message="recovery child creation could not be locked",
     ):
-        pending_child = JobWorkspace(root=jobs_root / child_job.job_id, jobs_root=jobs_root)
+        pending_child = JobWorkspace(
+            root=jobs_root / child_job.job_id,
+            jobs_root=jobs_root,
+            resource_root=qualified.workspace.resources_root,
+        )
         target_was_absent = not pending_child.root.exists()
         child = pending_child
         child_created = False
         try:
             child = JobWorkspace.create(
-                qualified.workspace.jobs_root.parent.parent, child_job.job_id
+                qualified.workspace.resources_root, child_job.job_id, jobs_root=jobs_root
             )
             child_created = True
             atomic_write_new_bytes(
@@ -3217,7 +3221,7 @@ def _guide_semantic_paths(
     skill_id: str,
     draft_version: str | None = None,
 ) -> dict[str, str]:
-    repository_root = workspace.jobs_root.parent.parent
+    repository_root = workspace.resources_root
     request = _guide_semantic_request_path(
         workspace,
         operation=operation,

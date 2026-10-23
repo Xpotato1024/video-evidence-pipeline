@@ -234,7 +234,7 @@ def _semantic_exchange_paths(
     from video_evidence_pipeline.storage.layout import JobWorkspace
 
     workspace = JobWorkspace.open(workspace_path)
-    repository_root = workspace.jobs_root.parent.parent
+    repository_root = workspace.resources_root
     structured_schema = export_structured_output_schema(
         response_schema,
         workspace.safe_path(f"semantic/structured-output-schemas/{response_schema}"),
@@ -719,7 +719,7 @@ def transcribe(
     from video_evidence_pipeline.transcription.container import ContainerAsrBackend
 
     opened = JobWorkspace.open(workspace)
-    repository_root = opened.jobs_root.parent.parent
+    repository_root = opened.resources_root
     job = load_job_yaml(opened.job_yaml)
     backend_override = (
         None

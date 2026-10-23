@@ -15,6 +15,7 @@ from pathlib import Path
 from video_evidence_pipeline.domain.hashing import sha256_file
 from video_evidence_pipeline.domain.serialization import fingerprint
 from video_evidence_pipeline.errors import configuration_error, integrity_error
+from video_evidence_pipeline.runtime_context import model_root
 from video_evidence_pipeline.storage.atomic import atomic_write_json
 from video_evidence_pipeline.storage.layout import is_link_or_junction
 from video_evidence_pipeline.storage.locking import exclusive_file_lock
@@ -135,9 +136,9 @@ def publish_model_payload(
     revision_root = destination.parent
     profile_root = revision_root.parent
     for directory in (
-        repository_root / ".local",
-        repository_root / ".local" / "models",
-        repository_root / ".local" / "models" / "asr",
+        model_root(repository_root).parent,
+        model_root(repository_root),
+        model_root(repository_root) / "asr",
         profile_root,
     ):
         if directory.exists() and is_link_or_junction(directory):
@@ -173,15 +174,15 @@ def publish_model_payload(
 
 
 def _profile_root(repository_root: Path, profile_id: str) -> Path:
-    return repository_root / ".local" / "models" / "asr" / profile_id
+    return model_root(repository_root) / "asr" / profile_id
 
 
 def _ensure_profile_storage(repository_root: Path, profile_id: str) -> Path:
     profile_root = _profile_root(repository_root, profile_id)
     for directory in (
-        repository_root / ".local",
-        repository_root / ".local" / "models",
-        repository_root / ".local" / "models" / "asr",
+        model_root(repository_root).parent,
+        model_root(repository_root),
+        model_root(repository_root) / "asr",
         profile_root,
     ):
         if directory.exists() and is_link_or_junction(directory):

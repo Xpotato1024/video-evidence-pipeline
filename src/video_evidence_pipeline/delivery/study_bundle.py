@@ -370,8 +370,18 @@ def _copy_verified(source: Path, target: Path, entry: StudyBundleFile) -> None:
 def publish_study_bundle(workspace, job, fixed, history, human_review, approval, destination):
     """Publish a validated archival view, not a mutable VEP workspace."""
     destination = _safe_absolute(destination)
-    repository = workspace.jobs_root.parent.parent.resolve()
-    if destination.is_relative_to(repository) or repository.is_relative_to(destination):
+    from video_evidence_pipeline.runtime_context import current_runtime
+
+    context = current_runtime()
+    protected_roots = (
+        workspace.resources_root.resolve(),
+        workspace.jobs_root.parent.resolve(),
+        *((context.data.bindings_root.resolve(), *context.protected_roots) if context else ()),
+    )
+    if any(
+        destination.is_relative_to(root) or root.is_relative_to(destination)
+        for root in (item.resolve() for item in protected_roots)
+    ):
         raise state_error(
             "STUDY_BUNDLE_DESTINATION_INVALID", "choose a destination outside the VEP repository"
         )

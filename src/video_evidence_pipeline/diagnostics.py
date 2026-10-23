@@ -12,6 +12,7 @@ from typing import Any
 from video_evidence_pipeline import __version__
 from video_evidence_pipeline.domain.hashing import sha256_file
 from video_evidence_pipeline.errors import VepError, state_error
+from video_evidence_pipeline.runtime_context import current_runtime, resource_root
 from video_evidence_pipeline.semantic.skills import load_skill_snapshot
 
 _SEMANTIC_SKILLS = (
@@ -30,7 +31,7 @@ def diagnose_installation(repository_root: Path, *, media: bool = False) -> dict
     A successful report covers installation only. It does not authorize a source,
     validate a job, or assert that an ASR image/model/device is ready.
     """
-    root = repository_root.resolve()
+    root = resource_root(repository_root).resolve()
     checks: list[dict[str, Any]] = []
 
     def record(name: str, ok: bool, code: str, remedy: str, **details: Any) -> None:
@@ -140,6 +141,7 @@ def diagnose_installation(repository_root: Path, *, media: bool = False) -> dict
     return {
         "ok": all(check["ok"] for check in checks),
         "vep_version": __version__,
+        "installation_kind": "private-runtime" if current_runtime() else "source-checkout",
         "platform": sys.platform,
         "lock_sha256": lock_sha256,
         "mode": "media" if media else "transcript",
