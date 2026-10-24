@@ -137,6 +137,7 @@ const CHECK: u16 = 17;
 const DETAILS: u16 = 18;
 const PROGRESS: u16 = 19;
 const SUMMARY: u16 = 20;
+const LICENSES: u16 = 21;
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain([0]).collect()
 }
@@ -198,6 +199,8 @@ struct Window {
     busy: bool,
     compatible: bool,
     unknown: bool,
+    user_mode: bool,
+    license_offset: u32,
 }
 impl Window {
     fn control(&self, id: u16) -> Handle {
@@ -220,6 +223,7 @@ impl Window {
         );
     }
     fn invalidate(&mut self) {
+        self.license_offset = 0;
         self.pending = None;
         set(
             self.control(SUMMARY),
@@ -232,7 +236,7 @@ impl Window {
     }
     fn buttons(&self) {
         for id in [
-            ROOT, MANIFEST, PAYLOAD, DIGEST, INIT, PLAN, ROLLBACK, STATUS, REPAIR,
+            ROOT, MANIFEST, PAYLOAD, DIGEST, INIT, PLAN, ROLLBACK, STATUS, REPAIR, LICENSES,
         ] {
             unsafe {
                 EnableWindow(self.control(id), (!self.busy && self.compatible) as i32);
@@ -288,6 +292,7 @@ impl Window {
         spawn(
             self.engine.clone(),
             fields.root,
+            self.user_mode,
             request,
             self.input.clone(),
             self.tx.clone(),
@@ -322,6 +327,14 @@ impl Window {
             return;
         }
         match id {
+            LICENSES => {
+                let offset = self.license_offset;
+                self.invalidate();
+                let mut request = self.inputs().fields();
+                request["op"] = json!("licenses");
+                request["license_offset"] = json!(offset);
+                self.begin(request);
+            }
             CHECK => self.buttons(),
             PLAN | ROLLBACK => {
                 self.invalidate();
@@ -342,14 +355,18 @@ impl Window {
                     &format!(
                         "{}\r\nTarget: {}\r\nJobs/data: retained; no implicit migration.",
                         if id == INIT {
-                            "Initialize empty DEVELOPMENT folder"
+                            if self.user_mode {
+                                "Create/resume private per-user installation (existing ACLs unchanged)"
+                            } else {
+                                "Initialize empty DEVELOPMENT folder"
+                            }
                         } else {
                             "Repair: reconcile engine journal only"
                         },
                         inputs.root
                     ),
                 );
-                self.details(&json!({"action":if id==INIT {"Initialize empty DEVELOPMENT test folder"} else {"Reconcile existing journal using common engine"},"root":inputs.root,"data_policy":"No job/data deletion or migration; engine validates prerequisites","development_only":true}));
+                self.details(&json!({"action":if id==INIT {"Initialize selected installation"} else {"Reconcile existing journal and retained entrypoints using common engine"},"root":inputs.root,"data_policy":"No job/data deletion or migration; engine validates prerequisites","development_only":!self.user_mode,"distribution_ready":false}));
                 self.pending = Some(if id == INIT {
                     Pending::Initialize(inputs)
                 } else {
@@ -368,9 +385,9 @@ impl Window {
                 let inputs = self.inputs();
                 let request = match self.pending.take() {
                     Some(Pending::Install(plan)) => plan.request(&inputs),
-                    Some(Pending::Initialize(original)) if inputs == original => {
-                        Ok(json!({"op":"init-sandbox"}))
-                    }
+                    Some(Pending::Initialize(original)) if inputs == original => Ok(
+                        json!({"op":if self.user_mode {"init-user"} else {"init-sandbox"},"confirmed":true}),
+                    ),
                     Some(Pending::Repair(original)) if inputs == original => {
                         Ok(json!({"op":"repair"}))
                     }
@@ -453,13 +470,53 @@ impl Window {
                             if self.operation == "capabilities" {
                                 self.compatible = ok
                                     && value["value"]["streaming_events"] == true
-                                    && value["value"]["development_only"] == true;
+                                    && value["value"]["development_only"] == !self.user_mode;
+                                if self.user_mode && ok {
+                                    if text(self.control(ROOT)).is_empty() {
+                                        if let Some(root) = value["value"]["resolved_root"].as_str()
+                                        {
+                                            set(self.control(ROOT), root);
+                                        }
+                                    }
+                                    for (id, key) in [
+                                        (MANIFEST, "manifest"),
+                                        (PAYLOAD, "payload"),
+                                        (DIGEST, "manifest_sha256"),
+                                    ] {
+                                        if text(self.control(id)).is_empty() {
+                                            if let Some(text) =
+                                                value["value"]["bundle"][key].as_str()
+                                            {
+                                                set(self.control(id), text);
+                                            }
+                                        }
+                                    }
+                                }
                                 if !self.compatible {
                                     set(
                                         self.control(PROGRESS),
                                         "PROTOCOL_UNSUPPORTED; no fallback",
                                     );
                                 }
+                            } else if self.operation == "licenses" && ok {
+                                self.license_offset =
+                                    value["value"]["next_offset"].as_u64().unwrap_or(0) as u32;
+                                set(
+                                    self.control(DETAILS),
+                                    &value["value"]["text"]
+                                        .as_str()
+                                        .unwrap_or("")
+                                        .replace('\n', "\r\n"),
+                                );
+                                set(
+                                    self.control(SUMMARY),
+                                    &format!(
+                                        "License text: offset {} / {} characters\r\nSHA-256: {}\r\nPress Licenses > for the next page; preview a new plan before confirming.",
+                                        value["value"]["offset"],
+                                        value["value"]["total_characters"],
+                                        value["value"]["sha256"].as_str().unwrap_or("")
+                                    ),
+                                );
                             } else if self.operation == "plan" && ok {
                                 match ConfirmedPlan::new(
                                     value["value"].clone(),
@@ -529,6 +586,7 @@ impl Window {
 fn spawn(
     engine: PathBuf,
     root: String,
+    user_mode: bool,
     request: Value,
     input: Arc<Mutex<Pipe>>,
     tx: SyncSender<Event>,
@@ -544,8 +602,20 @@ fn spawn(
         }
         use std::os::windows::process::CommandExt;
         let mut command = Command::new(engine);
+        if user_mode && root.is_empty() {
+            command.arg("--user");
+        } else {
+            command.args([
+                if user_mode {
+                    "--user-root"
+                } else {
+                    "--sandbox-root"
+                },
+                &root,
+            ]);
+        }
         command
-            .args(["--sandbox-root", &root, "--protocol=jsonl"])
+            .arg("--protocol=jsonl")
             .creation_flags(0x08000000)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -668,12 +738,15 @@ impl Window {
             positions.push((201 + index as u16, 12, 60 + index as i32 * 34, 148, 26));
             positions.push((*id, 166, 60 + index as i32 * 34, width - 178, 26));
         }
-        for (index, id) in [INIT, PLAN, ROLLBACK, STATUS, REPAIR].iter().enumerate() {
+        for (index, id) in [INIT, PLAN, ROLLBACK, STATUS, REPAIR, LICENSES]
+            .iter()
+            .enumerate()
+        {
             positions.push((
                 *id,
-                12 + index as i32 * (width - 24) / 5,
+                12 + index as i32 * (width - 24) / 6,
                 204,
-                (width - 34) / 5,
+                (width - 34) / 6,
                 32,
             ));
         }
@@ -777,6 +850,8 @@ unsafe extern "system" fn procedure(
 }
 
 pub fn show() {
+    let arguments: Vec<_> = std::env::args().skip(1).collect();
+    let user_mode = !arguments.iter().any(|a| a == "--sandbox-root");
     let instance = unsafe { GetModuleHandleW(std::ptr::null()) };
     let name = wide("VepDevelopmentSetup");
     let class = WindowClass {
@@ -798,7 +873,12 @@ pub fn show() {
         CreateWindowExW(
             0x10000,
             name.as_ptr(),
-            wide("VEP setup — DEVELOPMENT SANDBOX").as_ptr(),
+            wide(if user_mode {
+                "VEP setup — Windows x64 offline candidate"
+            } else {
+                "VEP setup — DEVELOPMENT SANDBOX"
+            })
+            .as_ptr(),
             0xcf0000,
             100,
             80,
@@ -835,10 +915,19 @@ pub fn show() {
         busy: false,
         compatible: false,
         unknown: false,
+        user_mode,
+        license_offset: 0,
     });
-    state.add(200,"STATIC","Development only / 開発用。未署名・供給元未認証。テスト用の空フォルダーだけで使用してください。",0);
+    state.add(200,"STATIC",if user_mode {"Unsigned local candidate / 未署名のローカル検証候補。昇格せず選択したユーザー領域へ導入します。既存データ・既存ACLは変更しません。"} else {"Development only / 開発用。未署名・供給元未認証。テスト用の空フォルダーだけで使用してください。"},0);
     for (index, (id, label)) in [
-        (ROOT, "&Root / テスト先"),
+        (
+            ROOT,
+            if user_mode {
+                "&Root / 導入先"
+            } else {
+                "&Root / テスト先"
+            },
+        ),
         (MANIFEST, "&Manifest"),
         (PAYLOAD, "&Payload"),
         (DIGEST, "&SHA-256"),
@@ -855,6 +944,7 @@ pub fn show() {
         (ROLLBACK, "Plan roll&back"),
         (STATUS, "S&tatus"),
         (REPAIR, "R&epair…"),
+        (LICENSES, "&Licenses >"),
     ] {
         state.add(id, "BUTTON", label, 0x10000);
     }
@@ -868,16 +958,15 @@ pub fn show() {
     state.add(
         CHECK,
         "BUTTON",
-        "内容・対象・開発用の条件を確認した / I revie&wed this plan",
+        "対象・同梱license・未署名候補の条件に同意 / I revie&wed this plan and licenses",
         0x10003,
     );
     state.add(CONFIRM, "BUTTON", "&Confirm / 実行", 0x10001);
     state.add(CANCEL, "BUTTON", "Ca&ncel / 取消", 0x10000);
     state.add(PROGRESS, "STATIC", "Connecting to common engine…", 0);
-    let arguments: Vec<_> = std::env::args().skip(1).collect();
     for pair in arguments.chunks_exact(2) {
         let id = match pair[0].as_str() {
-            "--sandbox-root" => ROOT,
+            "--sandbox-root" | "--user-root" => ROOT,
             "--manifest" => MANIFEST,
             "--payload" => PAYLOAD,
             "--sha256" => DIGEST,

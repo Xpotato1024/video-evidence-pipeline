@@ -306,3 +306,77 @@ reviewerはcode/保存証拠の確認であり、実行担当はprimary。原本
 - P3/P4: 開発GUI以降のaccessibility/OS受入、TUF/client/key運用/撤回policy、任意component、Linux/macOS/ARM。
 
 設計上の方針やローカルの成功を、本番対応・再配布可能・release-readyと読み替えない。
+
+## Windows user installer continuation checkpoint — 2026-10-24
+
+Local worktree `vep-windows-installer`, branch `codex/windows-user-installer`,
+baseline main `809b352cd471721b1fc4e769880c958c48902705`.
+This continuation is local implementation/testing/package preparation only.
+No push, PR, merge, release, production profile installation, signing credentials,
+account changes, browser changes, or existing ACL repairs are performed.
+It is paused at the user's request to permit an application restart; it is not
+distribution-ready or complete production acceptance.
+
+Implemented, with integration still pending:
+
+- Read-only Known Folder discovery, explicit `--user-root`, normal-token checks,
+  protected current-user/SYSTEM/Administrators DACL at NEW root creation only.
+  Existing roots require verified ownership/private ACL and are never repaired.
+- Separate user marker/root identity and resumable initialization; mode/root/
+  installation identity/generation are bound to plans. All versions/data retained.
+- Shared CLI/GUI user mode, explicit confirmation/license acceptance, bounded
+  license-text pages, receipt-bound retained engine/GUI/launcher preparation.
+  End-to-end installed entrypoint and GUI execution are NOT yet validated.
+- Directory traversal handles and no-follow final file handles, single-link file
+  checks, common state/payload/lock adapters, private state/program inventory checks.
+  Directory handles deny DELETE, allowing child writes/atomic replacement.
+  This is not a claim of protection from malicious current-SID metadata changes
+  or administrators. Adversarial/race/fault acceptance remains pending.
+- Windows reserved/trailing-dot release IDs are rejected. Direct Win32 paths and
+  Python context paths use explicit extended paths; actual long-root runtime
+  acceptance remains pending, without registry/security-policy changes.
+- A pinned notice-source catalog and opt-in local notice collector preserve full
+  runtime/wheel/native/toolchain notices and upstream SBOM evidence. The collector
+  has NOT completed; the final Windows payload/SBOM/bundle is NOT prepared.
+
+Verified checkpoint scope:
+
+- Current Windows process token is unelevated, Administrators not enabled.
+  This is not a clean standard-user account/VM without developer tools.
+- Fault-injection debug build passes. Rust existing units: engine 3, GUI client 2.
+- `tests/test_user_install.py`: 6 passed, latest 0.90 seconds. Fresh isolated roots
+  cover confirmation, repeated initialization/data retention, interruption at both
+  initialization markers, existing non-private/foreign-root unchanged rejection,
+  moved-marker identity rejection, and hardlinked state rejection.
+- Initial root tests failed 5/6 because marker replacement returned Windows
+  sharing violation 32. Parent directory share-write was necessary for child
+  atomic replacement. After correction all 6 passed; prior failed evidence is kept.
+- Ruff focused check/format, Cargo formatting, diff whitespace pass. No full source
+  pytest, real user-mode runtime update/rollback/repair, process concurrency/race,
+  final normal-build GUI integration, disk-full/AV/power-loss or signed VM pass claim.
+
+Known resume issues:
+
+1. Proposed default `%LOCALAPPDATA%\VEP` collides with an older, unowned `models`
+   directory on this host (no installer marker). It was read only and must remain
+   untouched. Select a separate owned namespace or explicitly model coexistence
+   before testing any default-location installation. Current isolated roots work.
+2. Notice collection stops on `r-efi 5.2.0`: no standalone notice file matched the
+   collector. It is an upstream all-target pydantic-core dependency, not established
+   Windows linkage. Inspect the verified cached archive and handle its actual
+   license material honestly; do not silently drop it or call the dossier complete.
+3. CPython upstream SPDX and pydantic-core CycloneDX contain other targets; preserve
+   them as upstream evidence, not exact Windows static-link inventories. Microsoft
+   redistribution qualification/terms and remaining linkage coverage are open gates.
+4. Complete local bundle builder/SPDX file inventory, actual private runtime and
+   retained-entrypoint lifecycle, license-view GUI UX and negative/race/fault tests.
+   Review the changed security/file-operation implementation independently.
+5. Signing/credential decisions and clean general-user environment acceptance are
+   pending. Do not create credentials/accounts, change permissions/security settings,
+   incur costs, or expand online/OS/publication scope without reporting the boundary.
+
+Reproduction and exact local evidence are in the task's
+`evidence/windows-user-installer-resume.md`, `user-root-v1.xml` (initial failures),
+`user-root-v2.xml`, `user-root-pause.xml`, and `user-native-cargo-metadata.json`.
+Downloaded public license sources and the unfinished dossier remain in task-local
+`native-build/license-cache` and `native-build/user-notices-v1`; neither is a release.
