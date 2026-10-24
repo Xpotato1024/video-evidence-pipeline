@@ -61,19 +61,16 @@ fn bundled_fields() -> Option<Value> {
     )
 }
 fn default_user_root() -> Result<PathBuf> {
-    if let Ok(executable) = env::current_exe() {
-        if let Some(bin) = executable.parent() {
-            if bin.file_name().is_some_and(|n| n == "bin")
-                && bin
-                    .parent()
-                    .and_then(|p| p.file_name())
-                    .is_some_and(|n| n == "app")
-            {
-                if let Some(root) = bin.parent().and_then(|p| p.parent()) {
-                    return Ok(root.to_path_buf());
-                }
-            }
-        }
+    if let Ok(executable) = env::current_exe()
+        && let Some(bin) = executable.parent()
+        && bin.file_name().is_some_and(|n| n == "bin")
+        && bin
+            .parent()
+            .and_then(|p| p.file_name())
+            .is_some_and(|n| n == "app")
+        && let Some(root) = bin.parent().and_then(|p| p.parent())
+    {
+        return Ok(root.to_path_buf());
     }
     ownership::default_root()
 }

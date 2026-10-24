@@ -5,7 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import queue
+import shutil
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -16,7 +19,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def call(root, op, *, environment=None, **fields):
+def call(root, op, *, environment=None, timeout=180, **fields):
     request = {"schema": "vep.setup.v1", "id": "user-test", "op": op, **fields}
     result = subprocess.run(
         [ENGINE, "--user-root", str(root), "--protocol=jsonl"],
@@ -24,7 +27,7 @@ def call(root, op, *, environment=None, **fields):
         capture_output=True,
         text=True,
         encoding="utf-8",
-        timeout=180,
+        timeout=timeout,
         env=environment,
     )
     return result, json.loads(result.stdout) if result.stdout else {}
@@ -97,12 +100,45 @@ def test_linked_state_is_rejected_without_writing_the_other_name(tmp_path):
     assert alias.read_bytes() == before
 
 
-@pytest.mark.parametrize("name", ["CON", "NUL.txt", "trailing.", "trailing "])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "CON",
+        "NUL.txt",
+        "trailing.",
+        "trailing ",
+        "bad*name",
+        "bad?name",
+        'bad"name',
+        "bad<name",
+        "bad>name",
+        "bad|name",
+        "COM¹",
+        "com².txt",
+        "COM³",
+        "LPT¹",
+        "LPT².txt",
+        "LPT³",
+        "a" * 256,
+        "COM1",
+        "COM2.txt",
+        "COM3",
+        "LPT1",
+        "LPT2.txt",
+        "LPT3",
+    ],
+)
 def test_invalid_user_root_is_rejected_before_creating_any_sibling(tmp_path, name):
     before = list(tmp_path.iterdir())
     result, value = call(tmp_path / name, "init-user", confirmed=True)
     assert result.returncode and value["code"] == "PATH_UNSUPPORTED"
     assert list(tmp_path.iterdir()) == before
+
+
+def test_unicode_component_uses_utf16_not_utf8_limit(tmp_path):
+    root = tmp_path / ("\u65e5" * 90)
+    assert len(root.name.encode("utf-8")) > 255
+    assert call(root, "init-user", confirmed=True)[0].returncode == 0
 
 
 def test_junction_roots_and_state_are_rejected_without_target_changes(tmp_path):
@@ -190,6 +226,8 @@ def test_user_real_payload_lifecycle_retained_launcher_and_jobs(tmp_path):
     assert result.returncode == 0 and "third-party notices" in page["value"]["text"]
     assert page["value"]["next_offset"] > 0
     assert install(root, first)["value"]["active"]["generation"] == 1
+    check_private_module_subprocess(root / "app/versions/user-one", tmp_path / "hostile-cwd")
+    installed_cli(root, "doctor", "--json")  # Inventory still accepts the immutable version.
     import msvcrt
 
     with (root / "state/writer.lock").open("r+b") as locked:
@@ -305,7 +343,8 @@ def test_entrypoint_interruption_recovers_from_retained_version(tmp_path, point)
 
 
 @pytest.mark.skipif(not PAYLOAD, reason="user payload not supplied")
-def test_user_cancel_before_commit_preserves_active_and_data(tmp_path):
+@pytest.mark.parametrize("checkpoint", ["first", "private-check"])
+def test_user_cancel_before_commit_preserves_active_and_data(tmp_path, checkpoint):
     root = tmp_path / "cancelled"
     assert call(root, "init-user", confirmed=True)[0].returncode == 0
     sentinel = root / "data/synthetic.txt"
@@ -320,6 +359,17 @@ def test_user_cancel_before_commit_preserves_active_and_data(tmp_path):
         text=True,
         encoding="utf-8",
     )
+    lines = queue.Queue()
+
+    def read_events():
+        try:
+            for line in process.stdout:
+                lines.put(line)
+        finally:
+            lines.put(None)
+
+    reader = threading.Thread(target=read_events, daemon=True)
+    reader.start()
     try:
         process.stdin.write(
             json.dumps(
@@ -336,21 +386,130 @@ def test_user_cancel_before_commit_preserves_active_and_data(tmp_path):
             + "\n"
         )
         process.stdin.flush()
-        first = json.loads(process.stdout.readline())
-        assert first["event"] == "progress"
+        while True:
+            line = lines.get(timeout=180)
+            assert line is not None, "engine exited before requested cancellation checkpoint"
+            event = json.loads(line)
+            assert event["event"] == "progress", event
+            if checkpoint == "first" or (
+                event.get("phase") == "CHECK" and event.get("total", 0) > 0
+            ):
+                break
         with pytest.raises(OSError):
             (root / "app/staging").rename(tmp_path / "must-not-move")
         process.stdin.write('{"schema":"vep.setup.v1","id":"cancel-test","op":"cancel"}\n')
         process.stdin.flush()
-        output, error = process.communicate(timeout=180)
-        last = json.loads(output.splitlines()[-1])
-        assert last["status"] == "cancelled", (output, error)
+        events = []
+        while (line := lines.get(timeout=90)) is not None:
+            events.append(json.loads(line))
+        process.wait(timeout=10)
+        assert events[-1]["status"] == "cancelled", events
     finally:
         if process.poll() is None:
             process.kill()
             process.wait(timeout=10)
+        reader.join(timeout=5)
+        for stream in (process.stdin, process.stdout, process.stderr):
+            stream.close()
     assert call(root, "status")[1]["value"]["active"]["generation"] == 0
     assert sentinel.read_bytes() == b"retained\n"
+
+
+@pytest.mark.skipif(not PAYLOAD, reason="user payload not supplied")
+def test_private_module_subprocess_is_portable_and_ignores_host_paths(tmp_path):
+    payload = tmp_path / "copied-private-runtime"
+    shutil.copytree(PAYLOAD, payload)
+    check_private_module_subprocess(payload, tmp_path / "hostile-cwd")
+
+
+def check_private_module_subprocess(payload, tmp_path):
+    tmp_path.mkdir()
+    before = {
+        p.relative_to(payload): hashlib.sha256(p.read_bytes()).digest()
+        for p in payload.rglob("*")
+        if p.is_file()
+    }
+    assert not list((payload / "packages").rglob("*.exe"))
+    (tmp_path / "yt_dlp.py").write_text(
+        "raise RuntimeError('hostile cwd imported')", encoding="utf-8"
+    )
+    environment = dict(os.environ, PYTHONPATH=str(tmp_path), PYTHONHOME=str(tmp_path))
+    python = payload / "runtime/python.exe"
+    result = subprocess.run(
+        [
+            python,
+            "-B",
+            "-m",
+            "yt_dlp",
+            "--ignore-config",
+            "--no-plugin-dirs",
+            "--no-remote-components",
+            "--no-js-runtimes",
+            "--no-update",
+            "--version",
+        ],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "2026.08.19"
+    probe = subprocess.run(
+        [
+            python,
+            "-B",
+            "-c",
+            "import sys,json; print(json.dumps({'isolated':sys.flags.isolated,'site':'site' in sys.modules}))",
+        ],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert probe.returncode == 0, probe.stderr
+    assert json.loads(probe.stdout) == {"isolated": 1, "site": False}
+    # Exercise the production Windows job gate as well as the yt-dlp module.
+    # Both parent and child use only this private runtime, no network or tools.
+    marker = tmp_path / "child-completed.txt"
+    gate = subprocess.run(
+        [
+            python,
+            "-B",
+            "-c",
+            """
+import subprocess,sys,time
+from video_evidence_pipeline.acquisition.process_tree import ManagedProcessTree
+tree = ManagedProcessTree.start(
+    [sys.executable, '-B', '-c', 'from pathlib import Path; import sys; Path(sys.argv[1]).write_text(\"synthetic child completed\")', sys.argv[1]],
+    process_factory=subprocess.Popen, stdin=subprocess.DEVNULL,
+    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+try:
+    deadline = time.monotonic() + 15
+    while tree.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert tree.poll() == 0, 'private Windows child gate failed'
+finally:
+    tree.stop()
+""",
+            str(marker),
+        ],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert gate.returncode == 0, gate.stderr
+    assert marker.read_text() == "synthetic child completed"
+    after = {
+        p.relative_to(payload): hashlib.sha256(p.read_bytes()).digest()
+        for p in payload.rglob("*")
+        if p.is_file()
+    }
+    assert after == before, "private child process modified verified resources"
 
 
 @pytest.mark.skipif(not PAYLOAD, reason="user payload not supplied")
@@ -361,7 +520,10 @@ def test_long_japanese_user_root_runs_private_runtime(tmp_path):
     result, _ = call(root, "init-user", confirmed=True)
     assert result.returncode == 0, (result.stdout, result.stderr)
     fields = payload_fields(tmp_path, "long-root")
-    install(root, fields)
+    # The 00aac full run hit its180s driver budget while validating a complete
+    # stage (active generation0); retain that failure, bound this deep-path
+    # acceptance run separately, and never treat a larger budget as a speedup.
+    install(root, fields, timeout=300)
     assert (
         json.loads(installed_cli(root, "doctor", "--json").stdout)["installation_kind"]
         == "private-runtime"

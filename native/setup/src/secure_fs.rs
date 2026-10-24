@@ -43,12 +43,15 @@ fn absolute(path: &Path) -> Result<()> {
             let name = name.to_str().ok_or("PATH_UNSUPPORTED")?;
             let base = name.split('.').next().unwrap_or("").to_ascii_uppercase();
             if name.ends_with(['.', ' '])
+                || name.encode_utf16().count() > 255
                 || name.contains(':')
-                || name.chars().any(|c| c < ' ')
+                || name
+                    .chars()
+                    .any(|c| c < ' ' || matches!(c, '<' | '>' | '"' | '|' | '?' | '*'))
                 || [
                     "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6",
                     "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7",
-                    "LPT8", "LPT9",
+                    "LPT8", "LPT9", "COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³",
                 ]
                 .contains(&base.as_str())
             {
@@ -94,31 +97,35 @@ pub fn pin_directory(path: &Path) -> Result<DirectoryGuard> {
     paths.reverse();
     let mut files = Vec::new();
     for path in paths {
-        let mut options = OpenOptions::new();
-        options.read(true);
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::OpenOptionsExt;
-            // Deny directory rename/removal, while permitting child creation and
-            // atomic child replacement. This does not forbid same-SID metadata
-            // changes; those are outside the ownership threat boundary.
-            options
-                .custom_flags(0x02000000 | 0x00200000)
-                .share_mode(1 | 2);
-        }
-        #[cfg(not(windows))]
-        if fs::symlink_metadata(path)
-            .map_err(|_| "PATH_UNAVAILABLE")?
-            .file_type()
-            .is_symlink()
-        {
-            return Err("LINK_FORBIDDEN");
-        }
-        let file = options.open(path).map_err(|_| "PATH_BUSY_OR_UNAVAILABLE")?;
-        inspect(&file, true)?;
-        files.push(file);
+        files.push(open_directory(path)?);
     }
     Ok(DirectoryGuard { _files: files })
+}
+
+fn open_directory(path: &Path) -> Result<File> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // Deny directory rename/removal, while permitting child creation and
+        // atomic child replacement. This does not forbid same-SID metadata
+        // changes; those are outside the ownership threat boundary.
+        options
+            .custom_flags(0x02000000 | 0x00200000)
+            .share_mode(1 | 2);
+    }
+    #[cfg(not(windows))]
+    if fs::symlink_metadata(path)
+        .map_err(|_| "PATH_UNAVAILABLE")?
+        .file_type()
+        .is_symlink()
+    {
+        return Err("LINK_FORBIDDEN");
+    }
+    let file = options.open(path).map_err(|_| "PATH_BUSY_OR_UNAVAILABLE")?;
+    inspect(&file, true)?;
+    Ok(file)
 }
 
 pub fn inspect(file: &File, directory: bool) -> Result<()> {
@@ -242,14 +249,19 @@ pub fn create_dir_all(path: &Path) -> Result<()> {
     let mut guards = Vec::new();
     for path in paths {
         if !path.exists() {
-            let _parent = pin_directory(path.parent().ok_or("PATH_UNSUPPORTED")?)?;
+            // Every ancestor already visited remains opened and inspected in
+            // guards. Keep its deny-delete handle until the entire walk ends.
+            // Reopening the whole ancestor chain here adds no protection.
+            if guards.is_empty() {
+                return Err("PATH_UNAVAILABLE");
+            }
             match fs::create_dir(path) {
                 Ok(()) => {}
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
                 Err(_) => return Err("STORAGE_REQUIRED"),
             }
         }
-        guards.push(pin_directory(path)?);
+        guards.push(open_directory(path)?);
     }
     Ok(())
 }

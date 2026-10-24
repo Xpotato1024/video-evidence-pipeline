@@ -288,13 +288,12 @@ impl Sandbox {
         let checked = crate::secure_fs::metadata(path)?;
         crate::ownership::verify_file(&checked.file, false)
     }
-    fn private_inventory(&self, input: &Input) -> Result<()> {
+    fn private_inventory(&self, input: &Input, operation: &Operation) -> Result<()> {
         if self.user {
-            Self::check_private_path(&input.root)?;
             let mut directories = std::collections::BTreeSet::new();
             for entry in &input.manifest.files {
+                operation.check()?;
                 let path = input.root.join(&entry.path);
-                Self::check_private_path(&path)?;
                 for parent in path
                     .ancestors()
                     .skip(1)
@@ -303,9 +302,28 @@ impl Sandbox {
                     directories.insert(parent.to_path_buf());
                 }
             }
-            for path in directories {
-                Self::check_private_path(&path)?;
+            let total = (input.manifest.files.len() + directories.len() + 1) as u64;
+            let mut completed = 0;
+            operation.progress("CHECK", completed, total)?;
+            Self::check_private_path(&input.root)?;
+            completed += 1;
+            for entry in &input.manifest.files {
+                operation.check()?;
+                Self::check_private_path(&input.root.join(&entry.path))?;
+                completed += 1;
+                if completed % 32 == 0 {
+                    operation.progress("CHECK", completed, total)?;
+                }
             }
+            for path in directories {
+                operation.check()?;
+                Self::check_private_path(&path)?;
+                completed += 1;
+                if completed % 32 == 0 {
+                    operation.progress("CHECK", completed, total)?;
+                }
+            }
+            operation.progress("CHECK", completed, total)?;
         }
         Ok(())
     }
@@ -338,7 +356,7 @@ impl Sandbox {
         let input = Input::load(&root.join("release.json"), &root, &receipt.manifest_sha256)?;
         input.user_contract()?;
         input.verify_installed_with(operation)?;
-        self.private_inventory(&input)?;
+        self.private_inventory(&input, operation)?;
         // Persist recovery identity before publishing any entrypoint. A partial
         // first installation can then be repaired without an external bundle.
         if !path.exists() {
@@ -591,7 +609,7 @@ impl Sandbox {
             let installed = Input::load(&version.join("release.json"), &version, &input.sha256)
                 .map_err(|_| "RELEASE_ID_CONFLICT")?;
             installed.verify_installed_with(operation)?;
-            self.private_inventory(&installed)?;
+            self.private_inventory(&installed, operation)?;
         } else {
             crate::secure_fs::create_dir_all(&stage)?;
             input.verify_copy_with(Some(&stage), operation)?;
@@ -599,7 +617,7 @@ impl Sandbox {
             write_new(&stage.join("release.json"), &input.bytes)?;
             let staged = Input::load(&stage.join("release.json"), &stage, &input.sha256)?;
             staged.verify_installed_with(operation)?;
-            self.private_inventory(&staged)?;
+            self.private_inventory(&staged, operation)?;
             operation.progress("CHECK", 0, 0)?;
             let candidate_context = self
                 .root
@@ -639,9 +657,7 @@ impl Sandbox {
             let mut check = crate::candidate::Candidate::spawn(&mut command)?;
             let start = Instant::now();
             loop {
-                if let Err(code) = operation.check() {
-                    return Err(code);
-                }
+                operation.check()?;
                 match check.child.try_wait() {
                     Ok(Some(status)) => {
                         if !status.success() {
@@ -763,7 +779,9 @@ impl Sandbox {
         let input = Input::load(&root.join("release.json"), &root, &receipt.manifest_sha256)?;
         let metadata_ms = metadata_start.elapsed().as_secs_f64() * 1000.0;
         let (hash_ms, inventory_ms) = input.verify_installed_profile_with(operation)?;
-        self.private_inventory(&input)?;
+        let private_start = Instant::now();
+        self.private_inventory(&input, operation)?;
+        let private_ms = private_start.elapsed().as_secs_f64() * 1000.0;
         let context_start = Instant::now();
         if payload::digest(&payload::read(
             &self.root.join("state/contexts").join(format!("{id}.json")),
@@ -775,7 +793,7 @@ impl Sandbox {
         Ok((
             input,
             receipt,
-            json!({"receipt_manifest_ms":metadata_ms,"all_file_hash_and_paths_ms":hash_ms,"inventory_walk_ms":inventory_ms,"context_check_ms":context_start.elapsed().as_secs_f64()*1000.0}),
+            json!({"receipt_manifest_ms":metadata_ms,"all_file_hash_and_paths_ms":hash_ms,"inventory_walk_ms":inventory_ms,"private_inventory_ms":private_ms,"context_check_ms":context_start.elapsed().as_secs_f64()*1000.0}),
         ))
     }
     pub fn rollback_with(

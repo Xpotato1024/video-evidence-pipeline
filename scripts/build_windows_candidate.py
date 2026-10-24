@@ -23,6 +23,10 @@ from email.parser import Parser
 from pathlib import Path, PurePosixPath
 
 from build_private_runtime import assert_plain, assert_plain_tree, build, canonical_destination
+from windows_candidate_transforms import (
+    configure_private_module_path,
+    omit_generated_console_launchers,
+)
 
 
 def sha(path):
@@ -172,6 +176,8 @@ def assemble(root, archive, expected, packages, native, notices, output, release
         "scripts/build_windows_candidate.py",
         "tests/test_windows_candidate.py",
         "tests/test_user_install_gui.py",
+        "scripts/windows_candidate_transforms.py",
+        "tests/test_windows_candidate_transforms.py",
     ]
     paths = sorted(set(p for p in [*tracked, *additions] if p and (root / p).is_file()))
     verify_source_allowlist(root, paths)
@@ -182,6 +188,18 @@ def assemble(root, archive, expected, packages, native, notices, output, release
     preparation_lock = payload / "packages/.lock"
     if preparation_lock.exists() and preparation_lock.stat().st_size == 0:
         preparation_lock.unlink()
+    transformations = omit_generated_console_launchers(payload)
+    transformations.append(configure_private_module_path(payload))
+    verify_packages(root, payload / "packages")
+    write_json(
+        payload / "packaging/transforms.json",
+        {
+            "schema": "vep.packaging-transforms.v1",
+            "changes": transformations,
+            "input_records_verified_before_copy": True,
+            "output_records_verified_after_transform": True,
+        },
+    )
     (payload / "tools").mkdir()
     for name in ("vep-setup.exe", "vep-setup-gui.exe"):
         shutil.copy2(native / name, payload / "tools" / name)

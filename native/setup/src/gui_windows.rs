@@ -171,13 +171,14 @@ struct Pipe {
 }
 impl Pipe {
     fn deliver(&mut self) {
-        if self.cancel_pending && !self.cancel_sent {
-            if let Some(stdin) = self.stdin.as_mut() {
-                let request = json!({"schema":"vep.setup.v1","id":self.id,"op":"cancel"});
-                self.cancel_sent = writeln!(stdin, "{request}")
-                    .and_then(|_| stdin.flush())
-                    .is_ok();
-            }
+        if self.cancel_pending
+            && !self.cancel_sent
+            && let Some(stdin) = self.stdin.as_mut()
+        {
+            let request = json!({"schema":"vep.setup.v1","id":self.id,"op":"cancel"});
+            self.cancel_sent = writeln!(stdin, "{request}")
+                .and_then(|_| stdin.flush())
+                .is_ok();
         }
     }
 }
@@ -472,23 +473,21 @@ impl Window {
                                     && value["value"]["streaming_events"] == true
                                     && value["value"]["development_only"] == !self.user_mode;
                                 if self.user_mode && ok {
-                                    if text(self.control(ROOT)).is_empty() {
-                                        if let Some(root) = value["value"]["resolved_root"].as_str()
-                                        {
-                                            set(self.control(ROOT), root);
-                                        }
+                                    if text(self.control(ROOT)).is_empty()
+                                        && let Some(root) = value["value"]["resolved_root"].as_str()
+                                    {
+                                        set(self.control(ROOT), root);
                                     }
                                     for (id, key) in [
                                         (MANIFEST, "manifest"),
                                         (PAYLOAD, "payload"),
                                         (DIGEST, "manifest_sha256"),
                                     ] {
-                                        if text(self.control(id)).is_empty() {
-                                            if let Some(text) =
+                                        if text(self.control(id)).is_empty()
+                                            && let Some(text) =
                                                 value["value"]["bundle"][key].as_str()
-                                            {
-                                                set(self.control(id), text);
-                                            }
+                                        {
+                                            set(self.control(id), text);
                                         }
                                     }
                                 }
@@ -593,12 +592,11 @@ fn spawn(
 ) {
     std::thread::spawn(move || {
         #[cfg(feature = "fault-injection")]
-        if let Ok(delay) = std::env::var("VEP_GUI_TEST_SPAWN_DELAY_MS") {
-            if let Ok(ms) = delay.parse::<u64>() {
-                if ms <= 1000 {
-                    std::thread::sleep(std::time::Duration::from_millis(ms));
-                }
-            }
+        if let Ok(delay) = std::env::var("VEP_GUI_TEST_SPAWN_DELAY_MS")
+            && let Ok(ms) = delay.parse::<u64>()
+            && ms <= 1000
+        {
+            std::thread::sleep(std::time::Duration::from_millis(ms));
         }
         use std::os::windows::process::CommandExt;
         let mut command = Command::new(engine);

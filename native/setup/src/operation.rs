@@ -124,10 +124,10 @@ impl Operation {
     }
     // Progress/ack can coalesce under backpressure; neither can block activation.
     fn notice(&self, name: &'static str, fields: Value) {
-        if let Some(output) = &self.output {
-            if !output.finished.load(Ordering::SeqCst) {
-                let _ = output.sender.try_send(Frame { name, fields });
-            }
+        if let Some(output) = &self.output
+            && !output.finished.load(Ordering::SeqCst)
+        {
+            let _ = output.sender.try_send(Frame { name, fields });
         }
     }
     pub fn check(&self) -> Result<()> {
@@ -161,12 +161,11 @@ impl Operation {
             self.notice("progress", json!({"phase":"ACTIVATE","cancellable":false}));
         }
         #[cfg(feature = "fault-injection")]
-        if let Ok(delay) = std::env::var("VEP_SANDBOX_TEST_COMMIT_DELAY_MS") {
-            if let Ok(ms) = delay.parse::<u64>() {
-                if ms <= 1000 {
-                    std::thread::sleep(std::time::Duration::from_millis(ms));
-                }
-            }
+        if let Ok(delay) = std::env::var("VEP_SANDBOX_TEST_COMMIT_DELAY_MS")
+            && let Ok(ms) = delay.parse::<u64>()
+            && ms <= 1000
+        {
+            std::thread::sleep(std::time::Duration::from_millis(ms));
         }
         Ok(())
     }

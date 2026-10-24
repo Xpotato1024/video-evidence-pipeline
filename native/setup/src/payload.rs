@@ -261,7 +261,7 @@ impl Input {
             "payload/uv.lock",
             "payload/.agents/skill-system.toml",
         ] {
-            if !manifest.files.iter().any(|f| &f.path == required) {
+            if !manifest.files.iter().any(|f| f.path == required) {
                 return Err("PAYLOAD_INCOMPLETE");
             }
         }

@@ -491,3 +491,93 @@ SmartScreen/signing, cross-user attack simulation, disk exhaustion, AV contentio
 power loss, all GUI accessibility/commit-uncertainty states, or other Windows/CPU
 versions. Prior source/main CI and sandbox GUI results are not relabeled as these
 new user-install tests. No new performance improvement is claimed.
+
+## Post-candidate verification and packaging corrections - 2026-10-24
+
+The complete Windows suite at local commit `00aac774` finished with **923 passed,
+17 skipped and 1 failed** in approximately 54 minutes. The failure was the long
+Japanese-root apply driver's 180-second timeout. Read-only inspection found a
+complete staging copy, active generation zero, no selected receipt and no
+published bootstrap receipt. The failed run is retained; increasing a test budget
+does not establish a performance improvement. The follow-up acceptance driver has
+a separate 300-second bound. No full-suite success is claimed for that commit.
+
+The follow-up changes keep all file hashes, no-follow handle checks, ownership
+and private DACL checks. Directory creation retains one inspected deny-delete
+handle per ancestor for the complete walk, avoiding repeated opens of the same
+ancestor chains. Permission inventory checks cancellation and reports `CHECK`
+progress between files/directories; launcher profiling now records
+`private_inventory_ms` separately. Windows invalid characters, reserved device
+aliases and the supported 255 UTF-16-unit component limit are rejected before
+creating an initialization sibling. These changes do not assert a measured
+installation speedup on the shared host.
+
+Audit of the actual copied packages found six generated uv console wrappers with
+build-machine interpreter references. VEP invokes `sys.executable -m yt_dlp` and
+does not need these wrappers. The builder verifies original input RECORDs, omits
+only declared recognizable wrappers from its fresh output, preserves original
+RECORDs and their hashes under `packaging/`, rewrites the affected RECORDs and
+verifies the output again. Unknown executable artifacts cause refusal. The old
+candidate remains unchanged and must not be distributed.
+
+The original embedded Python `._pth` also omitted the private packages directory,
+so the actual module subprocess could not import yt-dlp. The copied configuration
+now adds only the verified relative `../packages` and `../payload/src` paths,
+preserves its original bytes, keeps `site` disabled and records the transformation.
+The latter path is required by the production Windows child-process job gate.
+Offline version probes cover a hostile
+current directory, `PYTHONPATH` and `PYTHONHOME`; no media or network request is
+needed. Native builds use ephemeral rustc source-path remapping and are checked
+for known build-profile prefixes. Remapping is not a general secret scanner or
+publisher attestation.
+
+The first corrected candidate's module probe exposed a further regression:
+child Python does not inherit the launcher's `-B`, and added 74 unlisted bytecode
+files after initial inventory verification. That candidate is retained as failed
+evidence. The yt-dlp and Windows job-gate child commands now explicitly pass
+`-B`; acceptance runs on fresh copied or installed private resources, compares
+their complete file hashes before/after child execution, and checks the next
+native doctor invocation. Original distribution inputs are never executed by
+these probes. Source-mode subprocess behavior retains the same acquisition
+arguments and result contract apart from suppressing bytecode writes.
+
+The top-level SPDX document is an exact file inventory, not a resolved component
+dependency graph. Conservative upstream SBOMs and notices remain supplementary
+evidence. Exact target-specific linkage/corresponding-source closure and the
+distributor's Microsoft runtime/compiler redistribution rights require further
+evidence and owner review; their absence is not a confirmed blanket dependency
+incompatibility or legal clearance. No FFmpeg, ASR runtime or model is bundled.
+
+Processing-version updates do not service the native bootstrap: the first
+`state/bootstrap.json` receipt continues to select the retained engine/GUI bytes.
+Repair also verifies that original version's whole payload, so damage to unused
+original processing files can block recovery. Supported native engine handoff,
+minimum-version policy, replacement/rollback, retention and uninstall are not yet
+implemented or accepted. Legacy source-mode jobs are not automatically migrated;
+installed private-job pinning tests are a narrower compatibility guarantee.
+
+These binary servicing, license evidence, signing/SmartScreen and clean-host
+acceptance gaps block a supported binary publication. They should be explicit in
+a source/tests/docs-only Draft review, which conveys no compiled dependencies.
+External source-sharing authorization is separately pending. Test artifacts stay
+local; no default profile installation, security/permission change, push, PR or
+release is performed by this continuation.
+
+The bounded follow-up checks completed on the same unelevated Windows host:
+
+| Scope | Result |
+| --- | --- |
+| Candidate transforms, acquisition and process-tree regression | 50 passed, 1 unavailable-symlink skip |
+| Native transaction and streaming regression | 12 passed; 6 GUI cases initially not enabled |
+| Explicit GUI transaction/protocol regression | All 6 previously unenabled GUI cases passed |
+| User-root lifecycle, refusal, interruption, cancellation and long-path acceptance | 41 passed |
+| Optimized no-fault CLI/GUI and junction/data preservation | 4 passed |
+
+Both normal and fault-enabled Rust unit sets passed 6 cases each. All-target,
+all-feature Clippy with warnings denied, Cargo formatting, Ruff check/format of
+all 142 Python files, repository validation, schema validation and changed-file
+UTF-8/whitespace checks passed. No separate Python static type-check suite is
+configured; Rust checks include compilation/type checking. The full 941-case
+suite was not restarted after these corrections: unaffected Python/media results
+are reused from the frozen run, and its failed long-path case was explicitly
+rechecked. These scoped results do not turn the original full run into a pass.

@@ -181,6 +181,7 @@ class ManagedProcessTree:
                 windows_gate = _WindowsLaunchGate()
                 launch_argv = [
                     sys.executable,
+                    "-B",  # Keep verified private resources free of bytecode.
                     "-m",
                     "video_evidence_pipeline.acquisition.windows_job_launcher",
                     windows_gate.name,
