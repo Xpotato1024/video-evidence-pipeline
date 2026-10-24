@@ -430,6 +430,7 @@ def hardened_argv(
 ) -> list[str]:
     argv = [
         sys.executable,
+        "-B",  # Child interpreters do not inherit the private launcher's flag.
         "-m",
         "yt_dlp",
         "--ignore-config",

@@ -1,0 +1,53 @@
+{
+  "schema": "vep.notice-sources.v1",
+  "sources": [
+    {
+      "name": "cpython-license-acknowledgements.rst",
+      "url": "https://raw.githubusercontent.com/python/cpython/64e080d38154391ff2d2caa1161c298bb7cd8f30/Doc/license.rst",
+      "sha256": "952ac05720d7f1dcb63589b35eb0931b1442eb250230a4ad31198eddf0ad6abc",
+      "bytes": 58181
+    },
+    {
+      "name": "expat-COPYING.txt",
+      "url": "https://raw.githubusercontent.com/python/cpython/64e080d38154391ff2d2caa1161c298bb7cd8f30/Modules/expat/COPYING",
+      "sha256": "31b15de82aa19a845156169a17a5488bf597e561b2c318d159ed583139b25e87",
+      "bytes": 1144
+    },
+    {
+      "name": "mpdecimal-COPYRIGHT.txt",
+      "url": "https://raw.githubusercontent.com/python/cpython-source-deps/48316ec025c1ebe500854c332be0a12c640c7301/COPYRIGHT.txt",
+      "sha256": "2713324211652ce4a60e6e21e54f9dc3004299e591b0933a352f1a89c5fb53c2",
+      "bytes": 1285
+    },
+    {
+      "name": "cpython-upstream.spdx.json",
+      "url": "https://www.python.org/ftp/python/3.13.17/python-3.13.17-embeddable-amd64.zip.spdx.json",
+      "sha256": "630ff535b213f17471b6dccbd00fbcb9168ee3c75a48a632fc55856847cb6de1",
+      "bytes": 15353
+    },
+    {
+      "name": "LICENSE-MIT",
+      "url": "https://raw.githubusercontent.com/bytecodealliance/wit-bindgen/f2393e6e98fa5f9236cac580db8a3fc9de6a4b70/LICENSE-MIT",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "component": "wit-bindgen-rt",
+      "version": "0.39.0",
+      "crate_sha256": "6f42320e61fe2cfd34354ecb597f86f413484a798ba44a8ca1165c58d42da6c1"
+    },
+    {
+      "name": "LICENSE-APACHE",
+      "url": "https://raw.githubusercontent.com/bytecodealliance/wit-bindgen/f2393e6e98fa5f9236cac580db8a3fc9de6a4b70/LICENSE-APACHE",
+      "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "component": "wit-bindgen-rt",
+      "version": "0.39.0",
+      "crate_sha256": "6f42320e61fe2cfd34354ecb597f86f413484a798ba44a8ca1165c58d42da6c1"
+    },
+    {
+      "name": "LICENSE-Apache-2.0_WITH_LLVM-exception",
+      "url": "https://raw.githubusercontent.com/bytecodealliance/wit-bindgen/f2393e6e98fa5f9236cac580db8a3fc9de6a4b70/LICENSE-Apache-2.0_WITH_LLVM-exception",
+      "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+      "component": "wit-bindgen-rt",
+      "version": "0.39.0",
+      "crate_sha256": "6f42320e61fe2cfd34354ecb597f86f413484a798ba44a8ca1165c58d42da6c1"
+    }
+  ]
+}
