@@ -30,6 +30,10 @@ impl io::Write for CheckedFile {
 }
 
 fn absolute(path: &Path) -> Result<()> {
+    #[cfg(windows)]
+    let normalized = normalized_windows_path(path);
+    #[cfg(windows)]
+    let path = normalized.as_path();
     if !path.is_absolute() || path.components().any(|p| matches!(p, Component::ParentDir)) {
         return Err("PATH_UNSUPPORTED");
     }
@@ -55,9 +59,21 @@ fn absolute(path: &Path) -> Result<()> {
     Ok(())
 }
 #[cfg(windows)]
+fn normalized_windows_path(path: &Path) -> std::path::PathBuf {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    let units: Vec<_> = path
+        .as_os_str()
+        .encode_wide()
+        .map(|u| if u == b'/' as u16 { b'\\' as u16 } else { u })
+        .collect();
+    std::ffi::OsString::from_wide(&units).into()
+}
+#[cfg(windows)]
 pub fn wide_path(path: &Path) -> Result<Vec<u16>> {
     use std::os::windows::ffi::OsStrExt;
     use std::path::Prefix;
+    let normalized = normalized_windows_path(path);
+    let path = normalized.as_path();
     absolute(path)?;
     match path.components().next() {
         Some(Component::Prefix(p)) => match p.kind() {
@@ -195,6 +211,30 @@ pub fn lock_file(path: &Path) -> Result<CheckedFile> {
     open(path, false, true)
 }
 
+/// Inspect identity/security without requesting content access or excluding an
+/// existing writer. Never use this handle to read or execute payload bytes.
+pub fn metadata(path: &Path) -> Result<CheckedFile> {
+    let parents = pin_directory(path.parent().ok_or("PATH_UNSUPPORTED")?)?;
+    let mut options = OpenOptions::new();
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options
+            .access_mode(0x00020000 | 0x80)
+            .share_mode(1 | 2 | 4)
+            .custom_flags(0x02000000 | 0x00200000);
+    }
+    #[cfg(not(windows))]
+    options.read(true);
+    let file = options.open(path).map_err(|_| "FILE_BUSY_OR_UNAVAILABLE")?;
+    let directory = file.metadata().map_err(|_| "FILE_UNAVAILABLE")?.is_dir();
+    inspect(&file, directory)?;
+    Ok(CheckedFile {
+        file,
+        _parents: parents,
+    })
+}
+
 pub fn create_dir_all(path: &Path) -> Result<()> {
     absolute(path)?;
     let mut paths: Vec<_> = path.ancestors().collect();
@@ -220,4 +260,18 @@ pub fn rename(from: &Path, to: &Path) -> Result<()> {
         return Err("RELEASE_ID_CONFLICT");
     }
     fs::rename(from, to).map_err(|_| "STORAGE_REQUIRED")
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    #[test]
+    fn explicit_win32_paths_normalize_separators_before_validation() {
+        let path = wide_path(Path::new("C:\\test-root\\state/bootstrap.json")).unwrap();
+        assert_eq!(
+            String::from_utf16_lossy(&path[..path.len() - 1]),
+            "\\\\?\\C:\\test-root\\state\\bootstrap.json"
+        );
+        assert!(wide_path(Path::new("\\\\?\\C:\\test-root/../escape")).is_err());
+    }
 }

@@ -380,3 +380,114 @@ Reproduction and exact local evidence are in the task's
 `user-root-v2.xml`, `user-root-pause.xml`, and `user-native-cargo-metadata.json`.
 Downloaded public license sources and the unfinished dossier remain in task-local
 `native-build/license-cache` and `native-build/user-notices-v1`; neither is a release.
+
+## Windows user candidate resume - 2026-10-24
+
+The restart checkpoint above is historical. Local implementation has resumed;
+this is still an unsigned candidate, with no publication or real profile install.
+The default uses the Windows LocalAppData Known Folder plus
+`VideoEvidencePipeline`. An existing older `VEP/models` directory is not adopted,
+moved, modified or deleted. Only a nonexistent selected root or a valid existing
+VEP user marker may initialize/resume. Even an empty unmarked directory is
+rejected; choose a new child directory rather than changing its ACL.
+
+The current layout is:
+
+```text
+<root>/.vep-user-install.json       installation identity, bound to canonical root
+<root>/app/bin/                    retained setup, GUI and VEP entrypoints
+<root>/app/versions/<release-id>/   private Python, packages, resources, tools,
+                                  notices, source snapshot and SPDX inventory
+<root>/app/staging/                verified candidate preparations
+<root>/state/                      selection, receipts, journals, contexts, bindings
+<root>/data/jobs/                  mutable user jobs, kept across selection changes
+<root>/data/models/                optional user models (none installed here)
+```
+
+CLI and Win32 GUI use the same JSONL engine. GUI initialization and application
+require review of the target/plan and an explicit confirmation. The license view
+reads bounded pages of the exact manifest-bound notice text; viewing a license
+invalidates an outstanding mutation confirmation. Apply also requires explicit
+license acceptance at the engine boundary. No elevation request, PATH/registry
+registration, online updater, FFmpeg, ASR package/model or deletion is included.
+The retained initial bootstrap engine is not upgraded in place; a future
+bootstrap-engine update protocol is a separate remaining distribution concern.
+
+New roots are prepared in a fresh private sibling with a complete synced marker
+before publishing the selected path. Initial active state is atomically replaced.
+An interrupted preparation can leave an unreferenced private sibling, which is
+retained rather than guessed safe to delete. Entry-point recovery saves the
+verified bootstrap receipt before publishing files, uses private temporary files
+and renames only complete executables into final names. Existing entrypoints with
+different bytes cause a conflict rather than replacement. Metadata/ownership
+inspection is separate from content reads so a writer lock does not unnecessarily
+prevent status or launching the current version. These changes do not claim
+protection against malicious same-SID code or administrators.
+
+`scripts/prepare_windows_notices.py` now completes a conservative dossier with
+253 notice files, 21 core wheel distributions and 103 upstream pydantic-core
+all-target components. r-efi's complete grant/copyright is preserved from AUTHORS;
+wit-bindgen-rt notices absent from its crate are pinned to that crate's recorded
+upstream VCS commit. Notice storage names follow the existing restricted payload
+path rules. Exact upstream SBOMs are preserved as evidence; their non-Windows
+entries are not described as confirmed Windows linkage.
+
+`scripts/build_windows_candidate.py` prepares a local offline fixture from
+explicit runtime, packages, native and notice inputs. It checks the official
+runtime ZIP hash, wheel RECORD self-consistency and locked name/version,
+Windows x64 PE headers, notice hashes/inventory, input/output separation, and
+source-snapshot coverage of copied resource files. It excludes the empty uv
+preparation lock and refuses untracked runtime sources or unlisted notices.
+It adds the VEP source snapshot, per-file SPDX 2.3 inventory, manifest and
+top-level checksums. RECORD consistency is not publisher authentication or proof
+of the original wheel ZIP hash. Native compile features are not inferred from PE
+headers; use the separate build/preparation evidence. A working-tree snapshot is
+labeled as such, not a clean commit-addressed release source.
+
+The local fault-injection debug fixtures are never distribution artifacts.
+`distribution_ready=false` and `publisher_authenticated=false` remain explicit.
+Microsoft redistribution qualification/downstream conditions, exact static
+linkage/source coverage, signing, clean standard-user acceptance and bootstrap
+upgrade policy remain open. Do not create keys/accounts, repair existing ACLs or
+change platform security settings to make a test pass.
+
+Execution results, failed runs, artifact identities and remaining tests are kept
+in the task's `evidence/windows-user-installer-resume.md`; independent code review
+is in `evidence/windows-user-installer-review.md`. Suite duration is verification
+wall time on a shared developer host, not a comparative installation benchmark.
+
+Verified continuation results (separate runs, not an all-pytest success claim):
+
+- Rust unit tests: engine 4 and GUI client 2 passed with fault injection, and
+  the same 6 passed without features. A separate optimized `--release
+  --no-default-features` build used `-C target-feature=+crt-static`, one job.
+- The actual payload lifecycle passed install/update/rollback, retained launcher
+  help/doctor, old-job runtime binding/data preservation and entrypoint repair.
+- The remaining v4 run passed 16 cases: init/retry, aliases, state hardlinks,
+  manifest/SBOM refusal, three bootstrap publication interruptions and cancellation.
+  That run also had one genuine long-root candidate failure, retained in evidence.
+- The long-root failure was caused by a non-extended context argument to Python.
+  Canonicalizing the context for both candidate checks and launches fixed it.
+  A subsequent driver failure came from CreateProcess's implicit module search
+  limit. Explicit extended application paths passed the complete long Japanese
+  root install and installed doctor case. Explorer/all shell support is unverified.
+- User-mode Win32 GUI license text, confirmation, common plan/result agreement and
+  builder input checks passed 5 cases. Normal optimized binaries passed 2 further
+  cases (CLI install/retained help/doctor/GUI status and plan; junction target/ACL
+  preservation). Normal GUI cancel/failure/repair passed one additional case.
+- Junction refusal can report `FILE_TYPE_INVALID` or `LINK_FORBIDDEN` because
+  no-follow handles can expose the reparse object as a different file type. Both
+  refusal and the untouched target are asserted. An earlier overly narrow error
+  expectation failed and is retained. Cancellation also refused a concurrent
+  staging-directory rename while the directory guard was held.
+- The generated SPDX document passed the official SPDX 2.3 JSON schema. Focused
+  Ruff, UTF-8/newline and whitespace checks pass. Repository validation initially
+  failed at sandboxed uv export, then passed offline with the task-local cache in
+  the normal execution context; no lock regeneration or ASR synchronization.
+
+Acceptance is limited to the existing unelevated developer host and synthetic
+fixtures. It does not certify a clean standard-user machine without toolchains,
+SmartScreen/signing, cross-user attack simulation, disk exhaustion, AV contention,
+power loss, all GUI accessibility/commit-uncertainty states, or other Windows/CPU
+versions. Prior source/main CI and sandbox GUI results are not relabeled as these
+new user-install tests. No new performance improvement is claimed.

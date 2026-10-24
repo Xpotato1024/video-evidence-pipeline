@@ -100,7 +100,8 @@ def prepare(
         if len(data) > 4 * 1024 * 1024:
             raise ValueError("notice file limit")
         safe = re.sub(r"[^A-Za-z0-9._-]", "_", Path(original).name)[:100]
-        name = f"{category}/{component}-{version}/{len(records):04d}-{safe}"
+        directory = re.sub(r"[^A-Za-z0-9._-]", "_", f"{component}-{version}")
+        name = f"{category}/{directory}/{len(records):04d}-{safe}"
         target = output / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
@@ -144,8 +145,8 @@ def prepare(
         data = cached(cache, item["url"], item["sha256"], fetch)
         notice(
             "runtime",
-            "CPython-source-notices",
-            "3.13.17",
+            item.get("component", "CPython-source-notices"),
+            item.get("version", "3.13.17"),
             item["name"],
             data,
             item["url"],
@@ -219,6 +220,9 @@ def prepare(
                 relevant = path.name.lower().startswith(
                     ("license", "copying", "copyright", "notice")
                 ) or any(p.lower() == "licenses" for p in path.parts)
+                # Some crates (notably r-efi) place the full license grant and
+                # copyright holders in AUTHORS instead of a LICENSE file.
+                relevant = relevant or path.name.lower() in {"authors", "authors.txt"}
                 if relevant:
                     if member.size > 4 * 1024 * 1024:
                         raise ValueError("crate notice limit")
@@ -235,7 +239,15 @@ def prepare(
                     )
                     found += 1
         if not found:
-            raise ValueError(f"source crate has no notice files: {name}@{version}")
+            supplements = [
+                s
+                for s in catalog["sources"]
+                if s.get("component") == name
+                and s.get("version") == version
+                and s.get("crate_sha256") == identity
+            ]
+            if not supplements:
+                raise ValueError(f"source crate has no notice files: {name}@{version}")
     native = json.loads(metadata.read_text(encoding="utf-8-sig"))
     lock = tomllib.loads((root / "native/setup/Cargo.lock").read_text())
     checksums = {(p["name"], p["version"]): p.get("checksum") for p in lock["package"]}

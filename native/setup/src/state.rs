@@ -132,27 +132,36 @@ fn interrupt(point: &str) {
 impl Sandbox {
     pub fn initialize_user(root: &Path) -> Result<()> {
         crate::ownership::standard_token()?;
+        #[cfg(windows)]
+        crate::secure_fs::wide_path(root)?;
         crate::ownership::local_ntfs(root)?;
         if !root.exists() {
-            crate::ownership::create_private(root)?;
+            // Publish a new root only after its complete identity is durable.
+            // Interrupted preparation leaves an unreferenced private sibling;
+            // it never leaves a truncated marker at the selected final root.
+            let parent = root.parent().ok_or("PATH_UNSUPPORTED")?;
+            let _parent = crate::secure_fs::pin_directory(parent)?;
+            let temporary = parent.join(format!(".vep-initialization-{}", unique()));
+            crate::ownership::create_private(&temporary)?;
+            let marker = UserMarker {
+                schema: "vep.user-install.v1".into(),
+                installation_id: unique(),
+                root: fs::canonicalize(parent)
+                    .map_err(|_| "ROOT_UNAVAILABLE")?
+                    .join(root.file_name().ok_or("PATH_UNSUPPORTED")?),
+                phase: "initializing".into(),
+            };
+            write_new(&temporary.join(USER_MARKER), &bytes(&marker)?)?;
+            interrupt("user-init-before-root-publish");
+            crate::secure_fs::rename(&temporary, root)?;
         }
         let _guard = crate::ownership::verify_root(root)?;
         let marker_path = root.join(USER_MARKER);
         if !marker_path.exists() {
-            if fs::read_dir(root)
-                .map_err(|_| "ROOT_UNAVAILABLE")?
-                .next()
-                .is_some()
-            {
-                return Err("FOREIGN_INSTALLATION_ROOT");
-            }
-            let marker = UserMarker {
-                schema: "vep.user-install.v1".into(),
-                installation_id: unique(),
-                root: fs::canonicalize(root).map_err(|_| "ROOT_UNAVAILABLE")?,
-                phase: "initializing".into(),
-            };
-            write_new(&marker_path, &bytes(&marker)?)?;
+            // Even an empty private directory is not ours to adopt. Claiming a
+            // preexisting unmarked root races another initializer and obscures
+            // crash ownership. New roots are published with a complete marker.
+            return Err("FOREIGN_INSTALLATION_ROOT");
         }
         let lock_path = root.join(".initialization.lock");
         if !lock_path.exists() {
@@ -201,7 +210,7 @@ impl Sandbox {
                 return Err("INITIALIZATION_CONFLICT");
             }
         } else {
-            write_new(&active_path, &bytes(&active)?)?;
+            replace(&active_path, &bytes(&active)?)?;
         }
         for name in ["writer", "selection"] {
             let path = root.join("state").join(format!("{name}.lock"));
@@ -276,25 +285,8 @@ impl Sandbox {
         })
     }
     fn check_private_path(path: &Path) -> Result<()> {
-        let file = if path.is_dir() {
-            #[cfg(windows)]
-            {
-                use std::os::windows::fs::OpenOptionsExt;
-                std::fs::OpenOptions::new()
-                    .read(true)
-                    .custom_flags(0x02000000 | 0x00200000)
-                    .share_mode(1)
-                    .open(path)
-                    .map_err(|_| "ROOT_PRIVACY_UNVERIFIED")?
-            }
-            #[cfg(not(windows))]
-            {
-                return Err("PLATFORM_UNSUPPORTED");
-            }
-        } else {
-            crate::secure_fs::read(path)?.file
-        };
-        crate::ownership::verify_file(&file, false)
+        let checked = crate::secure_fs::metadata(path)?;
+        crate::ownership::verify_file(&checked.file, false)
     }
     fn private_inventory(&self, input: &Input) -> Result<()> {
         if self.user {
@@ -347,6 +339,12 @@ impl Sandbox {
         input.user_contract()?;
         input.verify_installed_with(operation)?;
         self.private_inventory(&input)?;
+        // Persist recovery identity before publishing any entrypoint. A partial
+        // first installation can then be repaired without an external bundle.
+        if !path.exists() {
+            replace(&path, &bytes(&receipt)?)?;
+        }
+        interrupt("bootstrap-receipt");
         let bin = self.root.join("app/bin");
         for existing in fs::read_dir(&bin).map_err(|_| "BOOTSTRAP_RECOVERY_REQUIRED")? {
             let existing = existing.map_err(|_| "BOOTSTRAP_RECOVERY_REQUIRED")?;
@@ -379,12 +377,18 @@ impl Sandbox {
                     return Err("BOOTSTRAP_CONTENT_CONFLICT");
                 }
             } else {
-                write_new(&target, &bytes)?;
+                // Keep partial writes away from final executable names. Orphans
+                // remain in private state and are never executed or overwritten.
+                let temp = self
+                    .root
+                    .join("state")
+                    .join(format!("bootstrap-{}.tmp", unique()));
+                write_new(&temp, &bytes)?;
+                interrupt("bootstrap-staged");
+                crate::secure_fs::rename(&temp, &target)?;
+                interrupt("bootstrap-published");
             }
             Self::check_private_path(&target)?;
-        }
-        if !path.exists() {
-            write_new(&path, &bytes(&receipt)?)?;
         }
         Ok(())
     }
@@ -621,7 +625,11 @@ impl Sandbox {
                 } else {
                     stage.join("payload/bootstrap.py")
                 })
-                .arg(candidate_context)
+                .arg(if self.user {
+                    fs::canonicalize(candidate_context).map_err(|_| "ROOT_UNAVAILABLE")?
+                } else {
+                    candidate_context
+                })
                 .args(["doctor", "--json"])
                 .env_remove("PYTHONPATH")
                 .env_remove("PYTHONHOME")
@@ -862,7 +870,11 @@ impl Sandbox {
             } else {
                 input.root.join("payload/bootstrap.py")
             })
-            .arg(context)
+            .arg(if self.user {
+                fs::canonicalize(context).map_err(|_| "ROOT_UNAVAILABLE")?
+            } else {
+                context
+            })
             .args(args)
             .env_remove("PYTHONPATH")
             .env_remove("PYTHONHOME")

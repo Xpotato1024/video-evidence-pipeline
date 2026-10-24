@@ -10,10 +10,7 @@ mod windows {
     use super::*;
     use std::{
         ffi::{OsString, c_void},
-        os::windows::{
-            ffi::OsStringExt,
-            io::AsRawHandle,
-        },
+        os::windows::{ffi::OsStringExt, io::AsRawHandle},
     };
     type Handle = *mut c_void;
     #[repr(C)]
@@ -220,7 +217,7 @@ mod windows {
         let result = PathBuf::from(OsString::from_wide(unsafe {
             std::slice::from_raw_parts(path, length)
         }))
-        .join("VEP");
+        .join("VideoEvidencePipeline");
         unsafe {
             CoTaskMemFree(path.cast());
         }

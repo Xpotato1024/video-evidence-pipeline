@@ -1,5 +1,5 @@
-//! Local development transactions only. There is deliberately no production
-//! root selection, network/update service, signature bypass, GC or data deletion.
+//! Local unsigned Windows user-install candidate and development transactions.
+//! No network/update service, signature bypass, GC or user-data deletion.
 mod candidate;
 mod operation;
 mod ownership;
@@ -101,7 +101,7 @@ fn execute(
         return Ok(
             json!({"development_only":!user,"max_requests":1,"network":false,
             "operations":["init-sandbox","init-user","paths","plan","apply","status","rollback","repair"],
-                "production_install":user,"distribution_ready":false,"publisher_authenticated":false,"resolved_root":root,"bundle":fields,"token":ownership::token_status().ok(),"bootstrap_state":"vep.bootstrap-state.v1", "streaming_events":true,"cancel":"same-id stdin cancel; pre-commit only"}),
+                "installation_mode":if user {"user"} else {"sandbox"},"distribution_ready":false,"publisher_authenticated":false,"resolved_root":root,"bundle":fields,"token":ownership::token_status().ok(),"bootstrap_state":"vep.bootstrap-state.v1", "streaming_events":true,"cancel":"same-id stdin cancel; pre-commit only"}),
         );
     }
     if request.op == "licenses" {
@@ -173,12 +173,6 @@ fn execute(
 
 fn main() -> ExitCode {
     let mut args: Vec<_> = env::args_os().skip(1).collect();
-    if args.first().is_some_and(|v| v == "--help" || v == "-h") || args.is_empty() {
-        println!(
-            "VEP offline Windows x64 installer candidate (unsigned)\nvep-setup [--user | --user-root ABSOLUTE_PATH | --sandbox-root ABSOLUTE_PATH] COMMAND\nCommands: paths, initialize --confirm, status, repair, plan/apply --manifest FILE --payload DIR --sha256 HASH [--plan-id ID --accept-licenses], rollback --release-id ID --plan-id ID, run -- VEP_ARGS\nJSONL interface: <root selection> --protocol=jsonl\nNo elevation, online update, PATH/registry changes or data deletion."
-        );
-        return ExitCode::SUCCESS;
-    }
     // Installed launcher stays usable after the external bundle is removed.
     if env::current_exe()
         .ok()
@@ -204,6 +198,12 @@ fn main() -> ExitCode {
             launch.extend(args);
             args = launch;
         }
+    }
+    if args.first().is_some_and(|v| v == "--help" || v == "-h") || args.is_empty() {
+        println!(
+            "VEP offline Windows x64 installer candidate (unsigned)\nvep-setup [--user | --user-root ABSOLUTE_PATH | --sandbox-root ABSOLUTE_PATH] COMMAND\nCommands: paths, initialize --confirm, status, repair, plan/apply --manifest FILE --payload DIR --sha256 HASH [--plan-id ID --accept-licenses], rollback --release-id ID --plan-id ID, run -- VEP_ARGS\nJSONL interface: <root selection> --protocol=jsonl\nNo elevation, online update, PATH/registry changes or data deletion."
+        );
+        return ExitCode::SUCCESS;
     }
     if args.first().is_some_and(|v| v == "--user") {
         match default_user_root() {
