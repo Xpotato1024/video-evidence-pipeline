@@ -11,7 +11,7 @@ dependencies = [
   "pydantic>=2.11,<3",
   "PyYAML>=6.0.2,<7",
   "typer>=0.16,<1",
-  "yt-dlp==2026.8.19",
+  "yt-dlp==2026.10.21",
 ]
 
 [build-system]
