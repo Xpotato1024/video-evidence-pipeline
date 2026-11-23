@@ -91,3 +91,5 @@ Its identity is CLI-asserted. The original review bundle bytes are stable and it
 review candidate. Approval and hosting occur through separate operations.
 
 Reading HTML and PDF group citations in numbered section endnotes. The HTML notes expose individual evidence locators and the MDX and structured source retain per-claim bindings. Use equation blocks with aligned lines for symbolic operations; worked numeric steps retain their precision and units.
+
+Formatted fields in the reading view support inline KaTeX `\(...\)`, strong emphasis `**...**`, and internal links `[label](#block-ID)` to validated block IDs. Use these in prose, tables, figure captions, step titles or rationales and equation metadata. Alt text and the document title remain plain text. The portable MDX stores the Markdown-escaped field values for lossless source-import. A worked explanation with several headings has a native expandable contents list. Put the actual conceptual overview and its links in the authored material so it is present in print as well.

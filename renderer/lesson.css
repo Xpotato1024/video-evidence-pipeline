@@ -16,6 +16,16 @@ main {
 h1, h2, h3, h4, h5, h6 { line-height: 1.35; break-after: avoid; }
 h1 { border-bottom: .2rem solid #0d6c76; padding-bottom: .55em; margin: 0 0 1em; font-size: 1.9rem; }
 h2 { margin-top: 1.65em; font-size: 1.45rem; }
+.prose strong, td strong { font-weight: 750; color: #152d40; }
+.study-nav { margin: -.5em 0 .8em; }
+.study-nav summary { width: fit-content; padding: .4em .2em; min-height: 44px; }
+.study-nav ol { margin: 0; padding-inline-start: 2.2em; }
+.study-nav li[class^="level-"]:not(.level-2) { margin-inline-start: 1.4em; list-style: circle; }
+.study-nav li a { display: block; min-height: 44px; padding: .45em .2em; }
+.back { display: inline-block; vertical-align: middle; margin-inline-start: .65rem; font-size: .72rem; font-weight: normal; color: #56626a; padding: .45em; }
+.prose math, td math, .equation-meta math, figcaption math { font-size: 1.06em; }
+section:has(> .table-scroll) table { width: 100%; }
+.table-scroll td { line-height: 1.55; }
 p { margin: .6em 0; }
 .prose { white-space: pre-line; }
 a { color: #0b5962; }
@@ -64,6 +74,7 @@ th { background: #edf4f6; }
   .figure-scroll img { width: auto; max-width: 100%; min-width: 0; max-height: 136mm; }
   .figure-scroll, .equation, .table-scroll { overflow: visible; }
   details { display: none; }
+  .back, .study-nav { display: none; }
   thead { display: table-header-group; }
   tr { break-inside: avoid; }
 }

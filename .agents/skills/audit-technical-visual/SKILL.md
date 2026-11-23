@@ -29,3 +29,5 @@ Use the public CLI for deterministic validation and writes.
 ## Reading order
 
 Inspect a complete PDF page and a narrow-screen section containing a derivation. Check that the operation and its rationale lead the eye, that related symbolic equalities stay together, and that provenance remains reachable without a row of evidence links after every paragraph. Verify source-note destinations and supplement labels. Report repeated answer-form labels on pure algebra or citations that interrupt the explanation as reader-facing defects.
+
+Independently start at the overview, jump to a specific operation, and use the overview return link. Compare inline and displayed math glyphs, including vector weight and indices, at 320px and in the PDF. Inspect factual emphasis in the body separately from headings. A chapter list alone does not explain how its topics connect.

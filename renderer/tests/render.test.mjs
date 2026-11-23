@@ -9,7 +9,7 @@ import { promisify } from 'node:util';
 import { mermaidSource } from '../browser.mjs';
 import { renderChart, toCsv } from '../chart.mjs';
 import { hash, safeSvg } from '../common.mjs';
-import { mathml } from '../document.mjs';
+import { inline, mathml } from '../document.mjs';
 import { geometrySvg } from '../geometry.mjs';
 
 const exec = promisify(execFile);
@@ -68,6 +68,17 @@ test('KaTeX emits structural math without a raw TeX annotation', () => {
   assert.throws(() => mathml(String.raw`\text{Everything entered as plain text}`), /presentation MathML/);
 });
 
+test('reading prose typesets inline math, emphasis and verified fragment links', () => {
+  const tree = inline(String.raw`**基底** \(\mathbf e_r\) と [境界](#block-wall)`, new Set(['wall']));
+  assert.match(tree, /<strong>基底<\/strong>/u);
+  assert.match(tree, /<msub>/u);
+  assert.match(tree, /href="#block-wall"/u);
+  assert.doesNotMatch(tree, /display="block"|\\mathbf|e_r/u);
+  assert.equal(inline('<script>'), '&lt;script&gt;');
+  assert.throws(() => inline('[jump](#block-missing)'), /Missing lecture link/u);
+  assert.throws(() => inline(String.raw`\(\href{https://invalid}{x}\)`), /unsupported/u);
+});
+
 test('chart rejects ambiguous or clipped data and CSV escapes formula cells', async () => {
   const spec = fixture.figures[0].spec;
   const chart = await renderChart(spec);
@@ -101,7 +112,7 @@ test('renderer builds editable, offline and same-origin outputs from matching so
     const [html, md, mdx, site, pdf, receipt] = await Promise.all(
       ['review.html', 'lesson.md', 'lesson.mdx', 'sites/index.html', 'review.pdf', 'render-receipt.json']
         .map(name => readFile(join(output, name))));
-    assert.equal((html.toString().match(/<math\b/gu) ?? []).length, 5);
+    assert.equal((html.toString().match(/<math\b/gu) ?? []).length, 6);
     assert.equal((html.toString().match(/<img src="data:image\/svg\+xml/gu) ?? []).length, 3);
     assert.equal((site.toString().match(/<img src="figures\//gu) ?? []).length, 4);
     assert.match(html.toString(), /<img src="data:image\/png;base64,[^"]+" alt="[^"]+" width="2" height="2"/u);
