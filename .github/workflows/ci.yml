@@ -135,6 +135,27 @@ jobs:
           assert importlib.util.find_spec('huggingface_hub') is None"
       - run: uv run python scripts/validate_repository.py --root .
 
+  lecture-renderer:
+    name: offline lecture renderer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: renderer/package-lock.json
+      - run: npm ci --prefix renderer
+      - run: sudo apt-get update
+      - run: sudo apt-get install --yes --no-install-recommends fonts-noto-cjk
+      - run: npx --prefix renderer playwright install --with-deps chromium webkit
+      - run: npm test --prefix renderer
+        env:
+          VEP_LAYOUT_QA: "1"
+
   asr-container-build:
     name: asr-container-build
     runs-on: ubuntu-24.04

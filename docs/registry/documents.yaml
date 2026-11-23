@@ -398,3 +398,12 @@ documents:
   owners:
   - Xpotato1024
   metadata_mode: front-matter
+- document_id: VEP-OPS-TECHNICAL-LECTURE
+  path: docs/operations/technical-lecture.md
+  document_type: operations
+  status: active
+  canonical: true
+  canonical_for: technical-lecture-review
+  owners:
+  - Xpotato1024
+  metadata_mode: registry-only

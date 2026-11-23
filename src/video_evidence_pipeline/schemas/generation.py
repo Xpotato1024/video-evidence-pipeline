@@ -55,6 +55,15 @@ from video_evidence_pipeline.domain.evidence import (
     SourceRef,
 )
 from video_evidence_pipeline.domain.job import JobSpec
+from video_evidence_pipeline.domain.lecture import (
+    LectureApproval,
+    LectureAuditResponse,
+    LectureDocumentIndex,
+    LectureInput,
+    LectureRequest,
+    RichContent,
+    RichDeliverableManifest,
+)
 from video_evidence_pipeline.domain.length import (
     CharacterLengthAdjustmentAttempt,
     CharacterLengthAdjustmentRequest,
@@ -113,6 +122,13 @@ SCHEMA_VERSION = "1.0"
 SCHEMA_BASE_ID = "https://schemas.video-evidence-pipeline.local/v1"
 
 SCHEMA_MODELS: dict[str, type[BaseModel]] = {
+    "lecture-input.schema.json": LectureInput,
+    "lecture-document-index.schema.json": LectureDocumentIndex,
+    "lecture-request.schema.json": LectureRequest,
+    "lecture-approval.schema.json": LectureApproval,
+    "lecture-audit-response.schema.json": LectureAuditResponse,
+    "rich-content.schema.json": RichContent,
+    "rich-deliverable-manifest.schema.json": RichDeliverableManifest,
     "study-bundle-manifest.schema.json": StudyBundleManifest,
     "study-source-index.schema.json": StudySourceIndex,
     "job-spec.schema.json": JobSpec,
@@ -203,8 +219,23 @@ SCHEMA_MODELS: dict[str, type[BaseModel]] = {
 def schema_bytes(filename: str, model: type[BaseModel]) -> bytes:
     schema = model.model_json_schema(mode="validation")
     schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
-    schema["$id"] = f"{SCHEMA_BASE_ID}/{filename}"
-    schema["x-schema-version"] = SCHEMA_VERSION
+    version = (
+        "2.0"
+        if model
+        in {
+            LectureInput,
+            LectureRequest,
+            LectureApproval,
+            LectureAuditResponse,
+            LectureDocumentIndex,
+            RichContent,
+            RichDeliverableManifest,
+        }
+        else SCHEMA_VERSION
+    )
+    base = SCHEMA_BASE_ID.removesuffix("/v1") + "/v2" if version == "2.0" else SCHEMA_BASE_ID
+    schema["$id"] = f"{base}/{filename}"
+    schema["x-schema-version"] = version
     return (
         json.dumps(schema, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n"
     ).encode("utf-8")

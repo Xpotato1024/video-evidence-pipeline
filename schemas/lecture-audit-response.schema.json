@@ -1,0 +1,200 @@
+{
+  "$defs": {
+    "AgentExecutionMode": {
+      "enum": [
+        "external_exchange",
+        "test_fixture"
+      ],
+      "title": "AgentExecutionMode",
+      "type": "string"
+    },
+    "AgentIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "context_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "title": "Context Id",
+          "type": "string"
+        },
+        "execution_mode": {
+          "$ref": "#/$defs/AgentExecutionMode"
+        },
+        "executor": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Executor",
+          "type": "string"
+        },
+        "external_api_used": {
+          "title": "External Api Used",
+          "type": "boolean"
+        },
+        "model": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Model",
+          "type": "string"
+        },
+        "provider": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Provider",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/AgentRole"
+        },
+        "version": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "provider",
+        "model",
+        "version",
+        "executor",
+        "context_id",
+        "execution_mode",
+        "external_api_used"
+      ],
+      "title": "AgentIdentity",
+      "type": "object"
+    },
+    "AgentRole": {
+      "enum": [
+        "author",
+        "auditor",
+        "reviser"
+      ],
+      "title": "AgentRole",
+      "type": "string"
+    },
+    "AuditSeverity": {
+      "enum": [
+        "P0",
+        "P1",
+        "P2"
+      ],
+      "title": "AuditSeverity",
+      "type": "string"
+    },
+    "LectureAuditFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "severity": {
+          "$ref": "#/$defs/AuditSeverity"
+        },
+        "source_refs": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "type": "string"
+          },
+          "maxItems": 128,
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "target_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "title": "Target Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "severity",
+        "target_id",
+        "detail"
+      ],
+      "title": "LectureAuditFinding",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v2/lecture-audit-response.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "agent": {
+      "$ref": "#/$defs/AgentIdentity"
+    },
+    "checked_blocks": {
+      "items": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+        "type": "string"
+      },
+      "maxItems": 2048,
+      "title": "Checked Blocks",
+      "type": "array"
+    },
+    "checked_equations": {
+      "items": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+        "type": "string"
+      },
+      "maxItems": 512,
+      "title": "Checked Equations",
+      "type": "array"
+    },
+    "checked_figures": {
+      "items": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+        "type": "string"
+      },
+      "maxItems": 512,
+      "title": "Checked Figures",
+      "type": "array"
+    },
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/LectureAuditFinding"
+      },
+      "maxItems": 2048,
+      "title": "Findings",
+      "type": "array"
+    },
+    "kind": {
+      "enum": [
+        "content",
+        "visual"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "request_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Request Fingerprint",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "2.0",
+      "default": "2.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "request_fingerprint",
+    "agent",
+    "findings"
+  ],
+  "title": "LectureAuditResponse",
+  "type": "object",
+  "x-schema-version": "2.0"
+}

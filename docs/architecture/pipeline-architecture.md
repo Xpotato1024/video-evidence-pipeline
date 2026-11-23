@@ -246,6 +246,11 @@ human-review／approval／export境界で同じvalidatorを再実行します。
 束縛します。最後の許可responseが成功すれば受理し、exhaustionはtyped reason manifestを伴ってinitial authoringまたは
 semantic revisionから`BLOCKED`へ遷移します。length adjustmentは`semantic_revision_count`を消費しません。
 
+`vep lecture` adds a versioned technical-material exchange over verified evidence, an approved v1
+archive or hash-bound local documents. Typed math, figures, worked steps, provenance and rendering are bound
+to one immutable review candidate. The legacy transition and approval ledgers retain their v1 semantics.
+See the [technical lecture review operations](../operations/technical-lecture.md) for the CLI and v2 contract.
+
 ### 2.6 Independent Audit
 
 責務:

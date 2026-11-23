@@ -1,0 +1,404 @@
+{
+  "$defs": {
+    "AuthoringProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "language": {
+          "pattern": "^[a-z]{2,3}(-[A-Za-z0-9]{2,8}){0,3}$",
+          "title": "Language",
+          "type": "string"
+        },
+        "profile_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "title": "Profile Id",
+          "type": "string"
+        },
+        "rules": {
+          "items": {
+            "$ref": "#/$defs/ProfileRule"
+          },
+          "maxItems": 100,
+          "title": "Rules",
+          "type": "array"
+        },
+        "skills": {
+          "items": {
+            "$ref": "#/$defs/ProfileSkill"
+          },
+          "maxItems": 32,
+          "title": "Skills",
+          "type": "array"
+        },
+        "version": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile_id",
+        "version",
+        "language"
+      ],
+      "title": "AuthoringProfile",
+      "type": "object"
+    },
+    "LectureSource": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence_roles": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Evidence Roles",
+          "type": "array"
+        },
+        "excerpt": {
+          "anyOf": [
+            {
+              "maxLength": 65536,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Excerpt"
+        },
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "current_lecture",
+            "previous_lecture",
+            "supplement"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "locator": {
+          "$ref": "#/$defs/SourceLocator"
+        },
+        "source_refs": {
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "maxItems": 128,
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "title": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "locator"
+      ],
+      "title": "LectureSource",
+      "type": "object"
+    },
+    "ProfileRule": {
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "enum": [
+            "content",
+            "format",
+            "calculation",
+            "diagram"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scope",
+        "text"
+      ],
+      "title": "ProfileRule",
+      "type": "object"
+    },
+    "ProfileSkill": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "sha256"
+      ],
+      "title": "ProfileSkill",
+      "type": "object"
+    },
+    "SourceLocator": {
+      "additionalProperties": false,
+      "properties": {
+        "end_ms": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Ms"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "maxLength": 65536,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page"
+        },
+        "ref_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ref Id"
+        },
+        "region": {
+          "anyOf": [
+            {
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Session Id"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sha256"
+        },
+        "start_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Ms"
+        }
+      },
+      "title": "SourceLocator",
+      "type": "object"
+    },
+    "SourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "content_sha256": {
+          "description": "Transcript-record semantic fingerprint or canonical frame artifact SHA-256",
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "end_ms": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Ms"
+        },
+        "kind": {
+          "$ref": "#/$defs/SourceRefKind"
+        },
+        "ref_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Ref Id",
+          "type": "string"
+        },
+        "start_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Ms"
+        }
+      },
+      "required": [
+        "kind",
+        "ref_id",
+        "content_sha256"
+      ],
+      "title": "SourceRef",
+      "type": "object"
+    },
+    "SourceRefKind": {
+      "enum": [
+        "transcript_segment",
+        "frame",
+        "approved_artifact",
+        "pdf_text",
+        "pdf_page",
+        "image",
+        "notes"
+      ],
+      "title": "SourceRefKind",
+      "type": "string"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v2/lecture-input.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "output_mode": {
+      "enum": [
+        "worked_explanation",
+        "submission_answer"
+      ],
+      "title": "Output Mode",
+      "type": "string"
+    },
+    "previous_context": {
+      "items": {
+        "$ref": "#/$defs/LectureSource"
+      },
+      "maxItems": 64,
+      "title": "Previous Context",
+      "type": "array"
+    },
+    "profile": {
+      "$ref": "#/$defs/AuthoringProfile"
+    },
+    "schema_version": {
+      "const": "2.0",
+      "default": "2.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "version": {
+      "pattern": "^v(00[1-9]|0[1-9][0-9]|[1-9][0-9]{2})$",
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "version",
+    "output_mode",
+    "profile"
+  ],
+  "title": "LectureInput",
+  "type": "object",
+  "x-schema-version": "2.0"
+}

@@ -1,0 +1,1070 @@
+{
+  "$defs": {
+    "AgentExecutionMode": {
+      "enum": [
+        "external_exchange",
+        "test_fixture"
+      ],
+      "title": "AgentExecutionMode",
+      "type": "string"
+    },
+    "AgentIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "context_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "title": "Context Id",
+          "type": "string"
+        },
+        "execution_mode": {
+          "$ref": "#/$defs/AgentExecutionMode"
+        },
+        "executor": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Executor",
+          "type": "string"
+        },
+        "external_api_used": {
+          "title": "External Api Used",
+          "type": "boolean"
+        },
+        "model": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Model",
+          "type": "string"
+        },
+        "provider": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Provider",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/AgentRole"
+        },
+        "version": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "provider",
+        "model",
+        "version",
+        "executor",
+        "context_id",
+        "execution_mode",
+        "external_api_used"
+      ],
+      "title": "AgentIdentity",
+      "type": "object"
+    },
+    "AgentRole": {
+      "enum": [
+        "author",
+        "auditor",
+        "reviser"
+      ],
+      "title": "AgentRole",
+      "type": "string"
+    },
+    "CalloutBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "source_refs": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "text": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "type": {
+          "const": "callout",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source_refs",
+        "type",
+        "title",
+        "text"
+      ],
+      "title": "CalloutBlock",
+      "type": "object"
+    },
+    "Coverage": {
+      "additionalProperties": false,
+      "properties": {
+        "block_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "type": "string"
+          },
+          "maxItems": 128,
+          "title": "Block Ids",
+          "type": "array"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "maxLength": 65536,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "status": {
+          "enum": [
+            "covered",
+            "unresolved",
+            "not_applicable"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "topic": {
+          "enum": [
+            "concepts",
+            "definitions",
+            "derivations",
+            "conditions",
+            "teacher_emphasis",
+            "assignments",
+            "next_lesson",
+            "worked_examples",
+            "visuals",
+            "prior_lessons"
+          ],
+          "title": "Topic",
+          "type": "string"
+        }
+      },
+      "required": [
+        "topic",
+        "status",
+        "block_ids"
+      ],
+      "title": "Coverage",
+      "type": "object"
+    },
+    "Equation": {
+      "additionalProperties": false,
+      "properties": {
+        "assumptions": {
+          "items": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 128,
+          "title": "Assumptions",
+          "type": "array"
+        },
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "source_refs": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "symbol_table": {
+          "additionalProperties": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxProperties": 128,
+          "propertyNames": {
+            "maxLength": 65536,
+            "minLength": 1
+          },
+          "title": "Symbol Table",
+          "type": "object"
+        },
+        "tex": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Tex",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "tex",
+        "symbol_table",
+        "assumptions",
+        "source_refs"
+      ],
+      "title": "Equation",
+      "type": "object"
+    },
+    "EquationBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "equation_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+          "title": "Equation Id",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "source_refs": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "type": {
+          "const": "equation",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source_refs",
+        "type",
+        "equation_id"
+      ],
+      "title": "EquationBlock",
+      "type": "object"
+    },
+    "Figure": {
+      "additionalProperties": false,
+      "properties": {
+        "alt": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Alt",
+          "type": "string"
+        },
+        "caption": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Caption",
+          "type": "string"
+        },
+        "factuality": {
+          "enum": [
+            "source_crop",
+            "derived_diagram",
+            "theoretical",
+            "measured",
+            "illustrative"
+          ],
+          "title": "Factuality",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "vega-lite",
+            "mermaid",
+            "geometry",
+            "source_crop"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "source_refs": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "spec": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Spec",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "spec",
+        "alt",
+        "caption",
+        "source_refs",
+        "factuality"
+      ],
+      "title": "Figure",
+      "type": "object"
+    },
+    "FigureBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "figure_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+          "title": "Figure Id",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "source_refs": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "type": {
+          "const": "figure",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source_refs",
+        "type",
+        "figure_id"
+      ],
+      "title": "FigureBlock",
+      "type": "object"
+    },
+    "HeadingBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "level": {
+          "default": 2,
+          "enum": [
+            2,
+            3,
+            4
+          ],
+          "title": "Level",
+          "type": "integer"
+        },
+        "source_refs": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "text": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "type": {
+          "const": "heading",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source_refs",
+        "type",
+        "text"
+      ],
+      "title": "HeadingBlock",
+      "type": "object"
+    },
+    "JsonValue": {},
+    "LectureSource": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence_roles": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Evidence Roles",
+          "type": "array"
+        },
+        "excerpt": {
+          "anyOf": [
+            {
+              "maxLength": 65536,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Excerpt"
+        },
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "current_lecture",
+            "previous_lecture",
+            "supplement"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "locator": {
+          "$ref": "#/$defs/SourceLocator"
+        },
+        "source_refs": {
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "maxItems": 128,
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "title": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "locator"
+      ],
+      "title": "LectureSource",
+      "type": "object"
+    },
+    "ParagraphBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "source_refs": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "text": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "type": {
+          "const": "paragraph",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source_refs",
+        "type",
+        "text"
+      ],
+      "title": "ParagraphBlock",
+      "type": "object"
+    },
+    "SourceLocator": {
+      "additionalProperties": false,
+      "properties": {
+        "end_ms": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Ms"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "maxLength": 65536,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page"
+        },
+        "ref_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ref Id"
+        },
+        "region": {
+          "anyOf": [
+            {
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Session Id"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sha256"
+        },
+        "start_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Ms"
+        }
+      },
+      "title": "SourceLocator",
+      "type": "object"
+    },
+    "SourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "content_sha256": {
+          "description": "Transcript-record semantic fingerprint or canonical frame artifact SHA-256",
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "end_ms": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Ms"
+        },
+        "kind": {
+          "$ref": "#/$defs/SourceRefKind"
+        },
+        "ref_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Ref Id",
+          "type": "string"
+        },
+        "start_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Ms"
+        }
+      },
+      "required": [
+        "kind",
+        "ref_id",
+        "content_sha256"
+      ],
+      "title": "SourceRef",
+      "type": "object"
+    },
+    "SourceRefKind": {
+      "enum": [
+        "transcript_segment",
+        "frame",
+        "approved_artifact",
+        "pdf_text",
+        "pdf_page",
+        "image",
+        "notes"
+      ],
+      "title": "SourceRefKind",
+      "type": "string"
+    },
+    "StepsBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "source_refs": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/WorkedStep"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Steps",
+          "type": "array"
+        },
+        "type": {
+          "const": "steps",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source_refs",
+        "type",
+        "steps"
+      ],
+      "title": "StepsBlock",
+      "type": "object"
+    },
+    "TableBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "caption": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Caption",
+          "type": "string"
+        },
+        "headers": {
+          "items": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 24,
+          "minItems": 1,
+          "title": "Headers",
+          "type": "array"
+        },
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "rows": {
+          "items": {
+            "items": {
+              "maxLength": 65536,
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "maxItems": 512,
+          "minItems": 1,
+          "title": "Rows",
+          "type": "array"
+        },
+        "source_refs": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "type": {
+          "const": "table",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source_refs",
+        "type",
+        "caption",
+        "headers",
+        "rows"
+      ],
+      "title": "TableBlock",
+      "type": "object"
+    },
+    "WorkedStep": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "intermediate": {
+          "anyOf": [
+            {
+              "maxLength": 65536,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Intermediate"
+        },
+        "rationale": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Rationale",
+          "type": "string"
+        },
+        "result": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Result",
+          "type": "string"
+        },
+        "source_refs": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "substitution": {
+          "anyOf": [
+            {
+              "maxLength": 65536,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Substitution"
+        },
+        "symbolic": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Symbolic",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "rationale",
+        "symbolic",
+        "result",
+        "source_refs"
+      ],
+      "title": "WorkedStep",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v2/rich-content.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "author": {
+      "$ref": "#/$defs/AgentIdentity"
+    },
+    "blocks": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "callout": "#/$defs/CalloutBlock",
+            "equation": "#/$defs/EquationBlock",
+            "figure": "#/$defs/FigureBlock",
+            "heading": "#/$defs/HeadingBlock",
+            "paragraph": "#/$defs/ParagraphBlock",
+            "steps": "#/$defs/StepsBlock",
+            "table": "#/$defs/TableBlock"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/HeadingBlock"
+          },
+          {
+            "$ref": "#/$defs/ParagraphBlock"
+          },
+          {
+            "$ref": "#/$defs/CalloutBlock"
+          },
+          {
+            "$ref": "#/$defs/TableBlock"
+          },
+          {
+            "$ref": "#/$defs/EquationBlock"
+          },
+          {
+            "$ref": "#/$defs/FigureBlock"
+          },
+          {
+            "$ref": "#/$defs/StepsBlock"
+          }
+        ]
+      },
+      "maxItems": 2048,
+      "minItems": 1,
+      "title": "Blocks",
+      "type": "array"
+    },
+    "coverage": {
+      "items": {
+        "$ref": "#/$defs/Coverage"
+      },
+      "maxItems": 10,
+      "minItems": 1,
+      "title": "Coverage",
+      "type": "array"
+    },
+    "equations": {
+      "items": {
+        "$ref": "#/$defs/Equation"
+      },
+      "maxItems": 512,
+      "title": "Equations",
+      "type": "array"
+    },
+    "figures": {
+      "items": {
+        "$ref": "#/$defs/Figure"
+      },
+      "maxItems": 55,
+      "title": "Figures",
+      "type": "array"
+    },
+    "language": {
+      "pattern": "^[a-z]{2,3}(-[A-Za-z0-9]{2,8}){0,3}$",
+      "title": "Language",
+      "type": "string"
+    },
+    "output_mode": {
+      "enum": [
+        "worked_explanation",
+        "submission_answer"
+      ],
+      "title": "Output Mode",
+      "type": "string"
+    },
+    "request_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Request Fingerprint",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "2.0",
+      "default": "2.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "sources": {
+      "items": {
+        "$ref": "#/$defs/LectureSource"
+      },
+      "maxItems": 10000,
+      "minItems": 1,
+      "title": "Sources",
+      "type": "array"
+    },
+    "title": {
+      "maxLength": 65536,
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    }
+  },
+  "required": [
+    "title",
+    "language",
+    "output_mode",
+    "request_fingerprint",
+    "author",
+    "sources",
+    "blocks",
+    "equations",
+    "figures",
+    "coverage"
+  ],
+  "title": "RichContent",
+  "type": "object",
+  "x-schema-version": "2.0"
+}

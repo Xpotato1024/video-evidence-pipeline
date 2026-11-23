@@ -113,3 +113,36 @@ eval_path = ".agents/skill-evals/run-video-evidence-job.toml"
 eval_result_path = ".agents/skill-eval-results/run-video-evidence-job.toml"
 owner = "Xpotato1024"
 required_capabilities = ["filesystem-read", "command-execution"]
+
+[[skills]]
+id = "draft-technical-lecture"
+path = ".agents/skills/draft-technical-lecture/SKILL.md"
+resources = []
+lifecycle = "draft"
+automatic_trigger = false
+side_effect_policy = "instruction-only"
+eval_path = ".agents/skill-evals/draft-technical-lecture.toml"
+owner = "Xpotato1024"
+required_capabilities = ["validated-evidence-read"]
+
+[[skills]]
+id = "plan-technical-visual"
+path = ".agents/skills/plan-technical-visual/SKILL.md"
+resources = []
+lifecycle = "draft"
+automatic_trigger = false
+side_effect_policy = "instruction-only"
+eval_path = ".agents/skill-evals/plan-technical-visual.toml"
+owner = "Xpotato1024"
+required_capabilities = ["validated-evidence-read"]
+
+[[skills]]
+id = "audit-technical-visual"
+path = ".agents/skills/audit-technical-visual/SKILL.md"
+resources = []
+lifecycle = "draft"
+automatic_trigger = false
+side_effect_policy = "instruction-only"
+eval_path = ".agents/skill-evals/audit-technical-visual.toml"
+owner = "Xpotato1024"
+required_capabilities = ["validated-evidence-read"]
