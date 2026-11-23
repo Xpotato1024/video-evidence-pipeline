@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import urlencode
 
 import pytest
 from typer.testing import CliRunner
@@ -51,10 +52,8 @@ def test_workflow_start_reads_embed_url_from_stdin_and_persists_only_session_ide
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    source = (
-        "https://tenant.hosted.panopto.com/Panopto/Pages/Embed.aspx"
-        f"?id={_SESSION_ID}&access_token={_URL_SECRET}\n"
-    )
+    query = urlencode({"id": _SESSION_ID, "access_token": _URL_SECRET})
+    source = f"https://tenant.hosted.panopto.com/Panopto/Pages/Embed.aspx?{query}\n"
 
     result = _run_start_with_stdin(monkeypatch, tmp_path, source)
 
@@ -78,7 +77,7 @@ def test_workflow_start_redacts_invalid_stdin_url(
     result = _run_start_with_stdin(
         monkeypatch,
         tmp_path,
-        f"not-a-panopto-url?token={_URL_SECRET}\n",
+        f"not-a-panopto-url?{urlencode({'token': _URL_SECRET})}\n",
     )
 
     assert result.exit_code == 2
