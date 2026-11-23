@@ -366,3 +366,21 @@ def test_portable_list_and_operation_edits_keep_their_structure() -> None:
     assert result[0]["items"] == ["Outward", "Up"]
     assert result[1]["steps"][0]["expression"] == "h=2"
     assert result[1]["steps"][1]["rationale"] == "Trace the curve."
+
+
+def test_portable_background_paragraphs_and_question_are_editable() -> None:
+    from video_evidence_pipeline.delivery.lecture_source import apply_mdx_edits
+
+    content = {
+        "title": "Guide",
+        "blocks": [
+            {"id": "why", "type": "background", "title": "Why?", "paragraphs": ["One.", "Two."]}
+        ],
+        "figures": [],
+        "equations": [],
+    }
+    source = '# Guide\n\n{/* vep:block why */}\n\n<Background title="Why?">\n\nOne.\n\nTwo.\n\nSource: a\n\n</Background>\n\n{/* vep:sources */}\n\n## Sources\n'
+    edited = source.replace("Why?", "When?").replace("Two.", "Another reason.")
+    block = apply_mdx_edits(content, source, edited)["blocks"][0]
+    assert block["title"] == "When?"
+    assert block["paragraphs"] == ["One.", "Another reason."]

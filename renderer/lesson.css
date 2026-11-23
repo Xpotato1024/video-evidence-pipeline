@@ -65,6 +65,11 @@ figcaption { margin-top: .5em; font-weight: 590; }
 .step-equation > p { break-after: avoid; }
 details { margin-top: .6em; }
 summary { color: #0b5962; cursor: pointer; }
+.background { margin: .8rem 0; border-inline-start: 2px solid #c4d0d6; padding-inline-start: .75rem; }
+.background-print { display: none; }
+.background summary { padding: .4rem 0; min-height: 44px; color: #254251; font-weight: 600; }
+.background-label { font-size: .8em; font-weight: normal; color: #4d606c; margin-inline-end: .4em; }
+.background-body { margin: .15rem 0 .6rem; }
 table { border-collapse: collapse; margin: .55rem 0; }
 caption { text-align: left; font-weight: 600; }
 th, td { border: 1px solid #d2dce4; padding: .3rem .65rem; vertical-align: top; text-align: start; }
@@ -80,6 +85,8 @@ th { background: #edf4f6; }
   .figure-scroll img { width: auto; max-width: 100%; min-width: 0; max-height: 136mm; }
   .figure-scroll, .equation, .table-scroll { overflow: visible; }
   details { display: none; }
+  .background-print { display: block; }
+  .background-question { font-weight: 600; break-after: avoid; }
   .back, .study-nav { display: none; }
   thead { display: table-header-group; }
   tr { break-inside: avoid; }

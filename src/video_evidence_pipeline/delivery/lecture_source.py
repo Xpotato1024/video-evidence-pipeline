@@ -117,6 +117,12 @@ def apply_mdx_edits(content: dict[str, Any], original: str, edited: str) -> dict
                     fields.append((block["items"], index, "- ", "\n", _markdown, _decode_markdown))
             case "paragraph":
                 fields.append((block, "text", "\n\n", "\n\n", _markdown, _decode_markdown))
+            case "background":
+                fields.append((block, "title", '<Background title="', '">', _escape, html.unescape))
+                for index in range(len(block["paragraphs"])):
+                    fields.append(
+                        (block["paragraphs"], index, "\n\n", "\n\n", _markdown, _decode_markdown)
+                    )
             case "callout":
                 fields.extend(
                     [

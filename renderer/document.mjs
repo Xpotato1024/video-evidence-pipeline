@@ -233,6 +233,14 @@ export function createDocument(content, equations, figures, stepEquations) {
       }
       case 'bullets': return `<section id="block-${id}" class="bullet-group"><p><strong>${rich(block.title)}</strong></p>` +
         `<ul>${block.items.map(item => `<li>${rich(item)}</li>`).join('')}</ul></section>`;
+      case 'background': {
+        const optional = lang.startsWith('ja') ? '補足' : 'Background';
+        const label = `<span class="background-label">${optional}</span> ${rich(block.title)}`;
+        const body = `<div class="background-body">${block.paragraphs.map(text => `<p class="prose">${rich(text)}</p>`).join('')}</div>`;
+        // A closed native disclosure can suppress its children in WebKit print.
+        return `<section class="background" id="block-${id}"><details><summary>${label}</summary>${body}</details>` +
+          `<div class="background-print"><p class="background-question">${label}</p>${body}</div></section>`;
+      }
       case 'paragraph': return `<p id="block-${id}" class="prose">${rich(block.text)}</p>`;
       case 'callout': return `<aside id="block-${id}"><p><strong>${rich(block.title)}</strong></p><p class="prose">${rich(block.text)}</p></aside>`;
       case 'table': return `<section id="block-${id}">${htmlTable(block.headers, block.rows, block.caption, rich)}</section>`;
@@ -265,6 +273,11 @@ export function createDocument(content, equations, figures, stepEquations) {
         return '#'.repeat(Math.max(2, block.level)) + ' ' + markdown(block.text) + refs;
       case 'bullets': return '**' + markdown(block.title) + '**\n\n' +
         block.items.map(item => '- ' + markdown(item)).join('\n') + refs;
+      case 'background': {
+        const body = block.paragraphs.map(text => markdown(text)).join('\n\n');
+        return mode === 'mdx' ? `<Background title="${escape(block.title)}">\n\n${body}${refs}\n\n</Background>`
+          : '**' + markdown(block.title) + '**\n\n' + body + refs;
+      }
       case 'paragraph': return markdown(block.text) + refs;
       case 'callout': return mode === 'mdx'
         ? `<Callout title="${escape(block.title)}">\n\n${markdown(block.text)}${refs}\n\n</Callout>`

@@ -23,6 +23,7 @@ const fixture = {
   equations: [{ id: 'partial', tex: String.raw`\frac{\partial u_z}{\partial r} = \sum_{i=1}^n q_i`, symbol_table: { r: '距離' }, assumptions: ['定常'], source_refs: ['current'] }],
   blocks: [
     { id: 'heading', type: 'heading', level: 2, text: String.raw`式と図 \(u\)`, source_refs: ['current'] },
+    { id: 'basis-note', type: 'background', title: 'なぜ方向を分ける？', paragraphs: ['各軸の向きを使う。', String.raw`変化率を \(q\) と置く。`], source_refs: ['supplement'] },
     { id: 'directions', type: 'bullets', title: '二方向', items: [String.raw`**縦** \(y\)`, '横'], source_refs: ['current'] },
     { id: 'actions', type: 'steps', source_refs: ['current'], steps: [
       { id: 'select', type: 'operation', title: '値を選ぶ', rationale: '等値線の高さを決める。', expression: 'h=1', source_refs: ['current'] },
@@ -118,7 +119,7 @@ test('renderer builds editable, offline and same-origin outputs from matching so
     const [html, md, mdx, site, pdf, receipt] = await Promise.all(
       ['review.html', 'lesson.md', 'lesson.mdx', 'sites/index.html', 'review.pdf', 'render-receipt.json']
         .map(name => readFile(join(output, name))));
-    assert.equal((html.toString().match(/<math\b/gu) ?? []).length, 11);
+    assert.equal((html.toString().match(/<math\b/gu) ?? []).length, 13);
     assert.equal((html.toString().match(/<img src="data:image\/svg\+xml/gu) ?? []).length, 3);
     assert.equal((site.toString().match(/<img src="figures\//gu) ?? []).length, 4);
     assert.match(html.toString(), /<img src="data:image\/png;base64,[^"]+" alt="[^"]+" width="2" height="2"/u);
@@ -131,6 +132,9 @@ test('renderer builds editable, offline and same-origin outputs from matching so
     assert.match(body, /<li id="block-connect">/u);
     assert.match(mdx.toString(), /<Step title="値を選ぶ">[\s\S]*?```math id="actions-select-expression"/u);
     assert.match(md.toString(), /\n- [^\n]*縦[^\n]*\n- 横/u);
+    assert.match(body, /<section class="background" id="block-basis-note"><details><summary>/u);
+    assert.match(mdx.toString(), /<Background title="なぜ方向を分ける？">/u);
+    assert.match(md.toString(), /\*\*なぜ方向を分ける？\*\*/u);
     assert.match(body, /class="calculation"/);
     assert.match(body, /<nav class="study-nav"/);
     assert.match(body, /href="#block-values-heading"/);
@@ -157,6 +161,7 @@ test('renderer builds editable, offline and same-origin outputs from matching so
       const { stdout } = await exec(process.execPath, [layoutCheck, output, join(root, 'layout')], { timeout: 150_000 });
       const results = JSON.parse(stdout).results;
       assert.equal(results.length, 26);
+      assert.ok(results.every(result => result.backgroundCount === 1));
       assert.deepEqual(new Set(results.map(result => result.browser)), new Set(['chromium', 'webkit']));
     }
   } finally {

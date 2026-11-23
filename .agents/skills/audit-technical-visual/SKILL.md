@@ -33,3 +33,5 @@ Inspect a complete PDF page and a narrow-screen section containing a derivation.
 Independently start at the overview, jump to a specific operation, and use the overview return link. Compare inline and displayed math glyphs, including vector weight and indices, at 320px and in the PDF. Inspect factual emphasis in the body separately from headings. A chapter list alone does not explain how its topics connect.
 
 Inspect whether parallel items are scannable as a list and dependent actions have ordered steps. To check explanatory sufficiency, pick a key equation, identify when it applies, explain why the critical operation works, and reproduce the action from its diagram and equation. Check that figure arrows agree with the actual basis and that prose does not repeat their labels.
+
+Read each section with background disclosures closed. Check the objective and first-use definitions against the diagram and first formula. Open each question by keyboard and check its reasoning, typeset notation, narrow-screen layout and presence in the printed PDF.

@@ -271,6 +271,12 @@ class ParagraphBlock(ReferencedBlock):
     text: Text
 
 
+class BackgroundBlock(ReferencedBlock):
+    type: Literal["background"]
+    title: Text
+    paragraphs: list[Text] = Field(min_length=1, max_length=32)
+
+
 class CalloutBlock(ReferencedBlock):
     type: Literal["callout"]
     title: Text
@@ -321,6 +327,7 @@ class StepsBlock(ReferencedBlock):
 Block = Annotated[
     HeadingBlock
     | ParagraphBlock
+    | BackgroundBlock
     | CalloutBlock
     | TableBlock
     | EquationBlock

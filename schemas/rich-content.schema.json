@@ -79,6 +79,57 @@
       "title": "AgentRole",
       "type": "string"
     },
+    "BackgroundBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "paragraphs": {
+          "items": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Paragraphs",
+          "type": "array"
+        },
+        "source_refs": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "title": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "type": {
+          "const": "background",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source_refs",
+        "type",
+        "title",
+        "paragraphs"
+      ],
+      "title": "BackgroundBlock",
+      "type": "object"
+    },
     "BulletListBlock": {
       "additionalProperties": false,
       "properties": {
@@ -1064,6 +1115,7 @@
       "items": {
         "discriminator": {
           "mapping": {
+            "background": "#/$defs/BackgroundBlock",
             "bullets": "#/$defs/BulletListBlock",
             "callout": "#/$defs/CalloutBlock",
             "equation": "#/$defs/EquationBlock",
@@ -1081,6 +1133,9 @@
           },
           {
             "$ref": "#/$defs/ParagraphBlock"
+          },
+          {
+            "$ref": "#/$defs/BackgroundBlock"
           },
           {
             "$ref": "#/$defs/CalloutBlock"

@@ -96,6 +96,19 @@ async function inspect(browser, name, url, size, paper = false) {
     } else {
       await page.goto(url, { waitUntil: 'load' });
     }
+    const backgrounds = page.locator('.background details');
+    const backgroundCount = await backgrounds.count();
+    for (const item of await backgrounds.all()) {
+      const summary = item.locator('summary');
+      const body = paper ? item.locator('..').locator('.background-print .background-body') : item.locator('.background-body');
+      if (!paper) {
+        assert.equal(await item.getAttribute('open'), null);
+        await summary.focus();
+        await summary.press('Enter');
+        assert.notEqual(await item.getAttribute('open'), null);
+      }
+      assert.ok(await body.isVisible(), 'Optional background must be readable when expanded or printed');
+    }
     const metrics = await page.evaluate(async () => {
       await document.fonts.ready;
       const images = [...document.images];
@@ -117,7 +130,8 @@ async function inspect(browser, name, url, size, paper = false) {
       }).map(figure => figure.id);
       // The contents list repeats formatted section titles inside a disclosure.
       // Check the actual lesson equations, which must always be legible.
-      const equations = [...document.querySelectorAll('math')].filter(math => !math.closest('.study-nav'));
+      const inactive = matchMedia('print').matches ? '.background details' : '.background-print';
+      const equations = [...document.querySelectorAll('math')].filter(math => !math.closest(`.study-nav, ${inactive}`));
       const hiddenEquations = equations.filter(math => !math.getBoundingClientRect().height);
       return {
         viewport: document.documentElement.clientWidth,
@@ -131,6 +145,13 @@ async function inspect(browser, name, url, size, paper = false) {
         hiddenEquations: hiddenEquations.length,
       };
     });
+    if (!paper) {
+      for (const item of await backgrounds.all()) {
+        await item.locator('summary').press('Space');
+        assert.equal(await item.getAttribute('open'), null);
+      }
+      if (backgroundCount) await page.evaluate(() => window.scrollTo(0, 0));
+    }
     const label = [name, offline ? 'offline' : 'site', paper ? 'print' : size.name].join('-');
     await page.screenshot({ path: join(output, label + '.png') });
     assert.ok(metrics.scrollWidth <= metrics.viewport + 1, label + ' has horizontal page overflow');
@@ -143,7 +164,7 @@ async function inspect(browser, name, url, size, paper = false) {
     assert.deepEqual(errors, []);
     assert.ok([...requests.values()].every(status => status < 400), label + ' has failed requests');
     return { browser: name, route: offline ? 'standalone' : 'same-origin', loadMethod, size: paper ? 'print' : size.name,
-      ...metrics, externalRequests: blocked.length, httpRequests: offline ? 0 : requests.size };
+      ...metrics, backgroundCount, externalRequests: blocked.length, httpRequests: offline ? 0 : requests.size };
   } finally {
     await context.close();
   }
