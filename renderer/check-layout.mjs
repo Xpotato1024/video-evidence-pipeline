@@ -115,7 +115,9 @@ async function inspect(browser, name, url, size, paper = false) {
         const viewport = figure.querySelector('.figure-scroll');
         return viewport && viewport.scrollWidth > viewport.clientWidth + 1;
       }).map(figure => figure.id);
-      const equations = [...document.querySelectorAll('math')];
+      // The contents list repeats formatted section titles inside a disclosure.
+      // Check the actual lesson equations, which must always be legible.
+      const equations = [...document.querySelectorAll('math')].filter(math => !math.closest('.study-nav'));
       const hiddenEquations = equations.filter(math => !math.getBoundingClientRect().height);
       return {
         viewport: document.documentElement.clientWidth,

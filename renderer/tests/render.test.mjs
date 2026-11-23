@@ -22,12 +22,13 @@ const fixture = {
   ],
   equations: [{ id: 'partial', tex: String.raw`\frac{\partial u_z}{\partial r} = \sum_{i=1}^n q_i`, symbol_table: { r: '距離' }, assumptions: ['定常'], source_refs: ['current'] }],
   blocks: [
-    { id: 'heading', type: 'heading', level: 2, text: '式と図', source_refs: ['current'] },
+    { id: 'heading', type: 'heading', level: 2, text: String.raw`式と図 \(u\)`, source_refs: ['current'] },
     { id: 'formula', type: 'equation', equation_id: 'partial', source_refs: ['current'] },
     { id: 'curve-block', type: 'figure', figure_id: 'chart', source_refs: ['supplement'] },
     { id: 'diagram-block', type: 'figure', figure_id: 'axes', source_refs: ['supplement'] },
     { id: 'flow-block', type: 'figure', figure_id: 'flow', source_refs: ['supplement'] },
     { id: 'crop-block', type: 'figure', figure_id: 'crop', source_refs: ['handout:P0002'] },
+    { id: 'values-heading', type: 'heading', level: 2, text: '測定値', source_refs: ['current'] },
     { id: 'table-block', type: 'table', caption: '値の並び', headers: ['値', '単位'], rows: [['4.5', '1']], source_refs: ['current'] },
     { id: 'steps', type: 'steps', source_refs: ['current'], steps: [
       { id: 'solve', title: '面積を計算する', rationale: '幅と高さの積を用いる。', symbolic: String.raw`A = b h`,
@@ -112,7 +113,7 @@ test('renderer builds editable, offline and same-origin outputs from matching so
     const [html, md, mdx, site, pdf, receipt] = await Promise.all(
       ['review.html', 'lesson.md', 'lesson.mdx', 'sites/index.html', 'review.pdf', 'render-receipt.json']
         .map(name => readFile(join(output, name))));
-    assert.equal((html.toString().match(/<math\b/gu) ?? []).length, 6);
+    assert.equal((html.toString().match(/<math\b/gu) ?? []).length, 9);
     assert.equal((html.toString().match(/<img src="data:image\/svg\+xml/gu) ?? []).length, 3);
     assert.equal((site.toString().match(/<img src="figures\//gu) ?? []).length, 4);
     assert.match(html.toString(), /<img src="data:image\/png;base64,[^"]+" alt="[^"]+" width="2" height="2"/u);
@@ -121,6 +122,8 @@ test('renderer builds editable, offline and same-origin outputs from matching so
     assert.equal((body.match(/href="#note-1"/g) ?? []).length, 1);
     assert.doesNotMatch(body, /<p class="source-link"|>合成資料<|<p>数値代入<\/p>/);
     assert.match(body, /class="calculation"/);
+    assert.match(body, /<nav class="study-nav"/);
+    assert.match(body, /href="#block-values-heading"/);
     assert.match(notes, /id="note-1"/);
     assert.match(notes, /合成資料/);
     assert.match(notes, /handout:P0002/);
