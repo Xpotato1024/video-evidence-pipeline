@@ -318,3 +318,51 @@ def test_portable_mdx_edits_only_update_typed_fields() -> None:
         )
     with pytest.raises(VepError, match="unsupported markup"):
         apply_mdx_edits(deepcopy(content), original, edited.replace("Use two values.", "{run()}"))
+
+
+def test_portable_list_and_operation_edits_keep_their_structure() -> None:
+    from video_evidence_pipeline.delivery.lecture_source import apply_mdx_edits
+
+    content = {
+        "title": "Guide",
+        "blocks": [
+            {"id": "axes", "type": "bullets", "title": "Axes", "items": ["Right", "Up"]},
+            {
+                "id": "trace",
+                "type": "steps",
+                "steps": [
+                    {
+                        "id": "level",
+                        "type": "operation",
+                        "title": "Pick",
+                        "rationale": "Fix a level.",
+                        "expression": "h=1",
+                    },
+                    {
+                        "id": "join",
+                        "type": "operation",
+                        "title": "Join",
+                        "rationale": "Connect points.",
+                    },
+                ],
+            },
+        ],
+        "equations": [],
+        "figures": [],
+    }
+    source = (
+        "# Guide\n\n{/* vep:block axes */}\n\n**Axes**\n\n- Right\n- Up\n\n"
+        '{/* vep:block trace */}\n\n<Steps>\n\n<Step title="Pick">\n\nFix a level.\n\n'
+        '```math id="trace-level-expression"\nh=1\n```\n\n</Step>\n\n'
+        '<Step title="Join">\n\nConnect points.\n\n</Step>\n\n</Steps>\n\n'
+        "{/* vep:sources */}\n\n## Sources\n"
+    )
+    edited = (
+        source.replace("Right", "Outward")
+        .replace("h=1", "h=2")
+        .replace("Connect points.", "Trace the curve.")
+    )
+    result = apply_mdx_edits(content, source, edited)["blocks"]
+    assert result[0]["items"] == ["Outward", "Up"]
+    assert result[1]["steps"][0]["expression"] == "h=2"
+    assert result[1]["steps"][1]["rationale"] == "Trace the curve."

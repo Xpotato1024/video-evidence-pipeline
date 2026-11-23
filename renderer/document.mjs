@@ -130,6 +130,8 @@ export function createDocument(content, equations, figures, stepEquations) {
   if (!/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/u.test(lang)) throw new Error('Invalid language tag');
   const words = lang.startsWith('ja') ? messages.ja : messages.en;
   const targets = new Set(content.blocks.map(block => identifier(block.id)));
+  const operations = block => block.type === 'steps' ? block.steps.filter(step => step.type === 'operation') : [];
+  for (const step of content.blocks.flatMap(operations)) targets.add(identifier(step.id));
   const rich = text => inline(text, targets);
   const navigation = lang.startsWith('ja') ? '目次' : 'Contents';
   const returnLabel = lang.startsWith('ja') ? '全体に戻る' : 'Overview';
@@ -158,7 +160,8 @@ export function createDocument(content, equations, figures, stepEquations) {
     if (block.type === 'figure') related.push(figures.get(block.figure_id));
     for (const item of related) for (const source of references(item)) section.ids.add(source.id);
   }
-  const headings = content.blocks.filter(block => block.type === 'heading');
+  const headings = content.blocks.flatMap(block => block.type === 'heading' ? [block]
+    : operations(block).map(step => ({ id: step.id, level: 3, text: step.title })));
   const navigable = content.output_mode === 'worked_explanation' && headings.length > 1;
   const contents = navigable ? `<nav class="study-nav" aria-label="${navigation}"><details><summary>${navigation}</summary><ol>` +
     headings.map(block => `<li class="level-${block.level}"><a href="#block-${identifier(block.id)}">${rich(block.text)}</a></li>`).join('') +
@@ -204,6 +207,12 @@ export function createDocument(content, equations, figures, stepEquations) {
 
   function stepHtml(block, step) {
     const parts = stepEquations.get(block.id).get(step.id);
+    if (step.type === 'operation') {
+      const expression = parts.get('expression');
+      const back = navigable ? `<a class="back" href="#overview">${returnLabel}</a>` : '';
+      return `<li id="block-${identifier(step.id)}"><p class="step-title">${rich(step.title)}${back}</p>` +
+        `<p class="prose">${rich(step.rationale)}</p>` + (expression ? eqHtml(expression, step.id) : '') + '</li>';
+    }
     const numeric = [...parts.entries()].map(([kind, expression]) => {
       const equation = eqHtml(expression, step.id, kind);
       return content.output_mode === 'submission_answer'
@@ -222,6 +231,8 @@ export function createDocument(content, equations, figures, stepEquations) {
         const back = navigable && level <= 3 ? `<a class="back" href="#overview">${returnLabel}</a>` : '';
         return `<h${level} id="block-${id}">${rich(block.text)}${note}${back}</h${level}>`;
       }
+      case 'bullets': return `<section id="block-${id}" class="bullet-group"><p><strong>${rich(block.title)}</strong></p>` +
+        `<ul>${block.items.map(item => `<li>${rich(item)}</li>`).join('')}</ul></section>`;
       case 'paragraph': return `<p id="block-${id}" class="prose">${rich(block.text)}</p>`;
       case 'callout': return `<aside id="block-${id}"><p><strong>${rich(block.title)}</strong></p><p class="prose">${rich(block.text)}</p></aside>`;
       case 'table': return `<section id="block-${id}">${htmlTable(block.headers, block.rows, block.caption, rich)}</section>`;
@@ -252,6 +263,8 @@ export function createDocument(content, equations, figures, stepEquations) {
     switch (block.type) {
       case 'heading':
         return '#'.repeat(Math.max(2, block.level)) + ' ' + markdown(block.text) + refs;
+      case 'bullets': return '**' + markdown(block.title) + '**\n\n' +
+        block.items.map(item => '- ' + markdown(item)).join('\n') + refs;
       case 'paragraph': return markdown(block.text) + refs;
       case 'callout': return mode === 'mdx'
         ? `<Callout title="${escape(block.title)}">\n\n${markdown(block.text)}${refs}\n\n</Callout>`
@@ -273,9 +286,9 @@ export function createDocument(content, equations, figures, stepEquations) {
       }
       case 'steps': {
         const steps = block.steps.map((step, index) => {
-          const parts = ['symbolic', 'substitution', 'intermediate', 'result'].filter(kind => step[kind] != null);
+          const parts = step.type === 'operation' ? (step.expression ? ['expression'] : []) : ['symbolic', 'substitution', 'intermediate', 'result'].filter(kind => step[kind] != null);
           const body = [markdown(step.rationale), ...parts.map(kind =>
-            '**' + words[kind] + '**\n\n' + mdMath(step[kind], `${block.id}-${step.id}-${kind}`))].join('\n\n') + mdReferences(step);
+            (kind === 'expression' ? '' : '**' + words[kind] + '**\n\n') + mdMath(step[kind], `${block.id}-${step.id}-${kind}`))].join('\n\n') + mdReferences(step);
           return mode === 'mdx' ? `<Step title="${escape(step.title)}">\n\n${body}\n\n</Step>`
             : `${index + 1}. **${markdown(step.title)}**\n\n` + body.split('\n').map(line => line ? '   ' + line : '').join('\n');
         }).join('\n\n');

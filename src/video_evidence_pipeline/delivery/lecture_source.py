@@ -13,7 +13,7 @@ from video_evidence_pipeline.errors import integrity_error
 _MARKER = re.compile(r"\{\/\* vep:(?:block ([A-Za-z0-9._-]+)|sources) \*\/\}")
 _ESCAPES = {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}
 _MATH_FIELDS = ("symbolic", "substitution", "intermediate", "result")
-_Edit = tuple[dict[str, Any], str, str, str, Callable[[str], str], Callable[[str], str]]
+_Edit = tuple[Any, str | int, str, str, Callable[[str], str], Callable[[str], str]]
 
 
 def _escape(value: str) -> str:
@@ -111,6 +111,10 @@ def apply_mdx_edits(content: dict[str, Any], original: str, edited: str) -> dict
                 fields.append(
                     (block, "text", "#" * block["level"] + " ", "\n", _markdown, _decode_markdown)
                 )
+            case "bullets":
+                fields.append((block, "title", "**", "**", _markdown, _decode_markdown))
+                for index in range(len(block["items"])):
+                    fields.append((block["items"], index, "- ", "\n", _markdown, _decode_markdown))
             case "paragraph":
                 fields.append((block, "text", "\n\n", "\n\n", _markdown, _decode_markdown))
             case "callout":
@@ -140,8 +144,9 @@ def apply_mdx_edits(content: dict[str, Any], original: str, edited: str) -> dict
                             (step, "rationale", "\n\n", "\n\n", _markdown, _decode_markdown),
                         ]
                     )
-                    for part in _MATH_FIELDS:
-                        if step[part] is not None:
+                    parts = ("expression",) if step.get("type") == "operation" else _MATH_FIELDS
+                    for part in parts:
+                        if step.get(part) is not None:
                             opening = f'```math id="{block["id"]}-{step["id"]}-{part}"\n'
                             fields.append((step, part, opening, "\n```", _identity, _identity))
         _replace(before, after, fields)

@@ -23,6 +23,11 @@ const fixture = {
   equations: [{ id: 'partial', tex: String.raw`\frac{\partial u_z}{\partial r} = \sum_{i=1}^n q_i`, symbol_table: { r: '距離' }, assumptions: ['定常'], source_refs: ['current'] }],
   blocks: [
     { id: 'heading', type: 'heading', level: 2, text: String.raw`式と図 \(u\)`, source_refs: ['current'] },
+    { id: 'directions', type: 'bullets', title: '二方向', items: [String.raw`**縦** \(y\)`, '横'], source_refs: ['current'] },
+    { id: 'actions', type: 'steps', source_refs: ['current'], steps: [
+      { id: 'select', type: 'operation', title: '値を選ぶ', rationale: '等値線の高さを決める。', expression: 'h=1', source_refs: ['current'] },
+      { id: 'connect', type: 'operation', title: '点を結ぶ', rationale: '同じ高さの点をつなぐ。', source_refs: ['current'] },
+    ] },
     { id: 'formula', type: 'equation', equation_id: 'partial', source_refs: ['current'] },
     { id: 'curve-block', type: 'figure', figure_id: 'chart', source_refs: ['supplement'] },
     { id: 'diagram-block', type: 'figure', figure_id: 'axes', source_refs: ['supplement'] },
@@ -113,7 +118,7 @@ test('renderer builds editable, offline and same-origin outputs from matching so
     const [html, md, mdx, site, pdf, receipt] = await Promise.all(
       ['review.html', 'lesson.md', 'lesson.mdx', 'sites/index.html', 'review.pdf', 'render-receipt.json']
         .map(name => readFile(join(output, name))));
-    assert.equal((html.toString().match(/<math\b/gu) ?? []).length, 9);
+    assert.equal((html.toString().match(/<math\b/gu) ?? []).length, 11);
     assert.equal((html.toString().match(/<img src="data:image\/svg\+xml/gu) ?? []).length, 3);
     assert.equal((site.toString().match(/<img src="figures\//gu) ?? []).length, 4);
     assert.match(html.toString(), /<img src="data:image\/png;base64,[^"]+" alt="[^"]+" width="2" height="2"/u);
@@ -121,6 +126,11 @@ test('renderer builds editable, offline and same-origin outputs from matching so
     const [body, notes] = html.toString().split('<section class="sources">');
     assert.equal((body.match(/href="#note-1"/g) ?? []).length, 1);
     assert.doesNotMatch(body, /<p class="source-link"|>合成資料<|<p>数値代入<\/p>/);
+    assert.match(body, /<ul><li><strong>縦<\/strong> <math[\s\S]*?<\/math><\/li><li>横<\/li><\/ul>/u);
+    assert.match(body, /href="#block-select"/u);
+    assert.match(body, /<li id="block-connect">/u);
+    assert.match(mdx.toString(), /<Step title="値を選ぶ">[\s\S]*?```math id="actions-select-expression"/u);
+    assert.match(md.toString(), /\n- [^\n]*縦[^\n]*\n- 横/u);
     assert.match(body, /class="calculation"/);
     assert.match(body, /<nav class="study-nav"/);
     assert.match(body, /href="#block-values-heading"/);

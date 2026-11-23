@@ -155,7 +155,9 @@ async function buildEquations(content, write) {
       if (entries.has(stepId)) throw new Error('Duplicate step ID in ' + block.id);
       const parts = new Map();
       entries.set(stepId, parts);
-      for (const part of stepParts) {
+      const fields = step.type === 'operation' ? ['expression'] : stepParts;
+      for (const part of fields) {
+        if (part === 'expression' && step.expression == null) continue;
         if (step[part] == null && ['substitution', 'intermediate'].includes(part)) continue;
         const id = block.id + '-' + stepId + '-' + part;
         const expression = equation(step[part], id);

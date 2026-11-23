@@ -79,6 +79,57 @@
       "title": "AgentRole",
       "type": "string"
     },
+    "BulletListBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Items",
+          "type": "array"
+        },
+        "source_refs": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "title": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "type": {
+          "const": "bullets",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source_refs",
+        "type",
+        "title",
+        "items"
+      ],
+      "title": "BulletListBlock",
+      "type": "object"
+    },
     "CalloutBlock": {
       "additionalProperties": false,
       "properties": {
@@ -508,6 +559,66 @@
       "title": "LectureSource",
       "type": "object"
     },
+    "OperationStep": {
+      "additionalProperties": false,
+      "properties": {
+        "expression": {
+          "anyOf": [
+            {
+              "maxLength": 65536,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expression"
+        },
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "rationale": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Rationale",
+          "type": "string"
+        },
+        "source_refs": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "title": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "type": {
+          "const": "operation",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source_refs",
+        "type",
+        "title",
+        "rationale"
+      ],
+      "title": "OperationStep",
+      "type": "object"
+    },
     "ParagraphBlock": {
       "additionalProperties": false,
       "properties": {
@@ -764,7 +875,14 @@
         },
         "steps": {
           "items": {
-            "$ref": "#/$defs/WorkedStep"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/WorkedStep"
+              },
+              {
+                "$ref": "#/$defs/OperationStep"
+              }
+            ]
           },
           "maxItems": 128,
           "minItems": 1,
@@ -946,6 +1064,7 @@
       "items": {
         "discriminator": {
           "mapping": {
+            "bullets": "#/$defs/BulletListBlock",
             "callout": "#/$defs/CalloutBlock",
             "equation": "#/$defs/EquationBlock",
             "figure": "#/$defs/FigureBlock",
@@ -974,6 +1093,9 @@
           },
           {
             "$ref": "#/$defs/FigureBlock"
+          },
+          {
+            "$ref": "#/$defs/BulletListBlock"
           },
           {
             "$ref": "#/$defs/StepsBlock"

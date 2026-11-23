@@ -300,9 +300,22 @@ class FigureBlock(ReferencedBlock):
     figure_id: ArtifactIdentifier
 
 
+class BulletListBlock(ReferencedBlock):
+    type: Literal["bullets"]
+    title: Text
+    items: list[Text] = Field(min_length=1, max_length=128)
+
+
+class OperationStep(ReferencedBlock):
+    type: Literal["operation"]
+    title: Text
+    rationale: Text
+    expression: Text | None = None
+
+
 class StepsBlock(ReferencedBlock):
     type: Literal["steps"]
-    steps: list[WorkedStep] = Field(min_length=1, max_length=128)
+    steps: list[WorkedStep | OperationStep] = Field(min_length=1, max_length=128)
 
 
 Block = Annotated[
@@ -312,6 +325,7 @@ Block = Annotated[
     | TableBlock
     | EquationBlock
     | FigureBlock
+    | BulletListBlock
     | StepsBlock,
     Field(discriminator="type"),
 ]
