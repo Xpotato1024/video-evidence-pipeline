@@ -106,6 +106,13 @@ test('renderer builds editable, offline and same-origin outputs from matching so
     assert.equal((site.toString().match(/<img src="figures\//gu) ?? []).length, 4);
     assert.match(html.toString(), /<img src="data:image\/png;base64,[^"]+" alt="[^"]+" width="2" height="2"/u);
     assert.deepEqual(await readFile(join(output, 'inputs/source.png')), png);
+    const [body, notes] = html.toString().split('<section class="sources">');
+    assert.equal((body.match(/href="#note-1"/g) ?? []).length, 1);
+    assert.doesNotMatch(body, /<p class="source-link"|>合成資料<|<p>数値代入<\/p>/);
+    assert.match(body, /class="calculation"/);
+    assert.match(notes, /id="note-1"/);
+    assert.match(notes, /合成資料/);
+    assert.match(notes, /handout:P0002/);
     assert.match(mdx.toString(), /<Steps>/);
     assert.match(mdx.toString(), /\{\/\* vep:block steps \*\/\}/u);
     assert.match(mdx.toString(), /```math id="partial"/);

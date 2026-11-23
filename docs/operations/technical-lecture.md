@@ -89,3 +89,5 @@ vep lecture approval-validate review-v001 --json
 The approval is written once as the sibling `review-v001.approval.json` for the validated candidate.
 Its identity is CLI-asserted. The original review bundle bytes are stable and its manifest continues to describe the
 review candidate. Approval and hosting occur through separate operations.
+
+Reading HTML and PDF group citations in numbered section endnotes. The HTML notes expose individual evidence locators and the MDX and structured source retain per-claim bindings. Use equation blocks with aligned lines for symbolic operations; worked numeric steps retain their precision and units.

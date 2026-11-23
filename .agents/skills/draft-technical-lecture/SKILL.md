@@ -26,3 +26,7 @@ Stop if request identity, source access, or the required independent context can
 
 Do not invent facts, override evidence with an example, silently omit a critical step, or claim approval.
 Use the public CLI for deterministic validation and writes.
+
+## Reader-facing hierarchy
+
+Use the lecture objective and documented emphasis to choose which operation to explain in depth. Show the assumption that eliminates a term or the boundary that fixes a constant beside the equation. Attribute emphasis to the instructor only when the evidence supports the attribution. For symbolic algebra, author one equation block with an aligned chain for each reasoning move. Reserve substitution, intermediate precision and rounding fields for actual numerical exercises. Put optional invented examples after the lecture thread and identify them there. Keep exact evidence on individual blocks, figures, equations and steps; use section endnotes in the reading view.

@@ -25,3 +25,7 @@ Stop if request identity, source access, or the required independent context can
 
 Do not edit authoring files, carry over author self-assessments or issue a human approval.
 Use the public CLI for deterministic validation and writes.
+
+## Reading order
+
+Inspect a complete PDF page and a narrow-screen section containing a derivation. Check that the operation and its rationale lead the eye, that related symbolic equalities stay together, and that provenance remains reachable without a row of evidence links after every paragraph. Verify source-note destinations and supplement labels. Report repeated answer-form labels on pure algebra or citations that interrupt the explanation as reader-facing defects.

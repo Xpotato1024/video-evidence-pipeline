@@ -29,8 +29,17 @@ figcaption { margin-top: .5em; font-weight: 590; }
 .figure-scroll img { display: block; width: auto; max-width: min(100%, 36rem); height: auto; margin-inline: auto; }
 .equation { padding: .7rem .75rem; background: #f4f7fa; border-radius: .3rem; }
 .equation math { display: block; margin-inline: auto; width: max-content; }
+.calculation { background: #f4f7fa; padding: .45em .7em; border-radius: .3rem; }
+.calculation .equation { padding: .12em 0; background: transparent; }
+.calculation math { margin-inline: 0; }
 .equation-meta, .step-equation > p { font-size: .88em; }
-.source-link { font-size: .85em; color: #475b68; }
+.note-mark { font: normal .62rem/1 system-ui, sans-serif; margin-inline-start: .35em; }
+.note-mark a { color: #525c62; text-decoration: none; padding: .2em; }
+.note-mark a:hover { text-decoration: underline; }
+.sources { font-size: .86em; color: #42494d; }
+.sources > ol { padding-inline-start: 1.65em; }
+.sources > ol > li { margin: .5em 0; }
+.sources summary { color: inherit; }
 .sources { border-top: 1px solid #d0dce4; margin-top: 2em; }
 .sources p { font-size: .87em; margin: .05em 0 .4em; }
 .steps { padding-inline-start: 1.7em; }
@@ -50,6 +59,8 @@ th { background: #edf4f6; }
   main { max-width: none; min-height: auto; margin: 0; padding: 0; font-size: 10.5pt; }
   h1 { font-size: 20pt; }
   h2 { font-size: 15pt; }
+  .prose:has(+ .equation-block), .step-title, .step-title + p { break-after: avoid; }
+  .steps > li, .sources > ol > li { break-inside: avoid; }
   .figure-scroll img { width: auto; max-width: 100%; min-width: 0; max-height: 136mm; }
   .figure-scroll, .equation, .table-scroll { overflow: visible; }
   details { display: none; }

@@ -105,12 +105,41 @@ export function createDocument(content, equations, figures, stepEquations) {
     if (!source || !words[source.kind]) throw new Error('Unknown source reference ' + id);
     return source;
   });
-  const htmlReferences = (work, omit = []) => {
-    const known = references(work).filter(source => !omit.includes(source.id));
-    if (!known.length) return '';
-    return `<p class="source-link">${words.sourceList} ${known.map(source =>
-      `<a href="#source-${source.id}">${escape(words[source.kind])} · ${escape(source.title)}${source.locator?.page != null ? ' · ' + words.page + ' ' + escape(source.locator.page) : ''}</a>`).join(' / ')}</p>`;
-  };
+  // Reading views use one endnote per section. The editable source keeps every
+  // block/step binding; the endnote expands to the individual evidence locators.
+  const sections = [];
+  for (const block of content.blocks) {
+    if (!sections.length || block.type === 'heading' && block.level === 2)
+      sections.push({ title: block.type === 'heading' ? block.text : content.title, blocks: [], ids: new Set() });
+    const section = sections.at(-1);
+    section.blocks.push(block);
+    const related = [block];
+    if (block.type === 'steps') related.push(...block.steps);
+    if (block.type === 'equation') related.push(equations.get(block.equation_id));
+    if (block.type === 'figure') related.push(figures.get(block.figure_id));
+    for (const item of related) for (const source of references(item)) section.ids.add(source.id);
+  }
+  const marker = index => `<sup class="note-mark"><a href="#note-${index}" aria-label="${words.sourceList} ${index}">[${index}]</a></sup>`;
+  function endnote(section, index) {
+    const records = [...section.ids].map(id => sources.get(id));
+    const documents = new Map();
+    for (const source of records.filter(s => s.locator?.page != null)) {
+      const title = source.title.replace(/\s+p\.\s*\d+$/iu, '');
+      const key = JSON.stringify([source.kind, title, source.locator.sha256]);
+      if (!documents.has(key)) documents.set(key, { title, pages: new Set() });
+      documents.get(key).pages.add(source.locator.page);
+    }
+    const cited = [...documents.values()].map(doc =>
+      doc.title + ' pp. ' + [...doc.pages].sort((a, b) => a - b).join(', '));
+    const other = records.filter(s => s.kind !== 'current_lecture' || !documents.size && s.locator?.page == null);
+    cited.push(...new Set(other.map(s => words[s.kind] + ' · ' + s.title)));
+    const details = records.map(source => {
+      const locator = sourceDetails(source, words);
+      return `<li><span>${escape(source.id)}</span> · ${escape(source.title)}${locator ? ' · ' + escape(locator) : ''}</li>`;
+    }).join('');
+    return `<li id="note-${index}"><strong>${escape(section.title)}</strong><p>${escape(cited.join(' / '))}</p>` +
+      `<details><summary>${words.sourceList} (${records.length})</summary><ul>${details}</ul></details></li>`;
+  }
   const mdReferences = (work, omit = []) => {
     const known = references(work).filter(source => !omit.includes(source.id));
     return known.length ? '\n\n' + words.sourceList + ' ' +
@@ -131,30 +160,31 @@ export function createDocument(content, equations, figures, stepEquations) {
 
   function stepHtml(block, step) {
     const parts = stepEquations.get(block.id).get(step.id);
+    const numeric = [...parts.entries()].map(([kind, expression]) => {
+      const equation = eqHtml(expression, step.id, kind);
+      return content.output_mode === 'submission_answer'
+        ? `<div class="step-equation"><p>${words[kind]}</p>${equation}</div>` : equation;
+    }).join('');
     return `<li id="${block.id}-${step.id}"><p class="step-title">${prose(step.title)}</p><p>${prose(step.rationale)}</p>` +
-      [...parts.entries()].map(([kind, expression]) =>
-        `<div class="step-equation"><p>${words[kind]}</p>${eqHtml(expression, step.id, kind)}</div>`).join('') +
-      htmlReferences(step) + '</li>';
+      (content.output_mode === 'submission_answer' ? numeric : `<div class="calculation">${numeric}</div>`) + '</li>';
   }
 
-  function html(block, mode) {
+  function html(block, mode, note) {
     const id = identifier(block.id);
-    const refs = htmlReferences(block);
     switch (block.type) {
       case 'heading': {
         const level = Math.min(6, Math.max(2, block.level));
         if (!Number.isInteger(level)) throw new Error('Invalid heading level');
-        return `<h${level} id="block-${id}">${prose(block.text)}</h${level}>${refs}`;
+        return `<h${level} id="block-${id}">${prose(block.text)}${note}</h${level}>`;
       }
-      case 'paragraph': return `<p id="block-${id}" class="prose">${prose(block.text)}</p>${refs}`;
-      case 'callout': return `<aside id="block-${id}"><p><strong>${prose(block.title)}</strong></p><p class="prose">${prose(block.text)}</p>${refs}</aside>`;
-      case 'table': return `<section id="block-${id}">${htmlTable(block.headers, block.rows, block.caption)}${refs}</section>`;
+      case 'paragraph': return `<p id="block-${id}" class="prose">${prose(block.text)}</p>`;
+      case 'callout': return `<aside id="block-${id}"><p><strong>${prose(block.title)}</strong></p><p class="prose">${prose(block.text)}</p></aside>`;
+      case 'table': return `<section id="block-${id}">${htmlTable(block.headers, block.rows, block.caption)}</section>`;
       case 'equation': {
         const equation = equations.get(block.equation_id);
         if (!equation) throw new Error('Unknown equation ' + block.equation_id);
         return `<div id="block-${id}" class="equation-block">${eqHtml(equation.expression, equation.id)}` +
-          eqMeta(equation).map(([name, value]) => `<p class="equation-meta"><strong>${name}</strong> ${escape(value)}</p>`).join('') +
-          htmlReferences(equation) + `</div>${htmlReferences(block, equation.source_refs)}`;
+          eqMeta(equation).map(([name, value]) => `<p class="equation-meta"><strong>${name}</strong> ${escape(value)}</p>`).join('') + '</div>';
       }
       case 'figure': {
         const figure = figures.get(block.figure_id);
@@ -165,9 +195,9 @@ export function createDocument(content, equations, figures, stepEquations) {
         const kind = words.figureTypes[figure.factuality] ?? '';
         return `<figure id="block-${id}"><div class="figure-scroll" tabindex="0" aria-label="${escape(figure.alt)}">` +
           `<img src="${src}" alt="${escape(figure.alt)}" width="${figure.width}" height="${figure.height}">\n</div>` +
-          `<figcaption>${escape(figure.caption)}${kind ? '（' + kind + '）' : ''}</figcaption>${htmlReferences(figure)}${data}</figure>${htmlReferences(block, figure.source_refs)}`;
+          `<figcaption>${escape(figure.caption)}${kind ? '（' + kind + '）' : ''}</figcaption>${data}</figure>`;
       }
-      case 'steps': return `<ol class="steps" id="block-${id}">${block.steps.map(step => stepHtml(block, step)).join('')}</ol>${refs}`;
+      case 'steps': return `<ol class="steps" id="block-${id}">${block.steps.map(step => stepHtml(block, step)).join('')}</ol>`;
       default: throw new Error('Unknown lecture block ' + block.type);
     }
   }
@@ -211,18 +241,16 @@ export function createDocument(content, equations, figures, stepEquations) {
   }
 
   function renderHtml(mode, css) {
-    const list = usedSources.map(source => {
-      const details = sourceDetails(source, words);
-      return `<li id="source-${source.id}"><strong>${escape(words[source.kind])} · ${escape(source.title)}</strong>` +
-        (details ? `<p>${escape(details)}</p>` : '') + '</li>';
-    }).join('');
+    const list = sections.map((section, i) => endnote(section, i + 1)).join('');
+    const introNote = sections.length && sections[0].blocks[0].type !== 'heading' ? marker(1) : '';
     const style = mode === 'standalone' ? `<style>${css}</style>` : '<link rel="stylesheet" href="lesson.css">';
     const images = mode === 'standalone' ? 'data:' : "'self'";
     const styles = mode === 'standalone' ? "'unsafe-inline'" : "'self'";
     const policy = `default-src 'none'; style-src ${styles}; img-src ${images}; base-uri 'none'; form-action 'none'`;
-    return `<!doctype html>\n<html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><meta http-equiv="Content-Security-Policy" content="${policy}"><title>${prose(content.title)}</title>${style}</head>\n<body><main><h1>${prose(content.title)}</h1>\n` +
-      content.blocks.map(block => html(block, mode)).join('\n') +
-      `\n<section class="sources"><h2>${words.sourceList}</h2><ul>${list}</ul></section></main></body></html>\n`;
+    return `<!doctype html>\n<html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><meta http-equiv="Content-Security-Policy" content="${policy}"><title>${prose(content.title)}</title>${style}</head>\n<body><main><h1>${prose(content.title)}${introNote}</h1>\n` +
+      sections.flatMap((section, i) => section.blocks.map((block, j) =>
+        html(block, mode, j === 0 && block.type === 'heading' ? marker(i + 1) : ''))).join('\n') +
+      `\n<section class="sources"><h2>${words.sourceList}</h2><ol>${list}</ol></section></main></body></html>\n`;
   }
 
   function renderMarkdown(mode) {
