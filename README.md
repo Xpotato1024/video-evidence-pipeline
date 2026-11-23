@@ -175,7 +175,7 @@ material findingが残る場合は`REVISION_REQUIRED → DRAFTED → AUDITED`を
 | Local file | `local_file` | Supported | callerがlocal accessとprocessing authorizationを持つ |
 | Direct HTTPS media | `direct_http` | Supported | direct media URLのみ |
 | YouTube／他のyt-dlp service | `generic_ytdlp` | Partial/site-dependent | pinned parserとVEPのA/V契約の範囲 |
-| Panopto | `panopto` | Supported | official REST tokenを優先し、既存policyの範囲だけfallback |
+| Panopto | `panopto` | Supported | 公式ファイルを優先。保存を許可された講義では、指定したブラウザーの通常再生経路も利用可能。[入力と認証](docs/operations/network-acquisition.md#panopto) |
 | Box file／shared link | `box` | Supported | official Box API token、file-level acquisitionのみ |
 
 provider identity、locator、credentialの扱いは[`Network acquisition operations`](docs/operations/network-acquisition.md)が正本です。対応表の`Supported`はadapterの存在を示すだけで、provider側のdownload許可やDRM解除を意味しません。

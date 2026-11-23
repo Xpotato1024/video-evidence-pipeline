@@ -117,12 +117,43 @@ provider metadata responseは完全なHTTP 200、identity encoding、JSON media 
 
 ## Panopto
 
+### 講義URLから文字起こしとフレーム抽出まで実行する
+
+ソースcheckoutでGPU対応のASR runtimeとmodelを準備し、受講用ブラウザーで講義を開ける状態にします。
+PowerShell 7.1以降では次のコマンドを実行し、標準入力に講義URLを1行渡します。
+
+```powershell
+Read-Host '講義URL' -MaskInput | uv run vep workflow start --source-stdin --basis '教員がこの講義の保存を許可' --confirm-save --cookies-from-browser brave --json
+```
+
+`--basis`には実際に確認した根拠を指定します。LMSの埋め込みURLはtenantと講義IDに正規化されます。
+API認証を使う場合は`--panopto-token-env`にトークンを格納した環境変数の**名前**を、
+`--panopto-tenant-host`にtenantを指定します。browserも指定した場合は下表の条件で通常viewerへ移ります。
+job IDはtenantと講義IDから自動生成します。認証を更新した後は同じ講義URLで再実行します。
+別のjobとして始めるときは`workflow start lecture-09`のように名前を指定できます。
+GPUの準備は[ASR runtimeの手順](asr-runtime.md)を参照してください。
+
+### 取得経路の選択
+
 official REST APIを優先し、tenant API originにだけenvironment bearer tokenを送ります。session metadataの
-`Id`、`Name`、`Urls.DownloadUrl`をPanopto公式OpenAPI contractとして扱い、blank download URLは利用不可です。
-download URLはephemeralとして使用し、bearer tokenを転送しません。公式APIのblank `DownloadUrl`はproviderの
-download禁止を含み得るためfallbackせず失敗します。tokenを指定せず、`--panopto-ytdlp-fallback`とbrowser cookieの
-両方が明示されたときだけyt-dlp fallbackを使用します。
-access denial、DRM、extractor failureを回避しません。
+`Id`を要求した講義と照合します。取得した`Urls.DownloadUrl`はメモリ内で使用し、bearer tokenを転送しません。
+利用条件と権利者の保存許可を確認し、jobに許可の根拠を記録します。録画・保存の明示的な禁止がある場合は認可しません。
+認可済みjobで`--panopto-ytdlp-fallback`と同じ受講者がログインしたbrowserを指定すると、取得結果から次の処理を決定します。
+
+| 観測した結果 | 実行する処理 |
+| --- | --- |
+| tenant APIのHTTP 401 | 再認証を要求。同じjobに更新した認証を渡して再開する |
+| tenant APIのHTTP 403、session ID不一致 | 停止 |
+| session IDが一致し、公式ファイルのURLが未提供、または公式ファイルがHTTP 403 | 同じtenantとsession IDの通常viewerを、指定したbrowserの認証で取得 |
+| API tokenを指定せず、browser経路を指定 | 通常viewerで開始 |
+| 通常viewerがログインを要求、または同じtenantの再生情報APIがHTTP 401 | 認証待ち。指定したbrowserでSSO・MFAを完了し、同じjobを再開する |
+| 通常viewerの再生情報APIがHTTP 403 | 再生拒否として停止 |
+| 原因を特定できないviewerの失敗 | 取得エラーを返す。認証の成否は未確定 |
+
+通常viewerは固定版yt-dlpのPanopto extractorで処理します。再生用の署名付きURLを手作業でコピーする必要はありません。
+ブラウザーのプロファイルが読み取れない場合やDRM保護された講義では取得できない場合があります。
+公式ファイル・通常viewerのどちらも公開前に映像・音声と再生時間を検査します。配信元から長さが返った場合は、
+正規化処理と同じ許容差で照合します。取得・フレーム抽出後のGPUエラーでは、保存済みの動画とフレームを再利用できます。
 
 ## Box
 
