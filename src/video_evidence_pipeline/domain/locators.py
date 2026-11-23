@@ -162,6 +162,28 @@ def canonicalize_panopto_locator(locator: str) -> str:
     return f"panopto://{parsed.hostname}/session/{session_id}"
 
 
+def canonicalize_panopto_input(locator: str) -> str:
+    """Extract only the stable lecture identity from a transient LMS embed URL."""
+    if len(locator) > 65536 or any(ord(char) < 32 or ord(char) == 127 for char in locator):
+        raise ValueError("invalid Panopto input")
+    parsed = urlsplit(locator)
+    host, _ = _canonical_host(parsed)
+    if parsed.port not in {None, 443} or not re.fullmatch(r"[a-z0-9.-]+", host):
+        raise ValueError("invalid Panopto tenant")
+    if parsed.path.lower() != "/panopto/pages/embed.aspx":
+        return canonicalize_panopto_locator(locator)
+    if parsed.scheme != "https" or parsed.fragment:
+        raise ValueError("invalid Panopto embed URL")
+    identifiers = [
+        value
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True, max_num_fields=128)
+        if key.lower() == "id"
+    ]
+    if len(identifiers) != 1:
+        raise ValueError("Panopto embed URL must contain one session id")
+    return f"panopto://{host}/session/{UUID(identifiers[0])}"
+
+
 def canonicalize_box_locator(locator: str) -> str:
     if any(ord(character) < 0x20 or ord(character) == 0x7F for character in locator):
         raise ValueError("Box locator must not contain control characters")

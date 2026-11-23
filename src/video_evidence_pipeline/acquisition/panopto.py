@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime
+from enum import StrEnum
+from pathlib import Path
 
 import httpx
 
@@ -26,6 +29,7 @@ from video_evidence_pipeline.acquisition.staged import (
 from video_evidence_pipeline.acquisition.ytdlp_runner import (
     SubprocessRunner,
     YtdlpToolchainFactory,
+    check_panopto_duration,
     default_ytdlp_toolchain,
     run_ytdlp,
 )
@@ -35,6 +39,12 @@ from video_evidence_pipeline.domain.locators import locator_fingerprint, panopto
 from video_evidence_pipeline.domain.manifests import CredentialMode, HttpStatusCategory
 from video_evidence_pipeline.errors import VepError, integrity_error, state_error
 from video_evidence_pipeline.storage.layout import JobWorkspace
+
+
+class _FallbackReason(StrEnum):
+    BROWSER_ONLY = "browser-only"
+    DOWNLOAD_URL_MISSING = "download-url-missing"
+    DOWNLOAD_FORBIDDEN = "download-forbidden"
 
 
 class PanoptoAdapter(AcquisitionAdapter):
@@ -71,6 +81,8 @@ class PanoptoAdapter(AcquisitionAdapter):
         *,
         started_at: datetime,
         deadline: AcquisitionDeadline,
+        reason: _FallbackReason,
+        expected_duration_seconds: object = None,
     ) -> AcquisitionResult:
         if not self.runtime.panopto_ytdlp_fallback or self.runtime.cookies_from_browser is None:
             raise state_error(
@@ -87,15 +99,36 @@ class PanoptoAdapter(AcquisitionAdapter):
                 "Panopto token is not bound to the requested tenant",
             )
         viewer_url = f"https://{tenant}/Panopto/Pages/Viewer.aspx?id={session_id}"
-        staged = run_ytdlp(
-            viewer_url,
-            workspace,
-            self.runtime,
-            adapter_kind=SourceKind.PANOPTO,
-            runner=self.runner,
-            resolver=self.resolver,
-            deadline=deadline,
-            toolchain_factory=self.toolchain_factory,
+        staged = None
+        viewer_error = None
+        try:
+            staged = run_ytdlp(
+                viewer_url,
+                workspace,
+                self.runtime,
+                adapter_kind=SourceKind.PANOPTO,
+                expected_duration_seconds=expected_duration_seconds,
+                runner=self.runner,
+                resolver=self.resolver,
+                deadline=deadline,
+                toolchain_factory=self.toolchain_factory,
+            )
+        except VepError as exc:
+            if exc.code != "YTDLP_ACQUISITION_FAILED":
+                raise
+            viewer_error = state_error(
+                "PANOPTO_VIEWER_ACQUISITION_FAILED",
+                "Panopto viewer acquisition failed; verify browser access and retry",
+            )
+        if viewer_error is not None:
+            raise viewer_error
+        assert staged is not None
+        staged = replace(
+            staged,
+            evidence=replace(
+                staged.evidence,
+                warnings=(*staged.evidence.warnings, f"Panopto fallback: {reason.value}"),
+            ),
         )
         return publish_staged_source(
             job,
@@ -121,24 +154,17 @@ class PanoptoAdapter(AcquisitionAdapter):
                 "PANOPTO_TENANT_MISMATCH",
                 "Panopto token is not bound to the requested tenant",
             )
-        try:
-            token = self.runtime.token_from_environment(
-                self.runtime.panopto_token_env,
-                provider="panopto",
+        if self.runtime.panopto_token_env is None and self.runtime.panopto_ytdlp_fallback:
+            return self._fallback(
+                job,
+                workspace,
+                started_at=started_at,
+                deadline=deadline,
+                reason=_FallbackReason.BROWSER_ONLY,
             )
-        except VepError as exc:
-            if (
-                exc.code == "PANOPTO_CREDENTIAL_REQUIRED"
-                and self.runtime.panopto_token_env is None
-                and self.runtime.panopto_ytdlp_fallback
-            ):
-                return self._fallback(
-                    job,
-                    workspace,
-                    started_at=started_at,
-                    deadline=deadline,
-                )
-            raise
+        token = self.runtime.token_from_environment(
+            self.runtime.panopto_token_env, provider="panopto"
+        )
         api_url = f"https://{tenant}/Panopto/api/v1/sessions/{session_id}"
         metadata = get_json(
             api_url,
@@ -149,6 +175,7 @@ class PanoptoAdapter(AcquisitionAdapter):
             credential_origin=origin(api_url),
             error_code="PANOPTO_API_FAILED",
             access_denied_code="PANOPTO_ACCESS_DENIED",
+            unauthorized_code="PANOPTO_REAUTH_REQUIRED",
             not_found_code="PANOPTO_SESSION_NOT_FOUND",
             deadline=deadline,
         ).data
@@ -156,46 +183,80 @@ class PanoptoAdapter(AcquisitionAdapter):
         if not isinstance(response_id, str) or response_id.lower() != session_id.lower():
             raise integrity_error("PANOPTO_API_INVALID", "Panopto session identity did not match")
         urls = metadata.get("Urls")
+        if "Urls" in metadata and not isinstance(urls, dict):
+            raise integrity_error("PANOPTO_API_INVALID", "Panopto session URLs were invalid")
         download_url = urls.get("DownloadUrl") if isinstance(urls, dict) else None
-        if not isinstance(download_url, str) or not download_url.strip():
-            raise state_error(
-                "PANOPTO_DOWNLOAD_UNAVAILABLE",
-                "Panopto session does not expose an authorized download",
+        if download_url is None or (isinstance(download_url, str) and not download_url.strip()):
+            return self._fallback(
+                job,
+                workspace,
+                started_at=started_at,
+                deadline=deadline,
+                reason=_FallbackReason.DOWNLOAD_URL_MISSING,
+                expected_duration_seconds=metadata.get("Duration"),
             )
+        if not isinstance(download_url, str):
+            raise integrity_error("PANOPTO_API_INVALID", "Panopto download URL was invalid")
         name = metadata.get("Name")
         display_name = (
             sanitize_filename(name)
             if isinstance(name, str) and name.strip()
             else probe.display_name
         )
-        staged = stream_download(
-            download_url,
-            workspace,
-            self.runtime,
-            AcquisitionEvidenceDraft(
-                adapter_kind=SourceKind.PANOPTO,
-                transport="https",
-                backend="panopto-rest",
-                backend_version="v1",
-                requested_host=tenant,
-                final_host=tenant,
-                redirect_count=0,
-                http_status_category=HttpStatusCategory.SUCCESS,
-                response_content_type=None,
-                declared_content_length=None,
-                credential_mode=CredentialMode.ENVIRONMENT_TOKEN,
-            ),
-            client=self.client,
-            resolver=self.resolver,
-            allow_sensitive_redirect_query=True,
-            display_name=display_name,
-            deadline=deadline,
-            error_code="PANOPTO_ACQUISITION_FAILED",
-        )
+        try:
+            staged = stream_download(
+                download_url,
+                workspace,
+                self.runtime,
+                AcquisitionEvidenceDraft(
+                    adapter_kind=SourceKind.PANOPTO,
+                    transport="https",
+                    backend="panopto-rest",
+                    backend_version="v1",
+                    requested_host=tenant,
+                    final_host=tenant,
+                    redirect_count=0,
+                    http_status_category=HttpStatusCategory.SUCCESS,
+                    response_content_type=None,
+                    declared_content_length=None,
+                    credential_mode=CredentialMode.ENVIRONMENT_TOKEN,
+                ),
+                client=self.client,
+                resolver=self.resolver,
+                allow_sensitive_redirect_query=True,
+                display_name=display_name,
+                deadline=deadline,
+                error_code="PANOPTO_ACQUISITION_FAILED",
+                unauthorized_code="PANOPTO_FILE_ACQUISITION_FAILED",
+                access_denied_code="PANOPTO_DOWNLOAD_DENIED",
+            )
+        except VepError as exc:
+            if exc.code != "PANOPTO_DOWNLOAD_DENIED":
+                raise
+            download_denied = True
+        else:
+            download_denied = False
+        if download_denied:
+            return self._fallback(
+                job,
+                workspace,
+                started_at=started_at,
+                deadline=deadline,
+                reason=_FallbackReason.DOWNLOAD_FORBIDDEN,
+                expected_duration_seconds=metadata.get("Duration"),
+            )
+
+        def validate_official_media(path: Path) -> None:
+            toolchain = self.toolchain_factory(deadline)
+            duration_ms = toolchain.validate_final(path, deadline)
+            check_panopto_duration(metadata.get("Duration"), duration_ms)
+            toolchain.revalidate()
+
         return publish_staged_source(
             job,
             workspace,
             staged,
             maximum_bytes=self.runtime.maximum_download_bytes,
             started_at=started_at,
+            validate_media=validate_official_media,
         )

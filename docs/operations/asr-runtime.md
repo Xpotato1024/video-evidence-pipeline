@@ -81,7 +81,9 @@ reader failure時はdocker CLI processだけでなく、厳格に検証したexa
 typed JSONはhostが再検証してからpublishします。
 inference中のmodel download、package install、cloud fallbackはできません。
 profileまたはprovision manifestと一致するmodelがなければ`ASR_MODEL_NOT_PROVISIONED`で停止し、
-`vep asr model-provision`を案内します。caption coverageが十分なjobはmodelをloadしません。
+`vep asr model-provision`を案内します。通常の文字起こしではcaption coverageが十分ならmodelをloadしません。
+講義の全音声を文字起こしするworkflowは`require_full_asr`を有効にし、既存字幕の有無にかかわらず
+音声全体をASRへ渡します。既存字幕は正規化済みの別資料として保持します。
 内部workerはimage内`/opt/vep/config/asr-profiles.yaml`をprofile SoTとしてrequest全fieldを照合し、
 internal runtime markerとbuild-contract identityがないnormal host実行を明示拒否します。provision workerは
 profile IDだけを受け、任意repository／revisionを受け取りません。

@@ -44,8 +44,8 @@ class SyntheticYtdlpToolchain:
             capabilities=[],
         )
 
-    def validate_final(self, _path: Path, _deadline: object) -> None:
-        return None
+    def validate_final(self, _path: Path, _deadline: object) -> int:
+        return 4000
 
     def revalidate(self) -> None:
         return None
@@ -70,6 +70,11 @@ def synthetic_ytdlp_runner(
                         "protocol": "https",
                     },
                     "components": [],
+                    **(
+                        {"media": {"id": SESSION_ID, "duration": 4}}
+                        if "Viewer.aspx" in argv[-1]
+                        else {}
+                    ),
                 }
             )
             + "\n",
@@ -113,7 +118,8 @@ def persisted_machine_text(workspace: JobWorkspace) -> str:
     )
 
 
-def test_panopto_official(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("duration", [4, 40], ids=["complete", "truncated"])
+def test_panopto_official(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, duration: int) -> None:
     payload = b"panopto synthetic media"
     requests: list[tuple[str, str | None]] = []
 
@@ -125,6 +131,7 @@ def test_panopto_official(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
                 json={
                     "Id": SESSION_ID,
                     "Name": "Authorized Session.mp4",
+                    "Duration": duration,
                     "Urls": {
                         "DownloadUrl": (
                             "https://cdn.panopto.example/media.mp4?X-Amz-Signature=" + SIGNED_SECRET
@@ -150,7 +157,18 @@ def test_panopto_official(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
         maximum_download_bytes=1024,
     )
     client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False)
-    adapter = PanoptoAdapter(runtime, client=client, resolver=public_resolver)
+    adapter = PanoptoAdapter(
+        runtime,
+        client=client,
+        resolver=public_resolver,
+        toolchain_factory=lambda _: SyntheticYtdlpToolchain(tmp_path),
+    )
+    if duration == 40:
+        with pytest.raises(VepError, match="duration did not match"):
+            acquire_job(workspace.root, runtime, adapter)
+        assert not workspace.source_manifest_json.exists()
+        assert not list(workspace.safe_path("source/staging").iterdir())
+        return
     result = acquire_job(workspace.root, runtime, adapter)
 
     assert requests[0][0].endswith("/Panopto/api/v1/sessions/" + SESSION_ID)
@@ -193,16 +211,178 @@ def test_panopto_download_unavailable_fails_closed(
     assert captured.value.code == "PANOPTO_DOWNLOAD_UNAVAILABLE"
 
 
-def test_panopto_download_policy_is_not_bypassed_by_explicit_fallback(
+def test_panopto_missing_download_url_uses_explicit_viewer_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("VEP_PANOPTO_ACCESS_TOKEN", TOKEN_SECRET)
+    requests: list[tuple[str, str | None]] = []
+    captured: dict[str, object] = {}
+    payload = b"authorized progressive Panopto media"
 
-    def handler(_request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append((str(request.url), request.headers.get("authorization")))
         return httpx.Response(200, json={"Id": SESSION_ID, "Urls": {"DownloadUrl": ""}})
 
+    workspace = initialized_authorized_job(tmp_path, SourceKind.PANOPTO, PANOPTO_VIEWER)
+    job_yaml_before = workspace.job_yaml.read_bytes()
+    runtime = AcquisitionRuntimeConfig(
+        panopto_token_env="VEP_PANOPTO_ACCESS_TOKEN",
+        panopto_tenant_host="tenant.hosted.panopto.com",
+        cookies_from_browser=BrowserCookieSource.FIREFOX,
+        panopto_ytdlp_fallback=True,
+    )
+    adapter = PanoptoAdapter(
+        runtime,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        resolver=public_resolver,
+        runner=synthetic_ytdlp_runner(captured, payload),
+        toolchain_factory=lambda _deadline: SyntheticYtdlpToolchain(tmp_path),
+    )
+    result = acquire_job(workspace.root, runtime, adapter)
+
+    argv = captured["argv"]
+    assert isinstance(argv, list)
+    assert requests == [
+        (
+            "https://tenant.hosted.panopto.com/Panopto/api/v1/sessions/" + SESSION_ID,
+            "Bearer " + TOKEN_SECRET,
+        )
+    ]
+    assert "--cookies-from-browser" in argv
+    assert argv[argv.index("--cookies-from-browser") + 1] == "firefox"
+    assert argv[-1] == PANOPTO_VIEWER
+    assert TOKEN_SECRET not in " ".join(argv)
+    assert workspace.job_yaml.read_bytes() == job_yaml_before
+    assert result.source_manifest.artifact_record.artifact.content_sha256 == sha256_bytes(payload)
+    evidence = result.source_manifest.acquisition_evidence
+    assert evidence is not None
+    assert evidence.backend == "yt-dlp"
+    assert evidence.credential_mode == "browser-cookie"
+    assert "Panopto fallback: download-url-missing" in evidence.warnings
+    persisted = persisted_machine_text(workspace)
+    assert TOKEN_SECRET not in persisted
+    assert SIGNED_SECRET not in persisted
+
+
+def test_panopto_official_download_403_uses_same_tenant_viewer_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VEP_PANOPTO_ACCESS_TOKEN", TOKEN_SECRET)
+    requests: list[tuple[str, str | None]] = []
+    captured: dict[str, object] = {}
+    payload = b"authorized Panopto progressive download"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append((str(request.url), request.headers.get("authorization")))
+        if request.url.host == "tenant.hosted.panopto.com":
+            return httpx.Response(
+                200,
+                json={
+                    "Id": SESSION_ID,
+                    "Urls": {
+                        "DownloadUrl": (
+                            "https://cdn.panopto.example/media.mp4?X-Amz-Signature=" + SIGNED_SECRET
+                        )
+                    },
+                },
+            )
+        return httpx.Response(403)
+
+    workspace = initialized_authorized_job(tmp_path, SourceKind.PANOPTO, PANOPTO_VIEWER)
+    runtime = AcquisitionRuntimeConfig(
+        panopto_token_env="VEP_PANOPTO_ACCESS_TOKEN",
+        panopto_tenant_host="tenant.hosted.panopto.com",
+        cookies_from_browser=BrowserCookieSource.FIREFOX,
+        panopto_ytdlp_fallback=True,
+        maximum_download_bytes=1024,
+    )
+    adapter = PanoptoAdapter(
+        runtime,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        resolver=public_resolver,
+        runner=synthetic_ytdlp_runner(captured, payload),
+        toolchain_factory=lambda _deadline: SyntheticYtdlpToolchain(tmp_path),
+    )
+
+    result = acquire_job(workspace.root, runtime, adapter)
+
+    argv = captured["argv"]
+    assert isinstance(argv, list)
+    assert requests[0][1] == "Bearer " + TOKEN_SECRET
+    assert requests[1][0].startswith("https://cdn.panopto.example/")
+    assert requests[1][1] is None
+    assert argv[-1] == PANOPTO_VIEWER
+    assert TOKEN_SECRET not in " ".join(argv)
+    evidence = result.source_manifest.acquisition_evidence
+    assert evidence is not None
+    assert evidence.backend == "yt-dlp"
+    assert "Panopto fallback: download-forbidden" in evidence.warnings
+    persisted = persisted_machine_text(workspace)
+    assert SIGNED_SECRET not in persisted
+    assert TOKEN_SECRET not in persisted
+
+
+@pytest.mark.parametrize(
+    ("status", "expected_code"),
+    [(401, "PANOPTO_REAUTH_REQUIRED"), (403, "PANOPTO_ACCESS_DENIED")],
+)
+def test_panopto_metadata_authentication_and_denial_are_distinct(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    status: int,
+    expected_code: str,
+) -> None:
+    monkeypatch.setenv("VEP_PANOPTO_ACCESS_TOKEN", TOKEN_SECRET)
+    runner_called = False
+
     def runner(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
-        raise AssertionError("provider download prohibition must not fall back")
+        nonlocal runner_called
+        runner_called = True
+        return subprocess.CompletedProcess([], 0)
+
+    workspace = initialized_authorized_job(tmp_path, SourceKind.PANOPTO, PANOPTO_VIEWER)
+    runtime = AcquisitionRuntimeConfig(
+        panopto_token_env="VEP_PANOPTO_ACCESS_TOKEN",
+        panopto_tenant_host="tenant.hosted.panopto.com",
+        cookies_from_browser=BrowserCookieSource.FIREFOX,
+        panopto_ytdlp_fallback=True,
+    )
+    adapter = PanoptoAdapter(
+        runtime,
+        client=httpx.Client(transport=httpx.MockTransport(lambda _request: httpx.Response(status))),
+        resolver=public_resolver,
+        runner=runner,
+    )
+
+    with pytest.raises(VepError) as captured:
+        acquire_job(workspace.root, runtime, adapter)
+
+    assert captured.value.code == expected_code
+    assert runner_called is False
+    assert TOKEN_SECRET not in captured.value.safe_message
+
+
+def test_panopto_official_download_401_is_file_level_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VEP_PANOPTO_ACCESS_TOKEN", TOKEN_SECRET)
+    runner_called = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "tenant.hosted.panopto.com":
+            return httpx.Response(
+                200,
+                json={
+                    "Id": SESSION_ID,
+                    "Urls": {"DownloadUrl": "https://cdn.panopto.example/media.mp4"},
+                },
+            )
+        return httpx.Response(401)
+
+    def runner(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        nonlocal runner_called
+        runner_called = True
+        return subprocess.CompletedProcess([], 0)
 
     workspace = initialized_authorized_job(tmp_path, SourceKind.PANOPTO, PANOPTO_VIEWER)
     runtime = AcquisitionRuntimeConfig(
@@ -217,9 +397,85 @@ def test_panopto_download_policy_is_not_bypassed_by_explicit_fallback(
         resolver=public_resolver,
         runner=runner,
     )
+
     with pytest.raises(VepError) as captured:
         acquire_job(workspace.root, runtime, adapter)
-    assert captured.value.code == "PANOPTO_DOWNLOAD_UNAVAILABLE"
+
+    assert captured.value.code == "PANOPTO_FILE_ACQUISITION_FAILED"
+    assert runner_called is False
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"Id": SESSION_ID, "Urls": []},
+        {"Id": SESSION_ID, "Urls": {"DownloadUrl": 123}},
+        {"Id": SESSION_ID, "Urls": None},
+    ],
+)
+def test_panopto_malformed_download_metadata_does_not_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    metadata: dict[str, object],
+) -> None:
+    monkeypatch.setenv("VEP_PANOPTO_ACCESS_TOKEN", TOKEN_SECRET)
+    runner_called = False
+
+    def runner(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        nonlocal runner_called
+        runner_called = True
+        return subprocess.CompletedProcess([], 0)
+
+    workspace = initialized_authorized_job(tmp_path, SourceKind.PANOPTO, PANOPTO_VIEWER)
+    runtime = AcquisitionRuntimeConfig(
+        panopto_token_env="VEP_PANOPTO_ACCESS_TOKEN",
+        panopto_tenant_host="tenant.hosted.panopto.com",
+        cookies_from_browser=BrowserCookieSource.FIREFOX,
+        panopto_ytdlp_fallback=True,
+    )
+    adapter = PanoptoAdapter(
+        runtime,
+        client=httpx.Client(
+            transport=httpx.MockTransport(lambda _request: httpx.Response(200, json=metadata))
+        ),
+        resolver=public_resolver,
+        runner=runner,
+    )
+
+    with pytest.raises(VepError) as captured:
+        acquire_job(workspace.root, runtime, adapter)
+
+    assert captured.value.code == "PANOPTO_API_INVALID"
+    assert runner_called is False
+
+
+def test_panopto_viewer_failure_is_structured_and_safe(tmp_path: Path) -> None:
+    sensitive_error = "https://tenant.hosted.panopto.com/login?state=" + TOKEN_SECRET
+
+    def failed_runner(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(argv, 1, stderr=sensitive_error.encode())
+
+    workspace = initialized_authorized_job(tmp_path, SourceKind.PANOPTO, PANOPTO_VIEWER)
+    runtime = AcquisitionRuntimeConfig(
+        cookies_from_browser=BrowserCookieSource.FIREFOX,
+        panopto_ytdlp_fallback=True,
+        maximum_download_bytes=1024,
+    )
+    adapter = PanoptoAdapter(
+        runtime,
+        resolver=public_resolver,
+        runner=failed_runner,
+        toolchain_factory=lambda _deadline: SyntheticYtdlpToolchain(tmp_path),
+    )
+
+    with pytest.raises(VepError) as captured:
+        acquire_job(workspace.root, runtime, adapter)
+
+    assert captured.value.code == "PANOPTO_VIEWER_ACQUISITION_FAILED"
+    assert sensitive_error not in captured.value.safe_message
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    assert not workspace.source_manifest_json.exists()
 
 
 def test_panopto_requires_exact_session_id_field(
@@ -417,6 +673,7 @@ def test_panopto_explicit_browser_cookie_fallback_uses_hardened_runner(tmp_path:
                         "protocol": "https",
                     },
                     "components": [],
+                    "media": {"id": SESSION_ID, "duration": 4},
                 }
             )
             + "\n",

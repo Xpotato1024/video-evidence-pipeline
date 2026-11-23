@@ -62,8 +62,12 @@ from video_evidence_pipeline.domain.transcription import (
     OverlapPolicy,
     TranscriptionConfig,
 )
-from video_evidence_pipeline.errors import VepError, configuration_error
+from video_evidence_pipeline.errors import VepError, configuration_error, state_error
 from video_evidence_pipeline.schemas.generation import check_schemas, export_schemas
+from video_evidence_pipeline.url_workflow import (
+    run_url_workflow,
+    start_url_workflow,
+)
 
 _ASR_CONTAINER_ROOT = Path("/opt/vep")
 _ASR_INTERNAL_MARKER = "VEP_ASR_INTERNAL_RUNTIME"
@@ -187,6 +191,7 @@ author_app = typer.Typer(no_args_is_help=True)
 audit_app = typer.Typer(no_args_is_help=True)
 revision_app = typer.Typer(no_args_is_help=True)
 asr_app = typer.Typer(no_args_is_help=True)
+workflow_app = typer.Typer(no_args_is_help=True)
 app.add_typer(job_app, name="job")
 app.add_typer(schema_app, name="schema")
 app.add_typer(evidence_app, name="evidence")
@@ -196,6 +201,7 @@ app.add_typer(author_app, name="author")
 app.add_typer(audit_app, name="audit")
 app.add_typer(revision_app, name="revision")
 app.add_typer(asr_app, name="asr")
+app.add_typer(workflow_app, name="workflow")
 
 
 def _emit(value: Any, *, json_output: bool) -> None:
@@ -288,6 +294,30 @@ def _supporting_inputs(values: list[str] | None) -> list[SupportingInputSpec]:
             ) from None
         parsed.append(SupportingInputSpec(kind=kind, locator=locator))
     return parsed
+
+
+def _panopto_workflow_source(source: str | None, *, source_stdin: bool) -> str:
+    if source_stdin == (source is not None):
+        raise configuration_error(
+            "SOURCE_INPUT_INVALID",
+            "provide exactly one of --source or --source-stdin",
+        )
+    if source_stdin:
+        raw_source = sys.stdin.readline(8193)
+        if len(raw_source) > 8192:
+            raise configuration_error("SOURCE_LOCATOR_INVALID", "Panopto source is invalid")
+        if raw_source.endswith("\n"):
+            raw_source = raw_source[:-1]
+            if raw_source.endswith("\r"):
+                raw_source = raw_source[:-1]
+    else:
+        raw_source = source or ""
+    try:
+        from video_evidence_pipeline.domain.locators import canonicalize_panopto_input
+
+        return canonicalize_panopto_input(raw_source.strip())
+    except (ValueError, ValidationError, VepError):
+        raise configuration_error("SOURCE_LOCATOR_INVALID", "Panopto source is invalid") from None
 
 
 @app.callback()
@@ -749,6 +779,317 @@ def transcribe(
         },
         json_output=json_output,
     )
+
+
+_PANOPTO_AUTH_WAIT_CODES = {
+    "PANOPTO_AUTH_REFERENCE_REQUIRED",
+    "PANOPTO_AUTHENTICATION_REQUIRED",
+    "PANOPTO_AUTHENTICATION_EXPIRED",
+    "PANOPTO_CREDENTIAL_REQUIRED",
+    "PANOPTO_MFA_REQUIRED",
+    "PANOPTO_REAUTH_REQUIRED",
+    "PANOPTO_SSO_REQUIRED",
+}
+
+_GPU_RETRY_CODES = {
+    "ASR_CONTAINER_RUNTIME_UNAVAILABLE",
+    "ASR_DEVICE_UNAVAILABLE",
+    "ASR_MODEL_NOT_PROVISIONED",
+    "ASR_CONTAINER_TRANSCRIPTION_FAILED",
+    "ASR_GPU_REQUIRED",
+}
+
+_WORKFLOW_STOP_CODES = {
+    "PANOPTO_ACCESS_DENIED",
+    "PANOPTO_DRM_RESTRICTED",
+    "PANOPTO_PLAYBACK_DENIED",
+    "PANOPTO_SESSION_IDENTITY_MISMATCH",
+    "PANOPTO_SESSION_NOT_FOUND",
+    "PANOPTO_TENANT_MISMATCH",
+    "PANOPTO_VIEWER_DENIED",
+    "SOURCE_CONTENT_CHANGED",
+    "URL_WORKFLOW_JOB_MISMATCH",
+    "URL_WORKFLOW_SOURCE_UNSUPPORTED",
+    "URL_WORKFLOW_STATE_UNSUPPORTED",
+}
+
+
+def _workflow_result_payload(result: Any) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "job_id": result.job_id,
+        "workspace_root": result.workspace_root,
+        "state": result.state,
+        "artifacts": {
+            "raw_media": result.raw_media_path,
+            "analysis_media": result.analysis_media_path,
+            "speech_audio": result.speech_audio_path,
+            "transcript_segments": result.transcript_segments_path,
+            "frame_index": result.frame_index_path,
+        },
+        "reused": {
+            "acquisition": result.acquisition_reused,
+            "normalization": result.normalization_reused,
+            "transcription": result.transcription_reused,
+        },
+        "frame_count": result.frame_count,
+        "frames": result.frames,
+        "segment_count": result.segment_count,
+        "transcript_sources": result.transcript_sources,
+        "asr_backend": result.asr_backend,
+    }
+
+
+def _workflow_failure(workspace: Path, error: VepError, *, json_output: bool) -> None:
+    stored_state: str | None = None
+    try:
+        status, _status_code = job_status(workspace)
+        stored_state = status.get("stored_state")
+    except VepError:
+        pass
+    waiting_for_authentication = error.code in _PANOPTO_AUTH_WAIT_CODES
+    resume_supported = (
+        stored_state in {"AUTHORIZED", "ACQUIRED", "NORMALIZED"}
+        and error.exit_code.value != 5
+        and error.code not in _WORKFLOW_STOP_CODES
+    ) or (waiting_for_authentication and stored_state is None)
+    if waiting_for_authentication:
+        if stored_state == "AUTHORIZED":
+            action = (
+                "Refresh the configured Panopto browser session or token reference, then rerun this "
+                "same command. The job remains authorized and no credential value is stored."
+            )
+        elif stored_state is None:
+            action = (
+                "Select the same learner's browser session or token reference, then rerun this "
+                "command. No job was created and no credential value was stored."
+            )
+        else:
+            action = (
+                "Refresh the configured Panopto browser session or token reference, then rerun this "
+                "command. No credential value is stored."
+            )
+        status_name = "waiting_for_authentication"
+    elif error.code in _GPU_RETRY_CODES and stored_state == "NORMALIZED":
+        action = (
+            "Make the pinned ASR container, provisioned model, and requested CUDA device available, "
+            "then rerun this command. Verified acquisition, normalization, and frames are reused."
+        )
+        status_name = "interrupted"
+    elif resume_supported and error.code not in _WORKFLOW_STOP_CODES:
+        action = (
+            "Resolve the reported issue and rerun this command. Completed stages are verified and "
+            "reused when their inputs still match."
+        )
+        status_name = "interrupted"
+    else:
+        action = None
+        status_name = "stopped"
+    _emit(
+        {
+            "ok": False,
+            "workflow_status": status_name,
+            "job_id": workspace.name,
+            "job_state": stored_state,
+            "resume_supported": resume_supported,
+            "resume_action": action,
+            "error": {"code": error.code, "message": error.safe_message},
+        },
+        json_output=json_output,
+    )
+    raise typer.Exit(code=int(error.exit_code))
+
+
+def _workflow_workspace_path(job_id: str | None) -> Path:
+    if job_id and re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", job_id):
+        return Path.cwd() / ".local" / "jobs" / job_id
+    return Path.cwd()
+
+
+@workflow_app.command("start")
+def workflow_start(
+    basis: Annotated[
+        str, typer.Option("--basis", help="Why this lecture may be saved and processed.")
+    ],
+    job_id: Annotated[
+        str | None, typer.Argument(help="Defaults to a stable ID for this lecture.")
+    ] = None,
+    source: Annotated[
+        str | None,
+        typer.Option(
+            "--source",
+            help="Panopto URL. Use --source-stdin when its query contains ephemeral credentials.",
+        ),
+    ] = None,
+    source_stdin: Annotated[
+        bool,
+        typer.Option(
+            "--source-stdin", help="Read one Panopto URL line from stdin without echoing it."
+        ),
+    ] = False,
+    confirm_save: Annotated[
+        bool,
+        typer.Option("--confirm-save", help="Confirm authorized saving and local processing."),
+    ] = False,
+    task_type: Annotated[str, typer.Option("--task-type")] = "summary",
+    language: Annotated[str, typer.Option("--language")] = "ja",
+    output_format: Annotated[str, typer.Option("--output-format")] = "markdown",
+    requirement: Annotated[
+        list[str] | None,
+        typer.Option("--requirement", help="Repeat for each ordered assignment requirement."),
+    ] = None,
+    purpose: Annotated[str | None, typer.Option("--purpose")] = None,
+    audience: Annotated[str | None, typer.Option("--audience")] = None,
+    confirmer: Annotated[str | None, typer.Option("--confirmer")] = None,
+    cookies_from_browser: Annotated[
+        BrowserCookieSource | None,
+        typer.Option("--cookies-from-browser"),
+    ] = None,
+    panopto_token_env: Annotated[str | None, typer.Option("--panopto-token-env")] = None,
+    panopto_tenant_host: Annotated[str | None, typer.Option("--panopto-tenant-host")] = None,
+    network_timeout: Annotated[float, typer.Option("--network-timeout")] = 30.0,
+    maximum_download_seconds: Annotated[
+        float,
+        typer.Option("--maximum-download-seconds"),
+    ] = 3600.0,
+    maximum_download_bytes: Annotated[
+        int,
+        typer.Option("--maximum-download-bytes"),
+    ] = 2 * 1024 * 1024 * 1024,
+    preferred_language: Annotated[
+        list[str] | None,
+        typer.Option("--preferred-language", help="Repeat in deterministic preference order."),
+    ] = None,
+    minimum_caption_coverage: Annotated[
+        float,
+        typer.Option("--minimum-caption-coverage", min=0.0, max=1.0),
+    ] = 0.8,
+    asr_language: Annotated[str | None, typer.Option("--asr-language")] = None,
+    asr_profile: Annotated[str, typer.Option("--asr-profile")] = "whisper-large-v3",
+    asr_device: Annotated[
+        str,
+        typer.Option("--asr-device", help="Explicit GPU device: cuda or cuda:<index>."),
+    ] = "cuda",
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    # Validate consent before reading a potentially credential-bearing URL from stdin.
+    if not confirm_save:
+        _workflow_failure(
+            _workflow_workspace_path(job_id),
+            state_error(
+                "SAVE_AUTHORIZATION_CONFIRMATION_REQUIRED",
+                "starting this workflow requires --confirm-save and an authorization basis",
+            ),
+            json_output=json_output,
+        )
+    workspace = _workflow_workspace_path(job_id)
+    try:
+        source_locator = _panopto_workflow_source(source, source_stdin=source_stdin)
+        if job_id is None:
+            from video_evidence_pipeline.domain.locators import locator_fingerprint
+
+            job_id = f"panopto-{locator_fingerprint(source_locator)[:32]}"
+            workspace = _workflow_workspace_path(job_id)
+        result = start_url_workflow(
+            Path.cwd(),
+            job_id=job_id,
+            source_locator=source_locator,
+            authorization_basis=basis,
+            confirm_save=confirm_save,
+            task_type=task_type,
+            language=language,
+            output_format=output_format,
+            requirements=requirement,
+            purpose=purpose,
+            audience=audience,
+            confirmer_identity=confirmer,
+            runtime_config=AcquisitionRuntimeConfig(
+                cookies_from_browser=cookies_from_browser,
+                panopto_token_env=panopto_token_env,
+                panopto_tenant_host=panopto_tenant_host,
+                panopto_ytdlp_fallback=cookies_from_browser is not None,
+                network_timeout_seconds=network_timeout,
+                maximum_download_seconds=maximum_download_seconds,
+                maximum_download_bytes=maximum_download_bytes,
+            ),
+            preferred_languages=preferred_language,
+            minimum_caption_coverage=minimum_caption_coverage,
+            asr_language=asr_language,
+            asr_profile=asr_profile,
+            asr_device=asr_device,
+        )
+    except VepError as error:
+        _workflow_failure(workspace, error, json_output=json_output)
+    except ValidationError:
+        _workflow_failure(
+            workspace,
+            configuration_error("CONFIG_INVALID", "workflow configuration is invalid"),
+            json_output=json_output,
+        )
+    _emit(_workflow_result_payload(result), json_output=json_output)
+
+
+@workflow_app.command("run")
+def workflow_run(
+    workspace: Path,
+    cookies_from_browser: Annotated[
+        BrowserCookieSource | None,
+        typer.Option("--cookies-from-browser"),
+    ] = None,
+    panopto_token_env: Annotated[str | None, typer.Option("--panopto-token-env")] = None,
+    panopto_tenant_host: Annotated[str | None, typer.Option("--panopto-tenant-host")] = None,
+    network_timeout: Annotated[float, typer.Option("--network-timeout")] = 30.0,
+    maximum_download_seconds: Annotated[
+        float,
+        typer.Option("--maximum-download-seconds"),
+    ] = 3600.0,
+    maximum_download_bytes: Annotated[
+        int,
+        typer.Option("--maximum-download-bytes"),
+    ] = 2 * 1024 * 1024 * 1024,
+    preferred_language: Annotated[
+        list[str] | None,
+        typer.Option("--preferred-language", help="Repeat in deterministic preference order."),
+    ] = None,
+    minimum_caption_coverage: Annotated[
+        float,
+        typer.Option("--minimum-caption-coverage", min=0.0, max=1.0),
+    ] = 0.8,
+    asr_language: Annotated[str | None, typer.Option("--asr-language")] = None,
+    asr_profile: Annotated[str, typer.Option("--asr-profile")] = "whisper-large-v3",
+    asr_device: Annotated[
+        str,
+        typer.Option("--asr-device", help="Explicit GPU device: cuda or cuda:<index>."),
+    ] = "cuda",
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    try:
+        result = run_url_workflow(
+            workspace,
+            runtime_config=AcquisitionRuntimeConfig(
+                cookies_from_browser=cookies_from_browser,
+                panopto_token_env=panopto_token_env,
+                panopto_tenant_host=panopto_tenant_host,
+                panopto_ytdlp_fallback=cookies_from_browser is not None,
+                network_timeout_seconds=network_timeout,
+                maximum_download_seconds=maximum_download_seconds,
+                maximum_download_bytes=maximum_download_bytes,
+            ),
+            preferred_languages=preferred_language,
+            minimum_caption_coverage=minimum_caption_coverage,
+            asr_language=asr_language,
+            asr_profile=asr_profile,
+            asr_device=asr_device,
+        )
+    except VepError as error:
+        _workflow_failure(workspace, error, json_output=json_output)
+    except ValidationError:
+        _workflow_failure(
+            workspace,
+            configuration_error("CONFIG_INVALID", "workflow configuration is invalid"),
+            json_output=json_output,
+        )
+    _emit(_workflow_result_payload(result), json_output=json_output)
 
 
 @asr_app.command("image-build")

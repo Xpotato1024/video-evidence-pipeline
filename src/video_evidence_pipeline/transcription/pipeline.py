@@ -257,7 +257,10 @@ def canonical_transcription_config_payload(
     payload = configuration.model_dump(mode="json")
     if contract_mode != "pre_pr46":
         return payload
-    return {field: payload[field] for field in _LEGACY_TRANSCRIPTION_CONFIG_FIELDS}
+    legacy = {field: payload[field] for field in _LEGACY_TRANSCRIPTION_CONFIG_FIELDS}
+    if configuration.require_full_asr:
+        legacy["require_full_asr"] = True
+    return legacy
 
 
 def canonical_backend_identity_payload(
@@ -496,7 +499,7 @@ def prepare_transcript(
     selected: NormalizedSubtitle | None = None
     selected_cues: tuple[SubtitleCue, ...] = ()
     coverage: float | None = None
-    if candidates:
+    if candidates and not config.require_full_asr:
         selected = candidates[0]
         selected_cues = verify_cue_jsonl(
             workspace.safe_path(selected.cues_artifact.relative_storage_path),
@@ -779,6 +782,8 @@ def prepare_supplied_transcript(
 ) -> PreparedTranscript:
     """Import acquired UTF-8 text/Markdown or bounded JSONL without ASR."""
 
+    if config.require_full_asr:
+        raise state_error("TRANSCRIPTION_SOURCE_UNAVAILABLE", "full ASR requires an audio source")
     raw_artifact = media_manifest.raw_artifact
     source_path = workspace.safe_path(raw_artifact.relative_storage_path)
     maximum_bytes = min(2_147_483_648, config.maximum_total_text_chars * 8)

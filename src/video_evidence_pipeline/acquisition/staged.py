@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import stat
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -268,10 +269,13 @@ def publish_staged_source(
     *,
     maximum_bytes: int,
     started_at: datetime,
+    validate_media: Callable[[Path], None] | None = None,
 ) -> AcquisitionResult:
     operation_failed = False
     try:
         size, content_sha256 = _verify_staged_file(staged.path, maximum_bytes=maximum_bytes)
+        if validate_media is not None:
+            validate_media(staged.path)
         display_name = sanitize_filename(staged.display_name)
         relative_path = f"source/raw/{content_sha256}/{display_name}"
         artifact = ArtifactRef(

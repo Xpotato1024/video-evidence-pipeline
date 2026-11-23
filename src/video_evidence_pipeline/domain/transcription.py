@@ -212,6 +212,7 @@ class TranscriptionConfig(StrictModel):
     schema_version: Literal["1.0"] = "1.0"
     preferred_languages: list[str] = Field(default_factory=list, max_length=32)
     minimum_caption_coverage: float = Field(default=0.8, ge=0.0, le=1.0, allow_inf_nan=False)
+    require_full_asr: bool = Field(default=False, exclude_if=lambda enabled: not enabled)
     gap_policy: GapPolicy = GapPolicy.RECORD
     overlap_policy: OverlapPolicy = OverlapPolicy.PRESERVE
     asr_language: str | None = Field(default=None, min_length=1, max_length=64)
@@ -697,6 +698,8 @@ class TranscriptManifest(StrictModel):
                 or asr_backend.free_vram_at_selection_mib is None
             ):
                 raise ValueError("profiled CUDA provenance is incomplete")
+        if self.configuration.require_full_asr and backend_sources != {TranscriptSource.ASR}:
+            raise ValueError("full audio transcription requires an ASR-only transcript")
         if len({item.source for item in self.backends}) != len(self.backends):
             raise ValueError("transcription backend identities must be unique")
         expected_backend_order = [

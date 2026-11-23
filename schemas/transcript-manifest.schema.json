@@ -728,6 +728,11 @@
           "title": "Preferred Languages",
           "type": "array"
         },
+        "require_full_asr": {
+          "default": false,
+          "title": "Require Full Asr",
+          "type": "boolean"
+        },
         "schema_version": {
           "const": "1.0",
           "default": "1.0",
