@@ -10,6 +10,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
+from yt_dlp import YoutubeDL
+from yt_dlp.extractor.panopto import PanoptoIE
 from yt_dlp.options import create_parser
 
 from video_evidence_pipeline.acquisition import ytdlp_runner
@@ -108,6 +110,30 @@ def output_directory(argv: list[str]) -> Path:
 
 def lineage_path(argv: list[str]) -> Path:
     return Path(argv[argv.index("--print-to-file") + 2])
+
+
+def test_panopto_progressive_lineage_from_pinned_extractor(tmp_path: Path) -> None:
+    stream = {"StreamHttpUrl": "https://cdn.example/lecture.mp4", "ViewerMediaFileTypeName": "mp4"}
+    with YoutubeDL({"quiet": True, "cachedir": False}) as downloader:
+        formats, _ = PanoptoIE(downloader)._extract_streams_formats_and_subtitles(
+            "lecture", [stream]
+        )
+        info = downloader.process_video_result(
+            {"id": "lecture", "title": "lecture", "duration": 4, "formats": formats}, download=False
+        )
+        line = downloader.evaluate_outtmpl(ytdlp_runner._PANOPTO_LINEAGE_TEMPLATE, info)
+    path = tmp_path / "lineage"
+    path.write_text(line, encoding="utf-8")
+    mode, (selected,), duration = ytdlp_runner._parse_lineage(path, "lecture")
+    assert mode.value == "progressive"
+    assert selected.video_codec == selected.audio_codec == "unknown"
+    ytdlp_runner.check_panopto_duration(duration, 4000)
+    with pytest.raises(VepError, match="duration did not match"):
+        ytdlp_runner.check_panopto_duration(duration, 1000)
+    with pytest.raises(VepError, match="identity did not match"):
+        ytdlp_runner._parse_lineage(path, "other-lecture")
+    with pytest.raises(VepError, match="lineage is malformed"):
+        ytdlp_runner._parse_lineage(path, None)
 
 
 def write_lineage(argv: list[str], *, adaptive: bool = False) -> None:

@@ -586,6 +586,25 @@ def test_subtitle_only_preserves_raw_and_needs_no_asr_or_model(tmp_path: Path) -
     assert [item.source for item in prepared.backends] == [TranscriptSource.NORMALIZED_SUBTITLE]
 
 
+def test_full_asr_uses_entire_audio_despite_complete_captions(tmp_path: Path) -> None:
+    job = _job()
+    workspace = _workspace(tmp_path, job)
+    media = _media_manifest(
+        workspace,
+        job,
+        audio=True,
+        subtitles=[("ja", SubtitleProvenance.EMBEDDED, True, False, _full_caption())],
+    )
+    backend = _FakeAsr()
+    config = TranscriptionConfig(require_full_asr=True)
+    prepared = prepare_transcript(workspace, job, media, config, backend)
+
+    assert backend.calls == [((0, media.probe.duration_ms),)]
+    assert {segment.source for segment in prepared.segments} == {TranscriptSource.ASR}
+    assert prepared.selected_subtitle_stream_index is None
+    assert "require_full_asr" not in TranscriptionConfig().model_dump()
+
+
 def test_public_transcribe_full_caption_does_not_probe_docker(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

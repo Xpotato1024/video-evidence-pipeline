@@ -26,6 +26,7 @@ from video_evidence_pipeline.domain.locators import (
     box_locator_kind,
     canonicalize_box_locator,
     canonicalize_https_locator,
+    canonicalize_panopto_input,
     canonicalize_panopto_locator,
     has_sensitive_query,
 )
@@ -146,6 +147,15 @@ def test_panopto_viewer_url_is_reduced_to_tenant_session_identity() -> None:
     assert canonicalize_panopto_locator(locator) == (
         "panopto://tenant.hosted.panopto.com/session/12345678-1234-1234-1234-123456789abc"
     )
+
+
+def test_transient_embed_input_keeps_only_the_lecture_identity() -> None:
+    session = "12345678-1234-1234-1234-123456789abc"
+    url = f"https://campus.example/Panopto/Pages/Embed.aspx?access_token=private&id={session}"
+    assert canonicalize_panopto_input(url) == f"panopto://campus.example/session/{session}"
+    for invalid in (url + "&ID=", url + "#fragment", url.replace("example/", "example:8443/")):
+        with pytest.raises(ValueError):
+            canonicalize_panopto_input(invalid)
 
 
 @pytest.mark.parametrize(

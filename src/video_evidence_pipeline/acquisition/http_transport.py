@@ -314,6 +314,8 @@ def stream_download(
     monotonic: Callable[[], float] = time.monotonic,
     deadline: AcquisitionDeadline | None = None,
     error_code: str = "HTTP_ACQUISITION_FAILED",
+    unauthorized_code: str | None = None,
+    access_denied_code: str | None = None,
 ) -> StagedSource:
     acquisition_deadline = deadline or AcquisitionDeadline.start(
         runtime.maximum_download_seconds,
@@ -418,6 +420,12 @@ def stream_download(
                             )
                         sleep(delay)
                         continue
+                    if response.status_code == 401 and unauthorized_code is not None:
+                        raise io_error(
+                            unauthorized_code, "network source authentication is required"
+                        )
+                    if response.status_code == 403 and access_denied_code is not None:
+                        raise io_error(access_denied_code, "network source access was denied")
                     if response.status_code != 200:
                         raise io_error(error_code, "network source request failed")
                     if response.headers.get("content-range") is not None:
@@ -528,6 +536,7 @@ def get_json(
     credential_origin: tuple[str, str, int],
     error_code: str,
     access_denied_code: str | None = None,
+    unauthorized_code: str | None = None,
     not_found_code: str | None = None,
     monotonic: Callable[[], float] = time.monotonic,
     deadline: AcquisitionDeadline | None = None,
@@ -565,7 +574,12 @@ def get_json(
                 follow_redirects=False,
                 timeout=_request_timeout(runtime, acquisition_deadline),
             ) as response:
-                if response.status_code in {401, 403}:
+                if response.status_code == 401:
+                    raise io_error(
+                        unauthorized_code or access_denied_code or error_code,
+                        "network API authentication is required",
+                    )
+                if response.status_code == 403:
                     raise io_error(
                         access_denied_code or error_code, "network API access was denied"
                     )

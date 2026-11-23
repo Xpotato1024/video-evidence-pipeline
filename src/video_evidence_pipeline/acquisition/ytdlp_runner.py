@@ -23,6 +23,10 @@ from video_evidence_pipeline.acquisition.network_policy import (
     default_resolver,
     validate_network_url,
 )
+from video_evidence_pipeline.acquisition.panopto_ytdlp_protocol import (
+    PANOPTO_CHILD_EXIT_REAUTH_REQUIRED,
+    PANOPTO_CHILD_EXIT_VIEWER_DENIED,
+)
 from video_evidence_pipeline.acquisition.process_tree import ManagedProcessTree
 from video_evidence_pipeline.acquisition.runtime import (
     AcquisitionDeadline,
@@ -35,6 +39,7 @@ from video_evidence_pipeline.acquisition.staged import (
 )
 from video_evidence_pipeline.domain.identifiers import sanitize_filename
 from video_evidence_pipeline.domain.job import SourceKind
+from video_evidence_pipeline.domain.locators import panopto_identity
 from video_evidence_pipeline.domain.manifests import (
     AcquisitionMode,
     CredentialMode,
@@ -42,7 +47,13 @@ from video_evidence_pipeline.domain.manifests import (
     YtdlpFormatEvidence,
 )
 from video_evidence_pipeline.domain.media import MediaStreamType, NormalizationConfig, ToolIdentity
-from video_evidence_pipeline.errors import VepError, configuration_error, integrity_error, io_error
+from video_evidence_pipeline.errors import (
+    VepError,
+    configuration_error,
+    integrity_error,
+    io_error,
+    state_error,
+)
 from video_evidence_pipeline.media.probe import probe_media
 from video_evidence_pipeline.media.runner import FFmpegRunner
 from video_evidence_pipeline.storage.layout import JobWorkspace
@@ -65,11 +76,26 @@ _LINEAGE_TEMPLATE = (
 )
 
 
+_PANOPTO_LINEAGE_TEMPLATE = '{"media":%(.{id,duration})j,' + _LINEAGE_TEMPLATE[1:]
+
+
+def check_panopto_duration(expected_seconds: object, actual_ms: int) -> None:
+    if expected_seconds is None:
+        return
+    config = NormalizationConfig()
+    if (
+        type(expected_seconds) not in {int, float}
+        or not 0 < expected_seconds <= config.maximum_duration_ms / 1000
+        or abs(actual_ms - expected_seconds * 1000) > config.duration_tolerance_ms
+    ):
+        raise integrity_error("PANOPTO_DURATION_MISMATCH", "Panopto media duration did not match")
+
+
 class YtdlpToolchain(Protocol):
     ffmpeg_identity: ToolIdentity
     ffmpeg_location: Path
 
-    def validate_final(self, path: Path, deadline: AcquisitionDeadline) -> None: ...
+    def validate_final(self, path: Path, deadline: AcquisitionDeadline) -> int: ...
 
     def revalidate(self) -> None: ...
 
@@ -84,7 +110,7 @@ class _PinnedYtdlpToolchain:
     ffprobe_identity: ToolIdentity
     ffmpeg_location: Path
 
-    def validate_final(self, path: Path, deadline: AcquisitionDeadline) -> None:
+    def validate_final(self, path: Path, deadline: AcquisitionDeadline) -> int:
         validation_error: VepError | None = None
         try:
             probe = probe_media(
@@ -126,6 +152,8 @@ class _PinnedYtdlpToolchain:
                 "YTDLP_OUTPUT_INVALID",
                 "yt-dlp final media must contain exactly one video and one audio stream",
             )
+
+        return probe.duration_ms
 
     def revalidate(self) -> None:
         identity_error = None
@@ -285,7 +313,9 @@ def _format_evidence(value: Any) -> YtdlpFormatEvidence:
     return evidence
 
 
-def _parse_lineage(path: Path) -> tuple[AcquisitionMode, tuple[YtdlpFormatEvidence, ...]]:
+def _parse_lineage(
+    path: Path, expected_panopto_id: str | None
+) -> tuple[AcquisitionMode, tuple[YtdlpFormatEvidence, ...], object]:
     lines = None
     try:
         if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
@@ -312,16 +342,38 @@ def _parse_lineage(path: Path) -> tuple[AcquisitionMode, tuple[YtdlpFormatEviden
         payload = json.loads(lines[0])
     if payload is None:
         raise integrity_error("YTDLP_OUTPUT_INVALID", "yt-dlp lineage is malformed")
+    duration = None
+    if expected_panopto_id is not None and isinstance(payload, dict):
+        media = payload.pop("media", None)
+        if (
+            not isinstance(media, dict)
+            or media.get("id") != expected_panopto_id
+            or set(media) - {"id", "duration"}
+        ):
+            raise integrity_error(
+                "PANOPTO_VIEWER_ID_MISMATCH", "viewer lecture identity did not match"
+            )
+        duration = media.get("duration")
     if not isinstance(payload, dict) or set(payload) != {"final", "components"}:
         raise integrity_error("YTDLP_OUTPUT_INVALID", "yt-dlp lineage is malformed")
-    final = _format_evidence(payload["final"])
     components = payload["components"]
+    final_metadata = payload["final"]
+    if (
+        expected_panopto_id is not None
+        and components == []
+        and isinstance(final_metadata, dict)
+        and final_metadata.get("protocol") == "https"
+    ):
+        # Panopto's progressive MP4 listing may omit codec names. The final
+        # file must independently pass the one-video/one-audio probe below.
+        final_metadata = {"vcodec": "unknown", "acodec": "unknown", **final_metadata}
+    final = _format_evidence(final_metadata)
     if components == []:
         if final.video_codec == "none" or final.audio_codec == "none":
             raise integrity_error(
                 "YTDLP_FORMAT_UNAVAILABLE", "yt-dlp did not select a combined audio/video format"
             )
-        return AcquisitionMode.PROGRESSIVE, (final,)
+        return AcquisitionMode.PROGRESSIVE, (final,), duration
     if not isinstance(components, list) or len(components) != 2:
         raise integrity_error(
             "YTDLP_FORMAT_UNAVAILABLE", "yt-dlp selected an unsupported stream composition"
@@ -336,7 +388,7 @@ def _parse_lineage(path: Path) -> tuple[AcquisitionMode, tuple[YtdlpFormatEviden
         raise integrity_error(
             "YTDLP_FORMAT_UNAVAILABLE", "yt-dlp selected an unsupported stream composition"
         )
-    return AcquisitionMode.ADAPTIVE_MERGED, selected
+    return AcquisitionMode.ADAPTIVE_MERGED, selected, duration
 
 
 def _failed_run_error(run_directory: Path, *, timed_out: bool = False) -> VepError:
@@ -427,11 +479,20 @@ def hardened_argv(
     proxy_url: str,
     ffmpeg_location: Path,
     lineage_path: Path,
+    adapter_kind: SourceKind = SourceKind.GENERIC_YTDLP,
 ) -> list[str]:
+    template = (
+        _PANOPTO_LINEAGE_TEMPLATE if adapter_kind is SourceKind.PANOPTO else _LINEAGE_TEMPLATE
+    )
+    module = (
+        "video_evidence_pipeline.acquisition.panopto_ytdlp_child"
+        if adapter_kind is SourceKind.PANOPTO
+        else "yt_dlp"
+    )
     argv = [
         sys.executable,
         "-m",
-        "yt_dlp",
+        module,
         "--ignore-config",
         "--no-plugin-dirs",
         "--no-remote-components",
@@ -473,13 +534,15 @@ def hardened_argv(
         "--format",
         _FORMAT_SELECTOR,
         "--print-to-file",
-        f"after_move:{_LINEAGE_TEMPLATE}",
+        f"after_move:{template}",
         str(lineage_path),
         "--paths",
         str(output_directory),
         "--output",
         "source.%(ext)s",
     ]
+    if adapter_kind is SourceKind.PANOPTO:
+        argv.append("--no-mark-watched")
     if runtime.cookies_from_browser is not None:
         argv.extend(["--cookies-from-browser", runtime.cookies_from_browser.value])
     argv.extend(["--", locator])
@@ -515,6 +578,7 @@ def run_ytdlp(
     runtime: AcquisitionRuntimeConfig,
     *,
     adapter_kind: SourceKind,
+    expected_duration_seconds: object = None,
     runner: SubprocessRunner | None = None,
     environment: Mapping[str, str] | None = None,
     resolver: Resolver = default_resolver,
@@ -556,6 +620,7 @@ def run_ytdlp(
                 proxy_url=proxy_url,
                 ffmpeg_location=toolchain.ffmpeg_location,
                 lineage_path=lineage_path,
+                adapter_kind=adapter_kind,
             )
             subprocess_environment = _subprocess_environment(environment or os.environ)
             maximum_staging_bytes = 3 * runtime.maximum_download_bytes
@@ -593,6 +658,17 @@ def run_ytdlp(
                     raise runner_error
         toolchain.revalidate()
         if completed.returncode != 0:
+            if adapter_kind is SourceKind.PANOPTO:
+                if completed.returncode == PANOPTO_CHILD_EXIT_REAUTH_REQUIRED:
+                    raise state_error(
+                        "PANOPTO_REAUTH_REQUIRED",
+                        "Panopto viewer requires browser reauthentication",
+                    )
+                if completed.returncode == PANOPTO_CHILD_EXIT_VIEWER_DENIED:
+                    raise state_error(
+                        "PANOPTO_VIEWER_DENIED",
+                        "Panopto denied access to the requested viewer session",
+                    )
             raise _failed_run_error(run_directory)
         if (
             _staged_output_size(
@@ -604,7 +680,10 @@ def run_ytdlp(
             raise integrity_error(
                 "SOURCE_TOO_LARGE", "yt-dlp cumulative staging exceeded the configured limit"
             )
-        acquisition_mode, selected_formats = _parse_lineage(lineage_path)
+        session_id = panopto_identity(locator)[1] if adapter_kind is SourceKind.PANOPTO else None
+        acquisition_mode, selected_formats, expected_duration = _parse_lineage(
+            lineage_path, session_id
+        )
         lineage_cleanup_error = None
         try:
             lineage_path.unlink()
@@ -625,7 +704,10 @@ def run_ytdlp(
         if candidate_metadata.st_size > runtime.maximum_download_bytes:
             raise integrity_error("SOURCE_TOO_LARGE", "yt-dlp output exceeds the configured limit")
         enforce_private_file(candidate)
-        toolchain.validate_final(candidate, acquisition_deadline)
+        duration_ms = toolchain.validate_final(candidate, acquisition_deadline)
+        if session_id is not None:
+            check_panopto_duration(expected_duration, duration_ms)
+            check_panopto_duration(expected_duration_seconds, duration_ms)
         toolchain.revalidate()
         host = (urlsplit(locator).hostname or "").lower()
         return StagedSource(
