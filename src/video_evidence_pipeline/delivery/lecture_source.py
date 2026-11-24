@@ -102,6 +102,34 @@ def apply_mdx_edits(content: dict[str, Any], original: str, edited: str) -> dict
     ):
         raise _error("MDX source-binding and block order must remain fixed")
     _replace(header, new_header, [(content, "title", "# ", "\n", _markdown, _decode_markdown)])
+    numbers: dict[str, int] = {}
+    for block in content["blocks"]:
+        entries = [block] if block["type"] == "equation" else block.get("steps", [])
+        for entry in entries:
+            if entry.get("numbered"):
+                numbers[entry["id"]] = len(numbers) + 1
+    prefix = "式" if content.get("language", "en").startswith("ja") else "Eq."
+    identifier = r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}"
+    token = re.compile(rf"(\\\([^\n]*?\\\)|@eq\({identifier}\))")
+    rendered = re.compile(rf"(?<!\\)\[(?:式|Eq\.) \([0-9]+\)\]\(#eq-({identifier})\)")
+
+    def linked_markdown(value: str) -> str:
+        if "@eq(" not in value:
+            return _markdown(value)
+        pieces = []
+        for part in token.split(value):
+            if re.fullmatch(rf"@eq\({identifier}\)", part):
+                key = part[4:-1]
+                if key not in numbers:
+                    raise _error(f"Unknown numbered equation: {key}")
+                pieces.append(f"[{prefix} ({numbers[key]})](#eq-{key})")
+            else:
+                pieces.append(_markdown(part))
+        return "".join(pieces)
+
+    def decode_linked(value: str) -> str:
+        return _decode_markdown(rendered.sub(lambda match: f"@eq({match[1]})", value))
+
     figures = {item["id"]: item for item in content["figures"]}
     equations = {item["id"]: item for item in content["equations"]}
     for block, (_, before), (_, after) in zip(content["blocks"], blocks, new_blocks, strict=True):
@@ -126,7 +154,7 @@ def apply_mdx_edits(content: dict[str, Any], original: str, edited: str) -> dict
                             (entry["items"], index, "- ", "\n", _markdown, _decode_markdown)
                         )
             case "paragraph":
-                fields.append((block, "text", "\n\n", "\n\n", _markdown, _decode_markdown))
+                fields.append((block, "text", "\n\n", "\n\n", linked_markdown, decode_linked))
             case "background":
                 fields.append((block, "title", '<Background title="', '">', _escape, html.unescape))
                 for index in range(len(block["paragraphs"])):
@@ -157,7 +185,7 @@ def apply_mdx_edits(content: dict[str, Any], original: str, edited: str) -> dict
                     fields.extend(
                         [
                             (step, "title", '<Step title="', '">', _escape, html.unescape),
-                            (step, "rationale", "\n\n", "\n\n", _markdown, _decode_markdown),
+                            (step, "rationale", "\n\n", "\n\n", linked_markdown, decode_linked),
                         ]
                     )
                     parts = ("expression",) if step.get("type") == "operation" else _MATH_FIELDS
@@ -176,7 +204,7 @@ def apply_mdx_edits(content: dict[str, Any], original: str, edited: str) -> dict
                 if block["type"] == "procedure":
                     for step in block["steps"]:
                         fields.append(
-                            (step, "explanation", "\n\n", "\n\n", _markdown, _decode_markdown)
+                            (step, "explanation", "\n\n", "\n\n", linked_markdown, decode_linked)
                         )
         _replace(before, after, fields)
     return content

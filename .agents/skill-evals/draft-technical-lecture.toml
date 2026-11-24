@@ -66,3 +66,16 @@ criteria = [
   { id = "source-gap", description = "Uses the given positive domain to justify division" },
   { id = "human-boundary", description = "Leaves human approval to the reviewer" },
 ]
+
+[[cases]]
+id = "referenced-total-differential"
+prompt = "A lesson derives radial partial derivatives, then says 'take the total differential of the coordinates above' and gives the result. Draft a standalone worked method for x=r cos θ and y=r sin θ."
+expected = ["A numbered coordinate pair, total differential, evaluated coefficient pairs, and substitution into the differential"]
+forbidden = ["Only positional references to the coordinate formula", "Skipping from positions to the simplified differentials"]
+criteria = [
+  { id = "request-bound", description = "States the two requested differentials" },
+  { id = "traceable", description = "The reference resolves to the coordinate equations by stable identifier" },
+  { id = "technical", description = "Shows the two-variable rule, what is fixed, and all four partial derivatives with correct signs before substitution" },
+  { id = "source-gap", description = "Distinguishes added working from the source" },
+  { id = "human-boundary", description = "Leaves human approval to the reviewer" },
+]

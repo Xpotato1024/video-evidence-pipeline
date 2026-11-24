@@ -51,15 +51,16 @@ function prose(text) {
 
 // Portable prose has a deliberately small inline vocabulary. Every text leaf is
 // escaped and links can only target blocks in the same verified document.
-export function inline(text, targets = new Set()) {
-  const token = /\\\(([^\n]*?)\\\)|\*\*([^*\n]+)\*\*|\[([^\[\]\n]+)\]\(#block-([A-Za-z0-9][A-Za-z0-9._-]{0,79})\)/gu;
+export function inline(text, targets = new Set(), equationLink) {
+  const token = /\\\(([^\n]*?)\\\)|\*\*([^*\n]+)\*\*|\[([^\[\]\n]+)\]\(#block-([A-Za-z0-9][A-Za-z0-9._-]{0,79})\)|@eq\(([A-Za-z0-9][A-Za-z0-9._-]{0,79})\)/gu;
   let cursor = 0;
   let out = '';
   for (const match of text.matchAll(token)) {
     out += prose(text.slice(cursor, match.index));
-    const [, tex, strong, link, id] = match;
+    const [, tex, strong, link, id, equationId] = match;
     if (tex !== undefined) out += mathml(tex, false);
-    else if (strong !== undefined) out += '<strong>' + inline(strong, targets) + '</strong>';
+    else if (strong !== undefined) out += '<strong>' + inline(strong, targets, equationLink) + '</strong>';
+    else if (equationId !== undefined) out += equationLink ? equationLink(equationId) : prose(match[0]);
     else {
       if (!targets.has(id)) throw new Error('Missing lecture link target: ' + id);
       out += `<a href="#block-${id}">${prose(link)}</a>`;
@@ -134,6 +135,31 @@ export function createDocument(content, equations, figures, stepEquations) {
   const operations = block => hasSteps(block) ? block.steps.filter(step => step.type === 'operation') : [];
   for (const step of content.blocks.flatMap(operations)) targets.add(identifier(step.id));
   const rich = text => inline(text, targets);
+  const numbered = new Map();
+  for (const block of content.blocks) {
+    const entries = block.type === 'equation' ? [block] : operations(block);
+    for (const entry of entries.filter(item => item.numbered)) {
+      const id = identifier(entry.id);
+      if (numbered.has(id) || entry.type === 'operation' && !entry.expression)
+        throw new Error('Invalid numbered equation: ' + id);
+      numbered.set(id, numbered.size + 1);
+    }
+  }
+  const refPrefix = lang.startsWith('ja') ? '式' : 'Eq.';
+  function equationLink(id, mode) {
+    if (!numbered.has(id)) throw new Error('Missing numbered equation: ' + id);
+    const name = refPrefix + ' (' + numbered.get(id) + ')';
+    return mode === 'html' ? `<a class="equation-ref" href="#eq-${id}">${name}</a>` : `[${name}](#eq-${id})`;
+  }
+  const linkedProse = value => inline(value, targets, id => equationLink(id, 'html'));
+  const linkedMarkdown = value => !value.includes('@eq(') ? markdown(value) : value.split(/(\\\([^\n]*?\\\)|@eq\([A-Za-z0-9][A-Za-z0-9._-]{0,79}\))/gu)
+    .map(part => /^@eq\([A-Za-z0-9][A-Za-z0-9._-]{0,79}\)$/u.test(part)
+      ? equationLink(part.slice(4, -1), 'md') : markdown(part)).join('');
+  function numberHtml(body, id) {
+    if (!numbered.has(id)) return body;
+    return `<div class="numbered-equation" id="eq-${id}" tabindex="-1">${body}<span class="equation-number">(${numbered.get(id)})</span></div>`;
+  }
+  const numberMd = id => numbered.has(id) ? `<a id="eq-${id}"></a>\n\n(${numbered.get(id)})\n\n` : '';
   const navigation = lang.startsWith('ja') ? '目次' : 'Contents';
   const returnLabel = lang.startsWith('ja') ? '全体に戻る' : 'Overview';
   const sources = new Map(content.sources.map(source => [sourceIdentifier(source.id), source]));
@@ -225,7 +251,7 @@ export function createDocument(content, equations, figures, stepEquations) {
   function explanationsHtml(steps) {
     return `<section class="procedure-reasons"><h3>${reasonsLabel}</h3>` +
       steps.map((step, i) => `<section id="why-${identifier(step.id)}" tabindex="-1"><h4>${stepLabel(i + 1)}　${rich(step.title)}</h4>` +
-        `<p class="prose">${rich(step.explanation)}</p><a href="#block-${step.id}">${returnTo(i + 1)}</a></section>`).join('') + '</section>';
+        `<p class="prose">${linkedProse(step.explanation)}</p><a href="#block-${step.id}">${returnTo(i + 1)}</a></section>`).join('') + '</section>';
   }
 
   function stepHtml(block, step, mode) {
@@ -237,14 +263,14 @@ export function createDocument(content, equations, figures, stepEquations) {
       const stage = guided && step.figure_id ? figureHtml(figures.get(step.figure_id), mode, 'stage-' + step.id) : '';
       const why = guided ? `<a class="step-reason-link" href="#why-${identifier(step.id)}">${whyLabel}</a>` : '';
       return `<li id="block-${identifier(step.id)}"${guided ? ' tabindex="-1"' : ''}><p class="step-title">${rich(step.title)}${back}</p>` +
-        stage + `<p class="prose">${rich(step.rationale)}</p>` + (expression ? eqHtml(expression, step.id) : '') + why + '</li>';
+        stage + `<p class="prose">${linkedProse(step.rationale)}</p>` + (expression ? numberHtml(eqHtml(expression, step.id), step.id) : '') + why + '</li>';
     }
     const numeric = [...parts.entries()].map(([kind, expression]) => {
       const equation = eqHtml(expression, step.id, kind);
       return content.output_mode === 'submission_answer'
         ? `<div class="step-equation"><p>${words[kind]}</p>${equation}</div>` : equation;
     }).join('');
-    return `<li id="${block.id}-${step.id}"><p class="step-title">${rich(step.title)}</p><p>${rich(step.rationale)}</p>` +
+    return `<li id="${block.id}-${step.id}"><p class="step-title">${rich(step.title)}</p><p>${linkedProse(step.rationale)}</p>` +
       (content.output_mode === 'submission_answer' ? numeric : `<div class="calculation">${numeric}</div>`) + '</li>';
   }
 
@@ -273,13 +299,13 @@ export function createDocument(content, equations, figures, stepEquations) {
         return `<section class="background" id="block-${id}"><details><summary>${label}</summary>${body}</details>` +
           `<div class="background-print"><p class="background-question">${label}</p>${body}</div></section>`;
       }
-      case 'paragraph': return `<p id="block-${id}" class="prose">${rich(block.text)}</p>`;
+      case 'paragraph': return `<p id="block-${id}" class="prose">${linkedProse(block.text)}</p>`;
       case 'callout': return `<aside id="block-${id}"><p><strong>${rich(block.title)}</strong></p><p class="prose">${rich(block.text)}</p></aside>`;
       case 'table': return `<section id="block-${id}">${htmlTable(block.headers, block.rows, block.caption, rich)}</section>`;
       case 'equation': {
         const equation = equations.get(block.equation_id);
         if (!equation) throw new Error('Unknown equation ' + block.equation_id);
-        return `<div id="block-${id}" class="equation-block">${eqHtml(equation.expression, equation.id)}` +
+        return `<div id="block-${id}" class="equation-block">${numberHtml(eqHtml(equation.expression, equation.id), id)}` +
           eqMeta(equation, true).map(([name, value]) => `<p class="equation-meta"><strong>${name}</strong> ${rich(value)}</p>`).join('') + '</div>';
       }
       case 'figure': {
@@ -322,7 +348,7 @@ export function createDocument(content, equations, figures, stepEquations) {
         return mode === 'mdx' ? `<Background title="${escape(block.title)}">\n\n${body}${refs}\n\n</Background>`
           : '**' + markdown(block.title) + '**\n\n' + body + refs;
       }
-      case 'paragraph': return markdown(block.text) + refs;
+      case 'paragraph': return linkedMarkdown(block.text) + refs;
       case 'callout': return mode === 'mdx'
         ? `<Callout title="${escape(block.title)}">\n\n${markdown(block.text)}${refs}\n\n</Callout>`
         : '> **' + markdown(block.title) + '**\n>\n' + markdown(block.text).replaceAll('\n', '\n> ') + refs;
@@ -330,7 +356,7 @@ export function createDocument(content, equations, figures, stepEquations) {
         return '**' + markdown(block.caption) + '**\n\n' + mdTable(block.headers, block.rows) + refs;
       case 'equation': {
         const equation = equations.get(block.equation_id);
-        return mdMath(equation.tex, equation.id) + eqMeta(equation).map(([name, value]) =>
+        return numberMd(block.id) + mdMath(equation.tex, equation.id) + eqMeta(equation).map(([name, value]) =>
           `\n\n**${name}** ${markdown(value)}`).join('') + mdReferences(equation) + mdReferences(block, equation.source_refs);
       }
       case 'figure': {
@@ -344,8 +370,8 @@ export function createDocument(content, equations, figures, stepEquations) {
         const guided = block.type === 'procedure';
         const steps = block.steps.map((step, index) => {
           const parts = step.type === 'operation' ? (step.expression ? ['expression'] : []) : ['symbolic', 'substitution', 'intermediate', 'result'].filter(kind => step[kind] != null);
-          let body = [markdown(step.rationale), ...parts.map(kind =>
-            (kind === 'expression' ? '' : '**' + words[kind] + '**\n\n') + mdMath(step[kind], `${block.id}-${step.id}-${kind}`))].join('\n\n') + mdReferences(step);
+          let body = [linkedMarkdown(step.rationale), ...parts.map(kind =>
+            (kind === 'expression' ? numberMd(step.id) : '**' + words[kind] + '**\n\n') + mdMath(step[kind], `${block.id}-${step.id}-${kind}`))].join('\n\n') + mdReferences(step);
           if (guided) {
             const anchor = identifier(step.id);
             const figure = step.figure_id ? figures.get(step.figure_id) : null;
@@ -357,7 +383,7 @@ export function createDocument(content, equations, figures, stepEquations) {
             : `${index + 1}. **${markdown(step.title)}**\n\n` + body.split('\n').map(line => line ? '   ' + line : '').join('\n');
         }).join('\n\n');
         const reasons = guided ? '\n\n### ' + reasonsLabel + '\n\n' + block.steps.map((step, i) =>
-          `<a id="why-${identifier(step.id)}"></a>\n\n#### ${stepLabel(i + 1)}\n\n${markdown(step.explanation)}\n\n[${returnTo(i + 1)}](#block-${step.id})`).join('\n\n') : '';
+          `<a id="why-${identifier(step.id)}"></a>\n\n#### ${stepLabel(i + 1)}\n\n${linkedMarkdown(step.explanation)}\n\n[${returnTo(i + 1)}](#block-${step.id})`).join('\n\n') : '';
         return (mode === 'mdx' ? '<Steps>\n\n' + steps + '\n\n</Steps>' : steps) + reasons + refs;
       }
       default: throw new Error('Unknown lecture block ' + block.type);

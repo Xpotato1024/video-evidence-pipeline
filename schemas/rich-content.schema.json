@@ -436,6 +436,11 @@
           "title": "Id",
           "type": "string"
         },
+        "numbered": {
+          "default": false,
+          "title": "Numbered",
+          "type": "boolean"
+        },
         "source_refs": {
           "items": {
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
@@ -709,6 +714,11 @@
           "title": "Id",
           "type": "string"
         },
+        "numbered": {
+          "default": false,
+          "title": "Numbered",
+          "type": "boolean"
+        },
         "rationale": {
           "maxLength": 65536,
           "minLength": 1,
@@ -877,6 +887,11 @@
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
           "title": "Id",
           "type": "string"
+        },
+        "numbered": {
+          "default": false,
+          "title": "Numbered",
+          "type": "boolean"
         },
         "rationale": {
           "maxLength": 65536,

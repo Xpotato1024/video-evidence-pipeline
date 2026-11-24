@@ -113,3 +113,9 @@ th { background: #edf4f6; }
 
 math menclose[notation="updiagonalstrike"]{background:linear-gradient(to bottom right,transparent calc(50% - 1.1px),#a72c28 calc(50% - .7px),#a72c28 calc(50% + .7px),transparent calc(50% + 1.1px));print-color-adjust:exact;-webkit-print-color-adjust:exact}
 math munder mtext,math mover mtext{color:#075d59;font-family:system-ui,sans-serif;font-weight:600}
+
+.numbered-equation { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .12rem .4rem; break-inside: avoid; scroll-margin-top: 1rem; }
+.numbered-equation > .equation { flex: 1 1 max-content; min-width: 0; }
+.equation-number { color: #40565c; margin-inline-start: auto; font-size: .88em; white-space: nowrap; }
+.equation-ref { white-space: nowrap; }
+.numbered-equation:target { outline: 2px solid #4a837b; outline-offset: 2px; }

@@ -313,6 +313,32 @@ def test_lecture_regeneration_freezes_verified_workspace_and_archive(tmp_path: P
     assert archive_before == (archive_dir / "bundle-manifest.json").read_bytes()
 
 
+def test_equation_reference_mdx_roundtrip() -> None:
+    from copy import deepcopy
+
+    from video_evidence_pipeline.delivery.lecture_source import apply_mdx_edits
+
+    content = {
+        "title": "Guide",
+        "language": "ja",
+        "figures": [],
+        "equations": [{"id": "base", "tex": "x=y"}],
+        "blocks": [
+            {"id": "basis", "type": "equation", "equation_id": "base", "numbered": True},
+            {"id": "use", "type": "paragraph", "text": "From @eq(basis)"},
+        ],
+    }
+    src = (
+        '# Guide\n\n{/* vep:block basis */}\n\n<a id="eq-basis"></a>\n\n(1)\n\n'
+        '```math id="base"\nx=y\n```\n\n{/* vep:block use */}\n\nFrom [式 (1)](#eq-basis)'
+        "\n\n{/* vep:sources */}\n\n## 出典\n"
+    )
+    result = apply_mdx_edits(deepcopy(content), src, src.replace("From ", "Apply "))
+    assert result["blocks"][1]["text"] == "Apply @eq(basis)"
+    with pytest.raises(VepError):
+        apply_mdx_edits(deepcopy(content), src, src.replace("[式 (1)]", "[式 (7)]"))
+
+
 def test_portable_mdx_edits_only_update_typed_fields() -> None:
     from copy import deepcopy
 

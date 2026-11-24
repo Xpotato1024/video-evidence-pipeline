@@ -9,7 +9,7 @@ import { promisify } from 'node:util';
 import { mermaidSource } from '../browser.mjs';
 import { renderChart, toCsv } from '../chart.mjs';
 import { hash, safeSvg } from '../common.mjs';
-import { inline, mathml } from '../document.mjs';
+import { createDocument, inline, mathml } from '../document.mjs';
 import { geometrySvg } from '../geometry.mjs';
 
 const exec = promisify(execFile);
@@ -30,7 +30,7 @@ const fixture = {
       { label: '弧長', items: ['円周上の距離（m）'] },
     ] },
     { id: 'actions', type: 'steps', source_refs: ['current'], steps: [
-      { id: 'select', type: 'operation', title: '値を選ぶ', rationale: '等値線の高さを決める。', expression: 'h=1', source_refs: ['current'] },
+      { id: 'select', type: 'operation', numbered: true, title: '値を選ぶ', rationale: '等値線の高さを決める。', expression: 'h=1', source_refs: ['current'] },
       { id: 'connect', type: 'operation', title: '点を結ぶ', rationale: '同じ高さの点をつなぐ。', source_refs: ['current'] },
     ] },
     { id: 'construction', type: 'procedure', kind: 'drawing', source_refs: ['supplement'], steps: [
@@ -39,7 +39,8 @@ const fixture = {
       { type: 'operation', id: 'draw-points', title: '測定点を打つ', rationale: '座標ごとに点を打つ。',
         figure_id: 'chart', explanation: '点の位置が測定結果を示す。', source_refs: ['supplement'] },
     ] },
-    { id: 'formula', type: 'equation', equation_id: 'partial', source_refs: ['current'] },
+    { id: 'use-eq', type: 'paragraph', text: '操作には @eq(select)、定義には @eq(formula) を使う。', source_refs: ['current'] },
+    { id: 'formula', type: 'equation', numbered: true, equation_id: 'partial', source_refs: ['current'] },
     { id: 'curve-block', type: 'figure', figure_id: 'chart', source_refs: ['supplement'] },
     { id: 'diagram-block', type: 'figure', figure_id: 'axes', source_refs: ['supplement'] },
     { id: 'flow-block', type: 'figure', figure_id: 'flow', source_refs: ['supplement'] },
@@ -89,6 +90,18 @@ test('KaTeX emits structural math without a raw TeX annotation', () => {
   assert.throws(() => mathml('x = \theta'), /unsupported/);
   assert.throws(() => mathml(String.raw`\href{https://example.invalid/}{x}`), /unsupported/);
   assert.throws(() => mathml(String.raw`\text{Everything entered as plain text}`), /presentation MathML/);
+});
+
+test('equation links follow stable targets when displayed equations change order', () => {
+  const source = { id: 'p', type: 'paragraph', text: 'Use @eq(radial).' };
+  const radial = { id: 'radial', equation_id: 'r', type: 'equation', numbered: true };
+  const axial = { id: 'axial', equation_id: 'z', type: 'equation', numbered: true };
+  const equations = new Map(['r', 'z'].map(id => [id, { id, tex: id, expression: mathml(id) }]));
+  const guide = blocks => createDocument({ ...fixture, language: 'en', blocks, equations: [], figures: [] },
+    equations, new Map(), new Map());
+  assert.ok(guide([source, radial, axial]).renderMarkdown('md').includes('[Eq. (1)](#eq-radial)'));
+  assert.ok(guide([source, axial, radial]).renderMarkdown('md').includes('[Eq. (2)](#eq-radial)'));
+  assert.throws(() => guide([source, axial]).renderHtml('standalone', ''), /Missing numbered equation: radial/u);
 });
 
 test('reading prose typesets inline math, emphasis and verified fragment links', () => {
@@ -156,6 +169,16 @@ test('renderer builds editable, offline and same-origin outputs from matching so
     }
     assert.match(mdx.toString(), /<Comparison>\s*<ComparisonCase label="角度">[\s\S]*?<ComparisonCase label="弧長">/u);
     assert.match(md.toString(), /\*\*角度\*\*\s+- 角度の変化（rad）/u);
+    for (const view of [body, site.toString()]) {
+      for (const [id, n] of [['select', 1], ['formula', 2]]) {
+        assert.ok(view.includes(`href="#eq-${id}">式 (${n})</a>`));
+        assert.ok(view.includes(`id="eq-${id}"`));
+      }
+    }
+    for (const view of [md.toString(), mdx.toString()]) {
+      assert.ok(view.includes('[式 (2)](#eq-formula)'));
+      assert.match(view, /<a id="eq-select"><\/a>\s+\(1\)/u);
+    }
     const firstStage = fixture.blocks.find(block => block.id === 'construction').steps[0];
     for (const view of [body, site.toString(), md.toString(), mdx.toString()]) {
       const start = view.indexOf('id="block-' + firstStage.id + '"');

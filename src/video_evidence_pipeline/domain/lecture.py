@@ -299,6 +299,7 @@ class TableBlock(ReferencedBlock):
 class EquationBlock(ReferencedBlock):
     type: Literal["equation"]
     equation_id: ArtifactIdentifier
+    numbered: bool = False
 
 
 class FigureBlock(ReferencedBlock):
@@ -328,6 +329,13 @@ class OperationStep(ReferencedBlock):
     title: Text
     rationale: Text
     expression: Text | None = None
+    numbered: bool = False
+
+    @model_validator(mode="after")
+    def check_numbered_expression(self) -> Self:
+        if self.numbered and not self.expression:
+            raise ValueError("a numbered operation requires an expression")
+        return self
 
 
 class StepsBlock(ReferencedBlock):
