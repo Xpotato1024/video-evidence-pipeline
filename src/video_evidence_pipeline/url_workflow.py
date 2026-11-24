@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +36,7 @@ from video_evidence_pipeline.errors import (
     state_error,
 )
 from video_evidence_pipeline.media.normalization import load_normalization_result
-from video_evidence_pipeline.runtime_context import require_source_asr
+from video_evidence_pipeline.runtime_context import current_runtime, require_source_asr
 from video_evidence_pipeline.storage.layout import JobWorkspace
 
 _RESUMABLE_STATES = {
@@ -44,6 +45,11 @@ _RESUMABLE_STATES = {
     JobState.NORMALIZED,
     JobState.TRANSCRIBED,
 }
+
+
+class UrlWorkflowStage(StrEnum):
+    ACQUIRED = "acquired"
+    TRANSCRIBED = "transcribed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +136,14 @@ def _source_for_start(value: str) -> str:
         raise configuration_error("SOURCE_LOCATOR_INVALID", "Panopto source is invalid") from None
 
 
+def url_workflow_workspace_path(repository_root: Path, job_id: str) -> Path:
+    runtime = current_runtime()
+    jobs_root = (
+        runtime.data.jobs_root if runtime else repository_root.absolute() / ".local" / "jobs"
+    )
+    return jobs_root / job_id
+
+
 def start_url_workflow(
     repository_root: Path,
     *,
@@ -150,10 +164,12 @@ def start_url_workflow(
     asr_language: str | None = None,
     asr_profile: str = "whisper-large-v3",
     asr_device: str = "cuda",
+    stop_after: UrlWorkflowStage = UrlWorkflowStage.TRANSCRIBED,
 ) -> UrlWorkflowResult:
     """Create or safely resume one explicitly authorized Panopto lecture job."""
 
-    require_source_asr()
+    if stop_after is UrlWorkflowStage.TRANSCRIBED:
+        require_source_asr()
     if not confirm_save:
         raise state_error(
             "SAVE_AUTHORIZATION_CONFIRMATION_REQUIRED",
@@ -165,8 +181,7 @@ def start_url_workflow(
         raise configuration_error("JOB_ID_INVALID", "job ID is invalid")
 
     source = _source_for_start(source_locator)
-    repository_root = repository_root.absolute()
-    workspace_path = repository_root / ".local" / "jobs" / job_id
+    workspace_path = url_workflow_workspace_path(repository_root, job_id)
     if workspace_path.exists() or workspace_path.is_symlink():
         workspace, job, _, state = _verified_status(workspace_path)
         if job.source.kind is not SourceKind.PANOPTO or job.source.locator != source:
@@ -214,6 +229,7 @@ def start_url_workflow(
         asr_language=asr_language,
         asr_profile=asr_profile,
         asr_device=asr_device,
+        stop_after=stop_after,
     )
 
 
@@ -226,22 +242,31 @@ def run_url_workflow(
     asr_language: str | None = None,
     asr_profile: str = "whisper-large-v3",
     asr_device: str = "cuda",
+    stop_after: UrlWorkflowStage = UrlWorkflowStage.TRANSCRIBED,
 ) -> UrlWorkflowResult:
     """Acquire, normalize, and transcribe a verified Panopto job, reusing completed stages."""
 
-    require_source_asr()
-    if asr_device != "cuda" and not asr_device.startswith("cuda:"):
-        raise configuration_error(
-            "ASR_GPU_REQUIRED",
-            "the Panopto URL workflow requires an explicit CUDA device (cuda or cuda:<index>)",
-        )
+    if stop_after is UrlWorkflowStage.TRANSCRIBED:
+        require_source_asr()
+        if asr_device != "cuda" and not asr_device.startswith("cuda:"):
+            raise configuration_error(
+                "ASR_GPU_REQUIRED",
+                "the Panopto URL workflow requires an explicit CUDA device (cuda or cuda:<index>)",
+            )
     workspace, job, status, state = _verified_status(path)
-    if job.source.kind is not SourceKind.PANOPTO:
+    if stop_after is UrlWorkflowStage.ACQUIRED and job.source.kind is SourceKind.LOCAL_FILE:
+        raise configuration_error(
+            "URL_WORKFLOW_SOURCE_UNSUPPORTED", "the URL workflow requires a network source"
+        )
+    if stop_after is UrlWorkflowStage.TRANSCRIBED and job.source.kind is not SourceKind.PANOPTO:
         raise configuration_error(
             "URL_WORKFLOW_SOURCE_UNSUPPORTED",
             "the URL workflow currently supports Panopto jobs only",
         )
-    if primary_input_kind(job) is not PrimaryInputKind.VIDEO:
+    if (
+        stop_after is UrlWorkflowStage.TRANSCRIBED
+        and primary_input_kind(job) is not PrimaryInputKind.VIDEO
+    ):
         raise configuration_error(
             "URL_WORKFLOW_INPUT_UNSUPPORTED",
             "the Panopto frame workflow requires video as its primary input",
@@ -268,7 +293,41 @@ def run_url_workflow(
             "network acquisition must be explicitly authorized for this job",
         )
     runtime = runtime_config or AcquisitionRuntimeConfig()
+    if (
+        job.source.kind is SourceKind.PANOPTO
+        and runtime.cookies_from_browser is not None
+        and not runtime.panopto_ytdlp_fallback
+    ):
+        # The URL workflow treats an explicitly chosen browser as opt-in to the
+        # provider's existing authorized viewer path.
+        runtime = runtime.model_copy(update={"panopto_ytdlp_fallback": True})
     runtime.validate_for(job.source.kind)
+    if stop_after is UrlWorkflowStage.ACQUIRED:
+        if state in {JobState.AUTHORIZED, JobState.ACQUIRED}:
+            acquired = acquire_job(workspace.root, runtime)
+            artifact = acquired.source_manifest.artifact_record.artifact
+            reused = acquired.reused
+        else:
+            artifact = verify_acquired_bundle(workspace, job)
+            reused = True
+        return UrlWorkflowResult(
+            job_id=job.job_id,
+            workspace_root=str(workspace.root),
+            state=JobState.ACQUIRED.value if state is JobState.AUTHORIZED else state.value,
+            raw_media_path=artifact.relative_storage_path,
+            analysis_media_path=None,
+            speech_audio_path=None,
+            transcript_segments_path=None,
+            frame_index_path=None,
+            acquisition_reused=reused,
+            normalization_reused=False,
+            transcription_reused=False,
+            frame_count=0,
+            frames=[],
+            segment_count=0,
+            transcript_sources=[],
+            asr_backend={},
+        )
     transcription_config = TranscriptionConfig(
         preferred_languages=preferred_languages or [],
         minimum_caption_coverage=minimum_caption_coverage,

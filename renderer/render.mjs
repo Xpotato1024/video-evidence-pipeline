@@ -14,6 +14,8 @@ const inputLimit = 4_000_000;
 const outputLimit = 128_000_000;
 const assetInputLimit = 12_000_000;
 const stepParts = ['symbolic', 'substitution', 'intermediate', 'result'];
+const outputFormats = ['markdown', 'mdx', 'html', 'pdf', 'sites'];
+const viewportWidths = [320, 390, 768, 1440];
 
 async function readLimited(path, limit) {
   const info = await stat(path);
@@ -46,7 +48,7 @@ async function sourceCrop(context, spec, assetDirectory) {
   return { ...crop, input, mediaType: 'image/png', extension: 'png' };
 }
 
-async function visual(context, figure, assetDirectory) {
+async function visual(context, figure, assetDirectory, rasterize) {
   if (figure.kind === 'source_crop') return sourceCrop(context, figure.spec, assetDirectory);
   let drawing;
   switch (figure.kind) {
@@ -56,7 +58,7 @@ async function visual(context, figure, assetDirectory) {
     default: throw new Error('Unknown figure kind ' + figure.kind);
   }
   const { svg, width, height } = safeSvg(drawing.svg);
-  const png = await imagePage(context, svg, width, height);
+  const png = rasterize ? await imagePage(context, svg, width, height) : null;
   const data = drawing.headers ? { headers: drawing.headers, rows: drawing.rows } : null;
   return { bytes: Buffer.from(svg), png, width, height, data, mediaType: 'image/svg+xml', extension: 'svg' };
 }
@@ -69,7 +71,7 @@ function equation(source, id) {
   }
 }
 
-async function buildFigures(content, context, write, inputAssetDirectory) {
+async function buildFigures(content, context, write, inputAssetDirectory, formats) {
   const figures = new Map();
   const copiedInputs = new Set();
   for (const figure of resolveGeometryStages(content.figures)) {
@@ -79,14 +81,14 @@ async function buildFigures(content, context, write, inputAssetDirectory) {
     label(figure.caption, 450);
     let rendered;
     try {
-      rendered = await visual(context, figure, inputAssetDirectory);
+      rendered = await visual(context, figure, inputAssetDirectory, formats.length === outputFormats.length);
     } catch (error) {
       throw new Error('Figure ' + id + ' could not be rendered: ' + error.message, { cause: error });
     }
     const name = id + '-' + hash(rendered.bytes).slice(0, 12);
     const path = 'figures/' + name + '.' + rendered.extension;
     await write(path, rendered.bytes);
-    await write('sites/' + path, rendered.bytes);
+    if (formats.includes('sites')) await write('sites/' + path, rendered.bytes);
     if (rendered.png) await write('figures/' + name + '.png', rendered.png);
     if (rendered.data) {
       const dataset = { ...rendered.data, specification: figure.spec, source_refs: figure.source_refs };
@@ -197,26 +199,30 @@ export async function checkPage(page) {
   });
 }
 
-async function printReview(context, html, equationCount) {
+async function validateAndPrint(context, html, { checkScreen, print }) {
   const page = await context.newPage();
   try {
     await page.setContent(html);
-    for (const width of [320, 390, 768, 1440]) {
-      await page.setViewportSize({ width, height: 900 });
-      const check = await checkPage(page);
-      if (!check.viewport_fits || !check.images_loaded || check.external_resources || check.equation_count !== equationCount)
-        throw new Error('Review HTML did not pass offline layout checks at viewport ' + width);
+    if (checkScreen) {
+      const equationCount = (html.match(/<math\b/gu) ?? []).length;
+      for (const width of viewportWidths) {
+        await page.setViewportSize({ width, height: 900 });
+        const check = await checkPage(page);
+        if (!check.viewport_fits || !check.images_loaded || check.external_resources || check.equation_count !== equationCount)
+          throw new Error('Review HTML did not pass offline layout checks at viewport ' + width);
+      }
+      await page.setViewportSize({ width: 390, height: 900 });
+      await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
+      const enlarged = await checkPage(page);
+      if (!enlarged.viewport_fits || !enlarged.images_loaded)
+        throw new Error('Review HTML did not fit its viewport with text enlarged to 200%');
+      await page.evaluate(() => { document.documentElement.style.fontSize = ''; });
     }
-    await page.setViewportSize({ width: 390, height: 900 });
-    await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
-    const enlarged = await checkPage(page);
-    if (!enlarged.viewport_fits || !enlarged.images_loaded)
-      throw new Error('Review HTML did not fit its viewport with text enlarged to 200%');
-    await page.evaluate(() => { document.documentElement.style.fontSize = ''; });
+    if (!print) return null;
     await page.setViewportSize({ width: 687, height: 1040 });
     await page.emulateMedia({ media: 'print' });
-    const print = await checkPage(page);
-    if (print.math_overflow_count || !print.viewport_fits)
+    const printed = await checkPage(page);
+    if (printed.math_overflow_count || !printed.viewport_fits || !printed.images_loaded || printed.external_resources)
       throw new Error('An equation or table exceeds the A4 print content width; split it into aligned lines');
     const pdf = await page.pdf({ format: 'A4', preferCSSPageSize: true, printBackground: true, tagged: true });
     // Normalize Chromium's build-time PDF metadata without moving byte offsets.
@@ -233,7 +239,7 @@ async function toolchain(browser) {
   const files = ['browser.mjs', 'chart.mjs', 'common.mjs', 'document.mjs', 'document/inline.mjs', 'geometry.mjs', 'lesson.css', 'package.json', 'package-lock.json', 'render.mjs'];
   const hashes = await Promise.all(files.map(async path => [path, hash(await readFile(join(rendererDirectory, path)))]));
   const fonts = {};
-  for (const name of ['sans-serif', 'math', 'Noto Sans CJK JP']) {
+  for (const name of browser ? ['sans-serif', 'math', 'Noto Sans CJK JP'] : []) {
     try {
       const file = execFileSync('fc-match', ['-f', '%{file}', name], { encoding: 'utf8', timeout: 5000 });
       if (file) fonts[name] = { filename: file.split(/[\\/]/u).at(-1), sha256: hash(await readFile(file)) };
@@ -245,15 +251,21 @@ async function toolchain(browser) {
   }
   return {
     version: manifest.version, source_sha256: hash(json(hashes)), files: Object.fromEntries(hashes),
-    node: process.versions.node, chromium: browser.version(), dependencies: manifest.dependencies, fonts,
+    node: process.versions.node, chromium: browser?.version() ?? null, dependencies: manifest.dependencies, fonts,
   };
 }
 
 async function main() {
   const { values } = parseArgs({ options: {
     input: { type: 'string' }, output: { type: 'string' }, assets: { type: 'string' },
+    format: { type: 'string', multiple: true },
   } });
-  if (!values.input || !values.output) throw new Error('Use --input CONTENT_JSON --output EMPTY_DIRECTORY [--assets INPUT_DIRECTORY]');
+  if (!values.input || !values.output) throw new Error('Use --input CONTENT_JSON --output EMPTY_DIRECTORY [--assets INPUT_DIRECTORY] [--format FORMAT]');
+  if (values.format?.some(format => !outputFormats.includes(format)))
+    throw new Error('Choose an output format: ' + outputFormats.join(', '));
+  const formats = values.format ? outputFormats.filter(format => values.format.includes(format)) : outputFormats;
+  const checkScreen = formats.includes('html') || formats.includes('sites');
+  const print = formats.includes('pdf');
   const input = await readLimited(resolve(values.input), inputLimit);
   const output = resolve(values.output);
   await mkdir(output, { recursive: true });
@@ -262,33 +274,40 @@ async function main() {
   const content = JSON.parse(input);
   validateContent(content);
   const { files, write } = makeWriter(output);
-  const browser = await launchChromium();
+  const browserRequired = checkScreen || print ||
+    content.figures.some(figure => ['mermaid', 'source_crop'].includes(figure.kind));
+  const browser = browserRequired ? await launchChromium() : null;
   let renderer;
   try {
-    const context = await offlineContext(browser);
+    const context = browser ? await offlineContext(browser) : null;
     const { equations, stepEquations } = await buildEquations(content, write);
-    const figures = await buildFigures(content, context, write, assetDirectory);
+    const figures = await buildFigures(content, context, write, assetDirectory, formats);
     const document = createDocument(content, equations, figures, stepEquations);
-    const css = await readFile(join(rendererDirectory, 'lesson.css'), 'utf8');
-    const html = document.renderHtml('standalone', css);
-    const equationCount = (html.match(/<math\b/gu) ?? []).length;
-    const pdf = await printReview(context, html, equationCount);
-    await write('lesson.md', document.renderMarkdown('md'));
-    await write('lesson.mdx', document.renderMarkdown('mdx'));
-    await write('review.html', html);
-    await write('review.pdf', pdf);
-    await write('sites/index.html', document.renderHtml('site', css));
-    await write('sites/lesson.css', css);
-    await write('sites/review.pdf', pdf);
-    await write('sites/robots.txt', 'User-agent: *\nDisallow: /\n');
+    if (formats.includes('markdown')) await write('lesson.md', document.renderMarkdown('md'));
+    if (formats.includes('mdx')) await write('lesson.mdx', document.renderMarkdown('mdx'));
+    if (checkScreen || print) {
+      const css = await readFile(join(rendererDirectory, 'lesson.css'), 'utf8');
+      const html = document.renderHtml('standalone', css);
+      const pdf = await validateAndPrint(context, html, { checkScreen, print });
+      if (formats.includes('html')) await write('review.html', html);
+      if (pdf) await write('review.pdf', pdf);
+      if (formats.includes('sites')) {
+        await write('sites/index.html', document.renderHtml('site', css));
+        await write('sites/lesson.css', css);
+        if (pdf) await write('sites/review.pdf', pdf);
+        await write('sites/robots.txt', 'User-agent: *\nDisallow: /\n');
+      }
+    }
     renderer = await toolchain(browser);
   } finally {
-    await browser.close();
+    await browser?.close();
   }
   await write('render-receipt.json', json({
     schema_version: '2.0', content_sha256: hash(input), renderer, files,
+    ...(values.format ? { formats } : {}),
     validation: {
-      chromium_viewport_px: [320, 390, 768, 1440], text_zoom: 2, print_format: 'A4',
+      chromium_viewport_px: checkScreen ? viewportWidths : [],
+      text_zoom: checkScreen ? 2 : null, print_format: print ? 'A4' : null,
       javascript_in_viewer: false, external_network: false, approval: 'not_evaluated',
     },
   }), false);

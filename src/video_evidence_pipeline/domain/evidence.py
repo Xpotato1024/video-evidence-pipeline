@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import re
 from enum import StrEnum
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
-from pydantic import Field, StrictBool, field_validator, model_validator
+from pydantic import Field, StrictBool, StringConstraints, field_validator, model_validator
 
 from video_evidence_pipeline.domain import StrictModel, UtcDateTime
 from video_evidence_pipeline.domain.artifacts import ArtifactRef, EvidenceLedgerArtifactRef
@@ -52,6 +52,34 @@ class ReviewStatus(StrEnum):
 class AmbiguityStatus(StrEnum):
     UNRESOLVED = "unresolved"
     RESOLVED = "resolved"
+
+
+class UncertaintyAssessment(StrictModel):
+    kind: Literal[
+        "source_unclear",
+        "conflicting_sources",
+        "general_knowledge",
+        "organization_rule",
+        "particular_event",
+        "other",
+    ]
+    impact: Literal["minor", "material"]
+    question: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2048)
+    ]
+
+
+UNCERTAINTY_POLICY = (
+    "Accept informal notes as attributed context and leads. Evaluate each source against the "
+    "specific assertion and its time, scope and applicability. Notes alone do not establish "
+    "an unattributed external fact. General educational explanations can supplement the "
+    "deliverable while source ambiguities stay open. Keep organizational rules and particular "
+    "events open without direct, applicable evidence. Each supporting_clarification_confirmations "
+    "artifact contains effective confirmations only. Use it to establish the attributed follow-up "
+    "it supports. Keep the time of that confirmation separate from the original "
+    "recording. For new ambiguities, use assessment to describe the kind, material impact and "
+    "exact follow-up question when known."
+)
 
 
 class AnalyzerExecutionMode(StrEnum):
@@ -224,6 +252,9 @@ class AmbiguityRecord(StrictModel):
     status: AmbiguityStatus = AmbiguityStatus.UNRESOLVED
     resolution: str | None = Field(default=None, min_length=1, max_length=65536)
     review_status: ReviewStatus = ReviewStatus.NEEDS_REVIEW
+    assessment: UncertaintyAssessment | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @field_validator("source_refs")
     @classmethod
@@ -257,6 +288,9 @@ class AnalyzerContract(StrictModel):
     atomic_proposition_contract: AtomicPropositionContract | None = Field(
         default=None,
         description="Semantic request rule for new input/refinement jobs; absent in v1 requests.",
+    )
+    uncertainty_policy: str | None = Field(
+        default=None, min_length=1, max_length=4096, exclude_if=lambda value: value is None
     )
 
 

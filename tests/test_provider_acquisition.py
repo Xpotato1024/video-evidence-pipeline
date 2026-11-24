@@ -1096,7 +1096,9 @@ def test_box_shared_link_resolution_statuses_fail_closed(
     with pytest.raises(VepError) as captured:
         acquire_job(workspace.root, runtime, adapter)
     assert captured.value.code == (
-        "BOX_ACCESS_DENIED" if status in {401, 403} else "BOX_SHARED_LINK_INVALID"
+        {401: "BOX_REAUTH_REQUIRED", 403: "BOX_ACCESS_DENIED"}.get(
+            status, "BOX_SHARED_LINK_INVALID"
+        )
     )
     assert BOX_SHARED_LINK not in captured.value.safe_message
 
@@ -1193,7 +1195,7 @@ def test_box_shared_link_resolution_metadata_and_download_share_one_deadline(
 
 
 @pytest.mark.parametrize(
-    ("status", "code"), [(401, "BOX_ACCESS_DENIED"), (403, "BOX_ACCESS_DENIED")]
+    ("status", "code"), [(401, "BOX_REAUTH_REQUIRED"), (403, "BOX_ACCESS_DENIED")]
 )
 def test_box_permission_denial_is_safe(
     tmp_path: Path,

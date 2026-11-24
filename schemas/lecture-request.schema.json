@@ -8,6 +8,17 @@
           "title": "Ambiguity Id",
           "type": "string"
         },
+        "assessment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UncertaintyAssessment"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "description": {
           "maxLength": 65536,
           "minLength": 1,
@@ -157,6 +168,157 @@
       "title": "AuthoringProfile",
       "type": "object"
     },
+    "ClarificationInput": {
+      "additionalProperties": false,
+      "properties": {
+        "ambiguity_id": {
+          "pattern": "^A[0-9]{6}$",
+          "title": "Ambiguity Id",
+          "type": "string"
+        },
+        "confirmation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Confirmation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "decision": {
+          "enum": [
+            "resolved",
+            "supplemented",
+            "deferred"
+          ],
+          "title": "Decision",
+          "type": "string"
+        },
+        "evidence_bundle_fingerprint": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Evidence Bundle Fingerprint",
+          "type": "string"
+        },
+        "rationale": {
+          "maxLength": 8192,
+          "minLength": 1,
+          "title": "Rationale",
+          "type": "string"
+        },
+        "resolution": {
+          "anyOf": [
+            {
+              "maxLength": 8192,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolution"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source_refs": {
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "maxItems": 32,
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "supersedes": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes"
+        }
+      },
+      "required": [
+        "evidence_bundle_fingerprint",
+        "ambiguity_id",
+        "decision",
+        "rationale"
+      ],
+      "title": "ClarificationInput",
+      "type": "object"
+    },
+    "ClarificationRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "clarification": {
+          "$ref": "#/$defs/ClarificationInput"
+        },
+        "job_id": {
+          "maxLength": 63,
+          "minLength": 1,
+          "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+          "title": "Job Id",
+          "type": "string"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "recorded_by": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Recorded By",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "recorded_by",
+        "recorded_at",
+        "clarification"
+      ],
+      "title": "ClarificationRecord",
+      "type": "object"
+    },
+    "Confirmation": {
+      "additionalProperties": false,
+      "properties": {
+        "provided_by": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Provided By",
+          "type": "string"
+        },
+        "statement": {
+          "maxLength": 8192,
+          "minLength": 1,
+          "title": "Statement",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provided_by",
+        "statement"
+      ],
+      "title": "Confirmation",
+      "type": "object"
+    },
     "LectureAsset": {
       "additionalProperties": false,
       "properties": {
@@ -268,6 +430,7 @@
           "enum": [
             "current_lecture",
             "previous_lecture",
+            "clarification",
             "supplement"
           ],
           "title": "Kind",
@@ -558,6 +721,44 @@
       ],
       "title": "SourceRefKind",
       "type": "string"
+    },
+    "UncertaintyAssessment": {
+      "additionalProperties": false,
+      "properties": {
+        "impact": {
+          "enum": [
+            "minor",
+            "material"
+          ],
+          "title": "Impact",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "source_unclear",
+            "conflicting_sources",
+            "general_knowledge",
+            "organization_rule",
+            "particular_event",
+            "other"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "question": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "impact",
+        "question"
+      ],
+      "title": "UncertaintyAssessment",
+      "type": "object"
     }
   },
   "$id": "https://schemas.video-evidence-pipeline.local/v2/lecture-request.schema.json",
@@ -571,6 +772,22 @@
       "maxItems": 10000,
       "title": "Ambiguities",
       "type": "array"
+    },
+    "clarifications": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/ClarificationRecord"
+          },
+          "maxItems": 1000,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Clarifications"
     },
     "crop_assets": {
       "items": {

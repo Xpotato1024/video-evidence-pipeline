@@ -5,14 +5,24 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlencode
 
+import httpx
 import pytest
+from test_provider_acquisition import initialized_authorized_job, public_resolver
 from typer.testing import CliRunner
 
 from video_evidence_pipeline import cli
+from video_evidence_pipeline.acquisition.box import BoxAdapter
 from video_evidence_pipeline.acquisition.runtime import AcquisitionRuntimeConfig
+from video_evidence_pipeline.domain.job import SourceKind
 from video_evidence_pipeline.domain.state import JobState
 from video_evidence_pipeline.domain.transcription import TranscriptSource
 from video_evidence_pipeline.errors import state_error
+from video_evidence_pipeline.runtime_context import (
+    DataContext,
+    ResourceContext,
+    RuntimeContext,
+    use_runtime,
+)
 from video_evidence_pipeline.transcription.container import ContainerAsrBackend
 from video_evidence_pipeline.url_workflow import run_url_workflow
 
@@ -68,6 +78,26 @@ def test_workflow_start_reads_embed_url_from_stdin_and_persists_only_session_ide
     payload = json.loads(result.stdout)
     assert payload["workflow_status"] == "waiting_for_authentication"
     assert payload["job_state"] == "AUTHORIZED"
+    assert payload["authentication"] == {
+        "provider": "panopto",
+        "action": "configure_credential",
+        "actor": "user",
+        "methods": [
+            {
+                "kind": "environment_token",
+                "credential_options": ["--panopto-token-env", "--panopto-tenant-host"],
+                "browser": None,
+                "browser_url": None,
+            }
+        ],
+    }
+    assert payload["resume"] == {
+        "operation": "workflow.run",
+        "workspace": str(workspace),
+        "reuse_runtime_options": True,
+        "stop_after": "transcribed",
+    }
+    assert "VEP_MISSING_PANOPTO_TOKEN" not in result.output
 
 
 def test_workflow_start_redacts_invalid_stdin_url(
@@ -85,6 +115,39 @@ def test_workflow_start_redacts_invalid_stdin_url(
     assert "not-a-panopto-url" not in result.output
     payload = json.loads(result.stdout)
     assert payload["error"]["code"] == "SOURCE_LOCATOR_INVALID"
+
+
+def test_download_only_resume_reports_bound_installed_workspace(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    resources, data, bindings = [tmp_path / name for name in ("resources", "data", "bindings")]
+    for root in (resources, data, bindings):
+        root.mkdir()
+    context = RuntimeContext(
+        "test-release", ResourceContext(resources), DataContext(data, bindings)
+    )
+    args = [
+        "workflow",
+        "start",
+        "auth-job",
+        "--source-stdin",
+        "--basis",
+        "authorized fixture",
+        "--confirm-save",
+        "--stop-after",
+        "acquired",
+        "--json",
+    ]
+    source = f"https://tenant.hosted.panopto.com/Panopto/Pages/Viewer.aspx?id={_SESSION_ID}\n"
+    with use_runtime(context):
+        for _ in range(2):
+            invocation = CliRunner().invoke(cli.app, args, input=source)
+            assert invocation.exit_code == 3, invocation.output
+            result = json.loads(invocation.stdout)
+            assert result["workflow_status"] == "waiting_for_authentication"
+            assert result["resume"]["workspace"] == str(data / "jobs" / "auth-job")
+    assert len(list((data / "jobs").iterdir())) == 1
 
 
 @pytest.mark.parametrize(
@@ -218,6 +281,85 @@ def test_workflow_cli_returns_structured_authentication_wait(
     assert "rerun this same command" in payload["resume_action"]
 
 
+def test_browser_authentication_link_is_derived_and_can_be_replayed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    source = (
+        f"https://tenant.hosted.panopto.com/Panopto/Pages/Embed.aspx?"
+        f"{urlencode({'id': _SESSION_ID, 'access_token': _URL_SECRET})}"
+    )
+
+    def require_authentication(*_args):
+        error = state_error("PANOPTO_REAUTH_REQUIRED", "browser sign-in required")
+        error.authentication_method = "browser_session"
+        raise error
+
+    monkeypatch.setattr("video_evidence_pipeline.url_workflow.acquire_job", require_authentication)
+    args = [
+        "workflow",
+        "start",
+        "--source-stdin",
+        "--basis",
+        "authorized fixture",
+        "--confirm-save",
+        "--cookies-from-browser",
+        "firefox",
+        "--stop-after",
+        "acquired",
+        "--json",
+    ]
+    first = CliRunner().invoke(cli.app, args, input=source + "\n")
+    assert first.exit_code == 3, first.output
+    wait = json.loads(first.stdout)
+    assert wait["authentication"]["methods"] == [
+        {
+            "kind": "browser_session",
+            "credential_options": ["--cookies-from-browser"],
+            "browser": "firefox",
+            "browser_url": (
+                f"https://tenant.hosted.panopto.com/Panopto/Pages/Viewer.aspx?id={_SESSION_ID}"
+            ),
+        }
+    ]
+    assert _URL_SECRET not in first.output
+    assert wait["resume"]["stop_after"] == "acquired"
+
+    def no_asr(*_args):
+        raise AssertionError("download-only workflow must not start ASR")
+
+    def complete_acquisition(path, runtime):
+        assert path == Path(wait["resume"]["workspace"])
+        assert runtime.cookies_from_browser.value == "firefox"
+        artifact = SimpleNamespace(relative_storage_path="source/raw/synthetic.mp4")
+        return SimpleNamespace(
+            source_manifest=SimpleNamespace(artifact_record=SimpleNamespace(artifact=artifact)),
+            reused=False,
+        )
+
+    monkeypatch.setattr("video_evidence_pipeline.url_workflow.require_source_asr", no_asr)
+    monkeypatch.setattr("video_evidence_pipeline.url_workflow.acquire_job", complete_acquisition)
+    second = CliRunner().invoke(
+        cli.app,
+        [
+            "workflow",
+            "run",
+            wait["resume"]["workspace"],
+            "--cookies-from-browser",
+            "firefox",
+            "--stop-after",
+            "acquired",
+            "--json",
+        ],
+    )
+    assert second.exit_code == 0, second.output
+    completed = json.loads(second.stdout)
+    assert completed["job_id"] == wait["job_id"]
+    assert completed["state"] == "ACQUIRED"
+    assert completed["artifacts"]["raw_media"] == "source/raw/synthetic.mp4"
+    assert completed["artifacts"]["transcript_segments"] is None
+
+
 def test_workflow_cli_stops_on_actual_viewer_denial(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -240,3 +382,61 @@ def test_workflow_cli_stops_on_actual_viewer_denial(
     assert payload["workflow_status"] == "stopped"
     assert payload["resume_supported"] is False
     assert payload["resume_action"] is None
+    assert "authentication" not in payload
+    assert "resume" not in payload
+
+
+@pytest.mark.parametrize("workflow", [False, True], ids=["acquire", "workflow-run"])
+def test_box_api_authentication_handoff_reuses_authorized_job(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, workflow: bool
+) -> None:
+    workspace = initialized_authorized_job(tmp_path, SourceKind.BOX, "123")
+    monkeypatch.setenv("VEP_BOX_AUTH_TEST", _URL_SECRET)
+    body = b"synthetic Box source bytes"
+    request_count = 0
+
+    def box_provider(request):
+        nonlocal request_count
+        request_count += 1
+        assert request.headers["authorization"] == f"Bearer {_URL_SECRET}"
+        if request_count == 1:
+            return httpx.Response(401)
+        if request.url.path == "/2.0/files/123":
+            return httpx.Response(
+                200, json={"id": "123", "type": "file", "size": len(body), "name": "test.mp4"}
+            )
+        assert request.url.path == "/2.0/files/123/content"
+        return httpx.Response(200, headers={"Content-Type": "video/mp4"}, content=body)
+
+    flags = ["--box-token-env", "VEP_BOX_AUTH_TEST", "--json"]
+    args = (
+        ["workflow", "run", str(workspace.root), "--stop-after", "acquired", *flags]
+        if workflow
+        else ["acquire", str(workspace.root), *flags]
+    )
+    with httpx.Client(transport=httpx.MockTransport(box_provider)) as client:
+        monkeypatch.setattr(
+            "video_evidence_pipeline.application.adapter_for",
+            lambda _kind, runtime: BoxAdapter(runtime, client=client, resolver=public_resolver),
+        )
+        first = CliRunner().invoke(cli.app, args)
+        assert first.exit_code == 4, first.output
+        wait = json.loads(first.stdout)
+        assert wait["workflow_status"] == "waiting_for_authentication"
+        assert wait["error"]["code"] == "BOX_REAUTH_REQUIRED"
+        assert wait["resume"]["operation"] == ("workflow.run" if workflow else "acquire")
+        assert wait["resume"]["workspace"] == str(workspace.root)
+        assert wait["authentication"]["provider"] == "box"
+        assert wait["authentication"]["action"] == "authenticate"
+        assert wait["authentication"]["methods"][0]["credential_options"] == ["--box-token-env"]
+        assert _URL_SECRET not in first.output
+        assert not workspace.source_manifest_json.exists()
+
+        second = CliRunner().invoke(cli.app, args)
+        assert second.exit_code == 0, second.output
+        assert json.loads(second.stdout)["state"] == "ACQUIRED"
+        third = CliRunner().invoke(cli.app, args)
+        assert third.exit_code == 0, third.output
+        reused = json.loads(third.stdout)["reused"]
+        assert (reused["acquisition"] if workflow else reused) is True
+        assert request_count == 3

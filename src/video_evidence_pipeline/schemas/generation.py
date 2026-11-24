@@ -33,6 +33,7 @@ from video_evidence_pipeline.domain.authoring import (
     SkillSnapshot,
 )
 from video_evidence_pipeline.domain.authorization import AuthorizationRecord
+from video_evidence_pipeline.domain.clarification import ClarificationInput
 from video_evidence_pipeline.domain.delivery import (
     ApprovalManifest,
     ApprovalRecord,
@@ -122,6 +123,7 @@ SCHEMA_VERSION = "1.0"
 SCHEMA_BASE_ID = "https://schemas.video-evidence-pipeline.local/v1"
 
 SCHEMA_MODELS: dict[str, type[BaseModel]] = {
+    "clarification-input.schema.json": ClarificationInput,
     "lecture-input.schema.json": LectureInput,
     "lecture-document-index.schema.json": LectureDocumentIndex,
     "lecture-request.schema.json": LectureRequest,

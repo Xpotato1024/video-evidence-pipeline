@@ -246,3 +246,63 @@ test('a drawing stage inherits the same canvas and every previous mark', () => {
   assert.throws(() => resolveGeometryStages([base, {...child, source_refs:[]}]), /sources/);
   assert.throws(() => resolveGeometryStages([base, {...child, spec:{...child.spec, width:400}}]), /fields/);
 });
+
+async function withSelectedRender(buildAndCheck) {
+  const root = await mkdtemp(join(tmpdir(), 'vep-selected-render-'));
+  try {
+    const selected = structuredClone(fixture);
+    const omitted = new Set(selected.figures
+      .filter(figure => ['mermaid', 'source_crop'].includes(figure.kind)).map(figure => figure.id));
+    selected.figures = selected.figures.filter(figure => !omitted.has(figure.id));
+    selected.blocks = selected.blocks.filter(block => !omitted.has(block.figure_id));
+    const input = join(root, 'input.json');
+    await writeFile(input, JSON.stringify(selected));
+    const program = fileURLToPath(new URL('../render.mjs', import.meta.url));
+    const build = (name, formats, env = process.env) => exec(process.execPath, [
+      program, '--input', input, '--output', join(root, name),
+      ...formats.flatMap(format => ['--format', format]),
+    ], { timeout: 60_000, env });
+    await buildAndCheck(root, build);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+test('selecting Markdown and MDX emits only text views and their assets without Chromium', async () => {
+  await withSelectedRender(async (root, build) => {
+    await build('text', ['mdx', 'markdown'], { ...process.env, VEP_CHROMIUM_PATH: join(root, 'missing-browser') });
+    const textReceipt = JSON.parse(await readFile(join(root, 'text/render-receipt.json')));
+    assert.deepEqual(textReceipt.formats, ['markdown', 'mdx']);
+    assert.equal(textReceipt.renderer.chromium, null);
+    assert.deepEqual(textReceipt.validation.chromium_viewport_px, []);
+    assert.equal(textReceipt.validation.print_format, null);
+    const expectedFigure = Object.keys(textReceipt.files).find(path => /^figures\/chart-.*\.svg$/u.test(path));
+    assert.ok(expectedFigure);
+    assert.ok((await readFile(join(root, 'text/lesson.md'), 'utf8')).includes(expectedFigure));
+    assert.ok(Object.keys(textReceipt.files).every(path => !path.startsWith('sites/') && !path.endsWith('.png')));
+    assert.deepEqual(Object.keys(textReceipt.files).filter(path => !path.includes('/')).sort(), ['lesson.md', 'lesson.mdx']);
+  });
+});
+
+test('selecting only Sites or PDF emits the requested browser view', async () => {
+  await withSelectedRender(async (root, build) => {
+    await build('sites', ['sites']);
+    const siteReceipt = JSON.parse(await readFile(join(root, 'sites/render-receipt.json')));
+    assert.equal(siteReceipt.validation.print_format, null);
+    assert.ok(siteReceipt.files['sites/index.html']);
+    const expectedFigure = Object.keys(siteReceipt.files).find(path => /^figures\/chart-.*\.svg$/u.test(path));
+    assert.ok(expectedFigure);
+    assert.ok(siteReceipt.files['sites/' + expectedFigure]);
+    assert.deepEqual(await readFile(join(root, 'sites/sites', expectedFigure)), await readFile(join(root, 'sites', expectedFigure)));
+    assert.ok(Object.keys(siteReceipt.files).every(path => !path.endsWith('.pdf')));
+    assert.equal(siteReceipt.files['review.html'], undefined);
+
+    await build('pdf', ['pdf']);
+    const pdfReceipt = JSON.parse(await readFile(join(root, 'pdf/render-receipt.json')));
+    assert.deepEqual(pdfReceipt.formats, ['pdf']);
+    assert.deepEqual(pdfReceipt.validation.chromium_viewport_px, []);
+    assert.equal(pdfReceipt.validation.print_format, 'A4');
+    assert.equal((await readFile(join(root, 'pdf/review.pdf'))).subarray(0, 5).toString(), '%PDF-');
+    assert.deepEqual(Object.keys(pdfReceipt.files).filter(path => !path.includes('/')), ['review.pdf']);
+  });
+});

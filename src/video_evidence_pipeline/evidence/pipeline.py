@@ -22,6 +22,7 @@ from video_evidence_pipeline.domain.artifacts import (
 )
 from video_evidence_pipeline.domain.evidence import (
     ATOMIC_PROPOSITION_RULE,
+    UNCERTAINTY_POLICY,
     AmbiguityLedger,
     AmbiguityRecord,
     AmbiguityStatus,
@@ -73,7 +74,12 @@ from video_evidence_pipeline.storage.permissions import (
     enforce_private_file,
     ensure_private_directory,
 )
-from video_evidence_pipeline.supporting import load_supporting_inputs
+from video_evidence_pipeline.supporting import (
+    CLARIFICATION_CONFIRMATIONS,
+    CLARIFICATION_HISTORY,
+    CLARIFICATION_ORIGINAL,
+    load_supporting_inputs,
+)
 from video_evidence_pipeline.transcription.pipeline import (
     load_transcription_result,
     media_bundle_fingerprint,
@@ -325,13 +331,28 @@ def _supporting_catalog(
         else:
             if record.canonical_text_artifact is None:
                 raise integrity_error("SUPPORTING_INPUT_MANIFEST_INVALID", "notes text is missing")
+            artifact = record.canonical_text_artifact
+            clarification = artifact.artifact_type == CLARIFICATION_CONFIRMATIONS
+            if clarification:
+                pairs.append(
+                    (
+                        record.original_artifact,
+                        SourceRef(
+                            kind=SourceRefKind.NOTES,
+                            ref_id=record.input_id,
+                            content_sha256=record.original_artifact.content_sha256,
+                        ),
+                    )
+                )
             pairs.append(
                 (
-                    record.canonical_text_artifact,
+                    artifact,
                     SourceRef(
-                        kind=SourceRefKind.NOTES,
-                        ref_id=record.input_id,
-                        content_sha256=record.canonical_text_artifact.content_sha256,
+                        kind=SourceRefKind.APPROVED_ARTIFACT
+                        if clarification
+                        else SourceRefKind.NOTES,
+                        ref_id=artifact.artifact_id if clarification else record.input_id,
+                        content_sha256=artifact.content_sha256,
                     ),
                 )
             )
@@ -410,11 +431,13 @@ def _expected_request(
     deep: bool = False,
     bind_skill: bool = True,
     frozen_skill: SkillSnapshot | None = None,
+    uncertainty_policy: str | None = None,
 ) -> EvidenceRequestManifest:
     contract = AnalyzerContract(
         atomic_proposition_contract=(
             ATOMIC_PROPOSITION_RULE if requires_transcript_refinement(job) else None
-        )
+        ),
+        uncertainty_policy=uncertainty_policy,
     )
     assignment = EvidenceAssignmentContext(
         task_type=job.assignment.task_type,
@@ -541,6 +564,7 @@ def _load_stored_evidence_request(
         deep=deep,
         bind_skill=enforce_current_skill and stored.skill is not None,
         frozen_skill=stored.skill,
+        uncertainty_policy=stored.analyzer_contract.uncertainty_policy,
     )
     if not _evidence_request_matches(stored, expected, deep=deep):
         raise state_error(
@@ -586,6 +610,7 @@ def prepare_evidence_request(
         segments,
         created_at=datetime.now(UTC),
         deep=deep,
+        uncertainty_policy=UNCERTAINTY_POLICY if requires_transcript_refinement(job) else None,
     )
     payload = pretty_json_bytes(request)
     if len(payload) > _MAXIMUM_REQUEST_BYTES:
@@ -690,6 +715,14 @@ def _validate_response(
             *request.approved_artifact_refs,
         ]
     }
+    followup_refs = {
+        (ref.kind, ref.ref_id)
+        for ref, artifact in zip(
+            request.approved_artifact_refs, request.approved_artifacts, strict=True
+        )
+        if artifact.artifact_type
+        in {CLARIFICATION_ORIGINAL, CLARIFICATION_HISTORY, CLARIFICATION_CONFIRMATIONS}
+    }
     segment_by_id = {item.segment_id: item for item in request.transcript_segments}
     for record in response.evidence_records:
         if record.review_status is not ReviewStatus.UNREVIEWED:
@@ -708,6 +741,28 @@ def _validate_response(
                     "EVIDENCE_SOURCE_REF_INVALID",
                     "evidence response contains an unknown or altered source reference",
                 )
+        if record.interpretation_level in {
+            InterpretationLevel.VERBATIM,
+            InterpretationLevel.EXPLICIT_STATEMENT,
+            InterpretationLevel.VISUAL_OBSERVATION,
+        } and any((source.kind, source.ref_id) in followup_refs for source in record.source_refs):
+            raise state_error(
+                "FOLLOWUP_IS_NOT_RECORDING_EVIDENCE",
+                "later clarifications cannot establish what was said or observed in the recording",
+            )
+        if (
+            request.analyzer_contract.uncertainty_policy
+            and record.interpretation_level is InterpretationLevel.EXTERNAL_FACT
+            and all(
+                source.kind
+                in {SourceRefKind.NOTES, SourceRefKind.TRANSCRIPT_SEGMENT, SourceRefKind.FRAME}
+                for source in record.source_refs
+            )
+        ):
+            raise state_error(
+                "NOTES_ONLY_EXTERNAL_FACT",
+                "notes alone cannot establish an external fact; retain attribution and uncertainty",
+            )
         if record.interpretation_level is InterpretationLevel.VERBATIM:
             transcript_ids = [
                 item.ref_id
@@ -739,6 +794,14 @@ def _validate_response(
             raise state_error(
                 "ANALYZER_REVIEW_STATUS_FORBIDDEN",
                 "an analyzer cannot assign an ambiguity reviewer decision",
+            )
+        if (
+            request.analyzer_contract.uncertainty_policy
+            and ambiguity.status is AmbiguityStatus.RESOLVED
+        ):
+            raise state_error(
+                "AMBIGUITY_CLARIFICATION_REQUIRED",
+                "record a source-backed clarification separately from the analyzer response",
             )
         if (
             request.duration_ms is not None
