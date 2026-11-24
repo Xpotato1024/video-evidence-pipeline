@@ -125,9 +125,9 @@ test('renderer builds editable, offline and same-origin outputs from matching so
     const [html, md, mdx, site, pdf, receipt] = await Promise.all(
       ['review.html', 'lesson.md', 'lesson.mdx', 'sites/index.html', 'review.pdf', 'render-receipt.json']
         .map(name => readFile(join(output, name))));
-    assert.equal((html.toString().match(/<math\b/gu) ?? []).length, 13);
-    assert.equal((html.toString().match(/<img src="data:image\/svg\+xml/gu) ?? []).length, 3);
-    assert.equal((site.toString().match(/<img src="figures\//gu) ?? []).length, 4);
+    assert.equal((html.toString().match(/<math\b/gu) ?? []).length, 14);
+    assert.equal((html.toString().match(/<img src="data:image\/svg\+xml/gu) ?? []).length, 5);
+    assert.equal((site.toString().match(/<img src="figures\//gu) ?? []).length, 6);
     assert.match(html.toString(), /<img src="data:image\/png;base64,[^"]+" alt="[^"]+" width="2" height="2"/u);
     assert.deepEqual(await readFile(join(output, 'inputs/source.png')), png);
     const [body, notes] = html.toString().split('<section class="sources">');
