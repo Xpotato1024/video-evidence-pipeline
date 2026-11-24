@@ -110,7 +110,7 @@ class LectureSource(StrictModel):
 
 
 class ProfileRule(StrictModel):
-    scope: Literal["content", "format", "calculation", "diagram"]
+    scope: Literal["content", "format", "calculation", "diagram", "content_audit", "visual_audit"]
     text: Text
 
 

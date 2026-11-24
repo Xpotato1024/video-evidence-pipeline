@@ -118,7 +118,9 @@
             "content",
             "format",
             "calculation",
-            "diagram"
+            "diagram",
+            "content_audit",
+            "visual_audit"
           ],
           "title": "Scope",
           "type": "string"

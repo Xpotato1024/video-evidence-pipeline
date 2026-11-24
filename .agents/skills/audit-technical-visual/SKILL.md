@@ -35,3 +35,9 @@ Independently start at the overview, jump to a specific operation, and use the o
 Inspect whether parallel items are scannable as a list and dependent actions have ordered steps. To check explanatory sufficiency, pick a key equation, identify when it applies, explain why the critical operation works, and reproduce the action from its diagram and equation. Check that figure arrows agree with the actual basis and that prose does not repeat their labels.
 
 Read each section with background disclosures closed. Check the objective and first-use definitions against the diagram and first formula. Open each question by keyboard and check its reasoning, typeset notation, narrow-screen layout and presence in the printed PDF.
+
+Start one pass from the verified lecture sources, before enumerating the delivered figures. Identify the
+apparatus, boundary, observation or calculated point the learner was asked to locate. Find its visual
+counterpart in the actual lesson. A missing figure can be reported against the containing block or the
+visuals coverage topic. Verify the first occurrence of a symbol in tables and captions as well as equations;
+a later glossary cannot explain an earlier axis during a first reading.

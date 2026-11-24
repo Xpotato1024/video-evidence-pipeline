@@ -37,6 +37,18 @@ The versioned profile carries scoped rules, language and optional hashes for the
 the caller's answer format while preserving evidence and calculation steps. The draft procedures for technical
 authoring, figure planning and visual audit remain on the Skill evaluation path.
 
+For a study guide, read the verified sources from start to finish before deciding what the author needs
+in the catalog. Include passages where a student must choose, derive, check, draw or try a problem. Bind
+the move and the reason to their locators. Repeated explanations across contexts can establish emphasis;
+duplicate captions or elapsed time alone cannot. If the existing ledger omits a verified teaching step,
+prepare a new evidence-backed request. A heading or page title labeled as board work cannot supply its algebra.
+
+Use optional profile scopes `content_audit` and `visual_audit` for the corresponding independent audit
+criteria. They travel in the frozen authoring profile and in the matching audit request. For example, ask
+the content auditor to reconstruct the required operations from the original sources before checking the
+draft. The visual auditor can identify missing diagrams from source demonstrations as well as inspect
+delivered figures. An omission finding can target a coverage topic and cite an unused frozen source ID.
+
 ### Input variants
 
 - An existing VEP workspace must have verified evidence and local processing authorization.

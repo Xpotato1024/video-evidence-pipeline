@@ -36,3 +36,21 @@ Open a study guide with a compact map of the problems, decisions and results. Li
 Use a bullets block for a set with no required order. Use Steps/Step for dependent operations: name the action, explain the decisive reason, place the supporting expression with that step, and show the result where needed. A single aligned expression can carry a whole symbolic transformation. Preserve a comparison table when the row/column relationship matters. Let the diagram or equation show what it can; put the applicable condition and the reason for a choice nearby. At the end, select the few relationships the reader should be able to explain in their own words.
 
 Before the first use of a symbol, state what it denotes and why the reader needs it. Distinguish a physical quantity, a coordinate, a component and a direction. Keep a concrete example and the takeaway visible. Use a question-titled background block for prerequisite reasoning that a prepared reader can skip. Bind supplementary explanations to their actual provenance.
+
+## First draft from lecture sources
+
+Before outlining a study guide, walk the verified source timeline or the pages actually taught. For each
+decision the learner must reproduce, map the source locator to an observable task and its planned block.
+Look for a warning given once, a return to the same reasoning in different words, board work that expands
+or checks a result, and a pause to let students solve a problem. A duplicate caption, a verbal tic, or
+time spent waiting supplies no extra corroboration. Resolve vague slide pointers against nearby board work
+or figures. If the frozen catalog lacks a verified key passage, request a new evidence preparation or
+identify the unresolved gap. Keep editorial reconstruction and predicted exam content separate from
+what the lecturer established.
+
+For each priority operation show the starting point, condition, decisive intermediate move and outcome.
+Keep the decision and its reason visible with optional prerequisites closed. Present an in-class exercise's
+givens and question before the hint, method table or solution. Supply a diagram when the learner needs
+it to locate a boundary, interpret an observation or plot a computed point. Trace the source-to-block map
+in reverse before handing off the first draft. A cited heading or final formula alone does not teach a move.
+Keep the mapping in working notes and use the existing source references and coverage fields in the response.

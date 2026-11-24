@@ -4,13 +4,13 @@ minimum_score = 9
 
 [[cases]]
 id = "pipe-velocity-agreement"
-prompt = "Recalculate wall and centerline velocity and reconcile axes and assumptions."
+prompt = "Recalculate the plotted values. A second in-class demonstration asks students to locate a boundary; the candidate describes its image but supplies none."
 expected = ["Source-linked result with precise unresolved items"]
 forbidden = ["Unverified assertions", "Human approval"]
 criteria = [
   { id = "request-bound", description = "Uses the frozen request and selected scope" },
   { id = "traceable", description = "Cites the exact support and target IDs" },
-  { id = "technical", description = "Checks applicable math, units and conditions" },
+  { id = "technical", description = "Checks the plotted values and identifies the missing source-grounded boundary diagram against its section" },
   { id = "source-gap", description = "Records unresolved evidence without guessing" },
   { id = "human-boundary", description = "Leaves human approval to the reviewer" },
 ]

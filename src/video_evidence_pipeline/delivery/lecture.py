@@ -765,6 +765,9 @@ def _audit_request(
             "Check equations and step calculations, consistency with diagrams, alt text and visual legibility.",
         ],
     }
+    criteria[kind].extend(
+        rule.text for rule in request.profile.rules if rule.scope == f"{kind}_audit"
+    )
     result = {
         "schema_version": "2.0",
         "kind": kind,
@@ -814,7 +817,8 @@ def _check_audits(
         ],
         *_TOPICS,
     }
-    sources = {item.id for item in content.sources}
+    # An omission finding can cite frozen evidence that the author never used.
+    sources = {item.id for item in request.sources} | {item.id for item in content.sources}
     for kind, response in zip(("content", "visual"), audits, strict=True):
         expected = _audit_request(request, content, inventory, kind)
         if response.kind != kind or response.request_fingerprint != expected["request_fingerprint"]:

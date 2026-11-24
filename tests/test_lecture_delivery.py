@@ -234,6 +234,52 @@ def test_lecture_document_to_review_and_separate_approval(tmp_path: Path, monkey
         lecture.prepare_lecture(documents, options, tmp_path / "new", documents=True)
 
 
+def test_audit_rules_and_omissions_use_frozen_sources(tmp_path: Path, monkeypatch) -> None:
+    sources = []
+    for name in ("handout", "board"):
+        path = tmp_path / f"{name}.txt"
+        path.write_text(f"Verified {name}", encoding="utf-8")
+        sources.append({"id": name, "path": path.name, "sha256": sha256_file(path)})
+    index = _write(tmp_path / "docs.json", {"job_id": "fixture-review", "sources": sources})
+    options = _options(tmp_path / "options.json")
+    values = json.loads(options.read_text(encoding="utf-8"))
+    content_rule = "Trace the operation from the board."
+    visual_rule = "Find the illustrated boundary."
+    values["profile"]["rules"].extend([
+        {"scope": "content_audit", "text": content_rule},
+        {"scope": "visual_audit", "text": visual_rule},
+    ])
+    _write(options, values)
+    prepared = tmp_path / "prepared"
+    request, _ = lecture.prepare_lecture(index, options, prepared, documents=True)
+    draft = _fixture_content(request)
+    omitted = draft["sources"].pop()["id"]
+    content = _write(tmp_path / "content.json", draft)
+    rendered = tmp_path / "render"
+    monkeypatch.setattr(lecture, "_render", _fake_render)
+    lecture.render_lecture(prepared / "request.json", content, rendered)
+    for kind, included, excluded in (
+        ("content", content_rule, visual_rule), ("visual", visual_rule, content_rule)
+    ):
+        criteria = lecture.prepare_lecture_audit(rendered, kind)["criteria"]
+        assert included in criteria and excluded not in criteria
+
+    audit = _audit(rendered, "content", "reader")
+    finding = {
+        "severity": "P1", "target_id": "derivations",
+        "detail": "A required operation is missing.", "source_refs": [omitted],
+    }
+    audit["findings"] = [finding]
+    content_audit = _write(tmp_path / "content-audit.json", audit)
+    visual_audit = _write(tmp_path / "visual-audit.json", _audit(rendered, "visual", "viewer"))
+    with pytest.raises(VepError, match="P0/P1"):
+        lecture.publish_lecture_review(rendered, content_audit, visual_audit, tmp_path / "review")
+    finding["source_refs"] = ["unverified"]
+    _write(content_audit, audit)
+    with pytest.raises(VepError, match="unknown evidence"):
+        lecture.publish_lecture_review(rendered, content_audit, visual_audit, tmp_path / "review")
+
+
 def test_lecture_regeneration_freezes_verified_workspace_and_archive(tmp_path: Path) -> None:
     workspace, _draft, audit = _human_review_ready(tmp_path, "lecture-legacy")
     target = audit.human_review.approval_target_sha256
