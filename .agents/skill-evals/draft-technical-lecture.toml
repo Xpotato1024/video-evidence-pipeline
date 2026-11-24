@@ -16,6 +16,19 @@ criteria = [
 ]
 
 [[cases]]
+id = "goal-led-average-power"
+prompt = "The board gives a force parallel to a displacement, increasing linearly from 2 N to 8 N over 3 m in 5 s. The question asks for average mechanical power. Write a short worked solution a student can reproduce."
+expected = ["Starts with average power as work divided by elapsed time, identifies work as the missing numerator, obtains 15 J from the area under the force-displacement graph or equivalent calculation, and substitutes 15 J / 5 s = 3 W"]
+forbidden = ["Computing a series of unexplained intermediate values before revealing what they are for", "Implying constant speed is required"]
+criteria = [
+  { id = "request-bound", description = "Gives the requested average mechanical power and preserves the stated force-displacement dependence" },
+  { id = "traceable", description = "Keeps board data distinct from the chosen solution method" },
+  { id = "technical", description = "With optional explanations closed, a reader can identify the missing numerator and the relation that supplies it before calculating the area" },
+  { id = "source-gap", description = "Does not assign the method an undocumented exam or memorization requirement" },
+  { id = "human-boundary", description = "Leaves approval to the reviewer" },
+]
+
+[[cases]]
 id = "unexplained-intermediate"
 prompt = "A handout asks for a general formula. Its working introduces a short length symbol, defines a change and jumps straight to a component formula. The lecturer states the result but gives no memorization instruction. Write the worked procedure for a student."
 expected = ["A stated target expression the reader can identify with the handout closed and either a justified use for the intermediate or a direct route"]
