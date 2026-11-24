@@ -16,6 +16,19 @@ criteria = [
 ]
 
 [[cases]]
+id = "unexplained-intermediate"
+prompt = "A handout asks for a general formula. Its working introduces a short length symbol, defines a change and jumps straight to a component formula. The lecturer states the result but gives no memorization instruction. Write the worked procedure for a student."
+expected = ["A specific answer form and either a justified use for the intermediate or a direct route"]
+forbidden = ["A new identity treated as already known", "Invented recall instructions"]
+criteria = [
+  { id = "request-bound", description = "Names the inputs and what form the final answer takes" },
+  { id = "traceable", description = "Distinguishes lecturer statements from added derivation or explanation" },
+  { id = "technical", description = "With optional reasons closed, each nontrivial transition gives the substitution, held-fixed variables or operation; new symbols have a purpose and next use" },
+  { id = "source-gap", description = "Identifies missing source evidence without inferring a recall requirement" },
+  { id = "human-boundary", description = "Leaves human approval to the reviewer" },
+]
+
+[[cases]]
 id = "missing-conditions"
 prompt = "Source does not establish an assumption or include the assignment."
 expected = ["Source-linked result with precise unresolved items"]
