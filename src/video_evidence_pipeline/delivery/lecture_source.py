@@ -142,7 +142,7 @@ def apply_mdx_edits(content: dict[str, Any], original: str, edited: str) -> dict
                 equation = equations[block["equation_id"]]
                 opening = f'```math id="{equation["id"]}"\n'
                 fields.append((equation, "tex", opening, "\n```", _identity, _identity))
-            case "steps":
+            case "steps" | "procedure":
                 for step in block["steps"]:
                     fields.extend(
                         [
@@ -155,5 +155,18 @@ def apply_mdx_edits(content: dict[str, Any], original: str, edited: str) -> dict
                         if step.get(part) is not None:
                             opening = f'```math id="{block["id"]}-{step["id"]}-{part}"\n'
                             fields.append((step, part, opening, "\n```", _identity, _identity))
+                    if block["type"] == "procedure" and step.get("figure_id"):
+                        figure = figures[step["figure_id"]]
+                        fields.extend(
+                            [
+                                (figure, "alt", ' alt="', '"', _escape, html.unescape),
+                                (figure, "caption", ' caption="', '"', _escape, html.unescape),
+                            ]
+                        )
+                if block["type"] == "procedure":
+                    for step in block["steps"]:
+                        fields.append(
+                            (step, "explanation", "\n\n", "\n\n", _markdown, _decode_markdown)
+                        )
         _replace(before, after, fields)
     return content

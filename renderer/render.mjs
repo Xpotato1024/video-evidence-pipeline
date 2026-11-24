@@ -145,9 +145,19 @@ async function buildEquations(content, write) {
     await write('math/' + item.id + '.tex', item.tex + '\n');
     await write('math/' + item.id + '.mml', expression + '\n');
   }
-  for (const block of content.blocks.filter(item => item.type === 'steps')) {
+  for (const block of content.blocks.filter(item => item.type === 'steps' || item.type === 'procedure')) {
     if (!Array.isArray(block.steps) || !block.steps.length || block.steps.length > 128)
       throw new Error('A steps block requires 1–128 steps');
+    if (block.type === 'procedure') {
+      if (!['drawing', 'calculation'].includes(block.kind) ||
+          block.steps.some(step => step.type !== 'operation' || !step.explanation?.trim()))
+        throw new Error('A procedure requires a kind and an explanation for each operation');
+      if (block.kind === 'drawing') {
+        const stages = block.steps.map(step => step.figure_id);
+        if (stages.some(id => !id) || new Set(stages).size !== stages.length)
+          throw new Error('Each drawing step requires a separate stage figure');
+      }
+    }
     const entries = new Map();
     stepEquations.set(block.id, entries);
     for (const step of block.steps) {

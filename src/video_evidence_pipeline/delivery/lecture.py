@@ -51,6 +51,7 @@ from video_evidence_pipeline.domain.lecture import (
     LectureInput,
     LectureRequest,
     LectureSource,
+    ProcedureBlock,
     RichContent,
     RichDeliverableManifest,
     SourceLocator,
@@ -503,7 +504,13 @@ def _check_content(content: RichContent, request: LectureRequest) -> None:
     for topic, block_type in (("worked_examples", StepsBlock), ("visuals", FigureBlock)):
         coverage = by_topic[topic]
         if coverage.status == "covered" and not any(
-            isinstance(by_block[block_id], block_type) for block_id in coverage.block_ids
+            isinstance(placed, block_type)
+            or (
+                topic == "visuals"
+                and isinstance(placed, ProcedureBlock)
+                and any(step.figure_id for step in placed.steps)
+            )
+            for placed in (by_block[block_id] for block_id in coverage.block_ids)
         ):
             raise integrity_error(
                 "LECTURE_COVERAGE_INCOMPLETE", "coverage lacks the relevant artifact"

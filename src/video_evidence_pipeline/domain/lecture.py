@@ -324,6 +324,25 @@ class StepsBlock(ReferencedBlock):
     steps: list[WorkedStep | OperationStep] = Field(min_length=1, max_length=128)
 
 
+class ProcedureStep(OperationStep):
+    explanation: Text
+    figure_id: ArtifactIdentifier | None = None
+
+
+class ProcedureBlock(StepsBlock):
+    type: Literal["procedure"]
+    kind: Literal["calculation", "drawing"]
+    steps: list[ProcedureStep] = Field(min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def check_drawing_stages(self) -> Self:
+        if self.kind == "drawing":
+            figures = {step.figure_id for step in self.steps}
+            if None in figures or len(figures) != len(self.steps):
+                raise ValueError("each drawing step requires its own stage figure")
+        return self
+
+
 Block = Annotated[
     HeadingBlock
     | ParagraphBlock
@@ -333,7 +352,8 @@ Block = Annotated[
     | EquationBlock
     | FigureBlock
     | BulletListBlock
-    | StepsBlock,
+    | StepsBlock
+    | ProcedureBlock,
     Field(discriminator="type"),
 ]
 
@@ -390,9 +410,29 @@ class RichContent(StrictModel):
             actual = {
                 getattr(block, id_field): block for block in self.blocks if isinstance(block, cls)
             }
-            if set(actual) != {item.id for item in objects}:
+            nested = set()
+            if cls is FigureBlock:
+                figures = {figure.id: figure for figure in self.figures}
+                for block in self.blocks:
+                    if isinstance(block, ProcedureBlock):
+                        for step in block.steps:
+                            if step.figure_id is None:
+                                continue
+                            figure = figures.get(step.figure_id)
+                            if figure is None or not set(figure.source_refs) <= set(
+                                step.source_refs
+                            ):
+                                raise ValueError(
+                                    "stage figure must resolve and be cited by its step"
+                                )
+                            nested.add(step.figure_id)
+            if set(actual) | nested != {item.id for item in objects}:
                 raise ValueError("every equation and figure must resolve to a placed block")
-            if any(set(actual[item.id].source_refs) != set(item.source_refs) for item in objects):
+            if any(
+                set(actual[item.id].source_refs) != set(item.source_refs)
+                for item in objects
+                if item.id in actual
+            ):
                 raise ValueError("equation or figure provenance disagrees with its block")
         if any(
             set(step.source_refs) - set(block.source_refs)

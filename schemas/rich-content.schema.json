@@ -709,6 +709,137 @@
       "title": "ParagraphBlock",
       "type": "object"
     },
+    "ProcedureBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "calculation",
+            "drawing"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "source_refs": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/ProcedureStep"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Steps",
+          "type": "array"
+        },
+        "type": {
+          "const": "procedure",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source_refs",
+        "type",
+        "steps",
+        "kind"
+      ],
+      "title": "ProcedureBlock",
+      "type": "object"
+    },
+    "ProcedureStep": {
+      "additionalProperties": false,
+      "properties": {
+        "explanation": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Explanation",
+          "type": "string"
+        },
+        "expression": {
+          "anyOf": [
+            {
+              "maxLength": 65536,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expression"
+        },
+        "figure_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Figure Id"
+        },
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "rationale": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Rationale",
+          "type": "string"
+        },
+        "source_refs": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "title": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "type": {
+          "const": "operation",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source_refs",
+        "type",
+        "title",
+        "rationale",
+        "explanation"
+      ],
+      "title": "ProcedureStep",
+      "type": "object"
+    },
     "SourceLocator": {
       "additionalProperties": false,
       "properties": {
@@ -1122,6 +1253,7 @@
             "figure": "#/$defs/FigureBlock",
             "heading": "#/$defs/HeadingBlock",
             "paragraph": "#/$defs/ParagraphBlock",
+            "procedure": "#/$defs/ProcedureBlock",
             "steps": "#/$defs/StepsBlock",
             "table": "#/$defs/TableBlock"
           },
@@ -1154,6 +1286,9 @@
           },
           {
             "$ref": "#/$defs/StepsBlock"
+          },
+          {
+            "$ref": "#/$defs/ProcedureBlock"
           }
         ]
       },

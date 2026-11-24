@@ -435,3 +435,59 @@ def test_portable_background_paragraphs_and_question_are_editable() -> None:
     block = apply_mdx_edits(content, source, edited)["blocks"][0]
     assert block["title"] == "When?"
     assert block["paragraphs"] == ["One.", "Another reason."]
+
+
+def test_drawing_steps_require_distinct_figures_and_bound_reasons(tmp_path: Path) -> None:
+    source = tmp_path / "lecture.txt"
+    source.write_text("Plot the origin and the axis.", encoding="utf-8")
+    docs = _write(
+        tmp_path / "docs.json",
+        {
+            "job_id": "fixture-sketch",
+            "sources": [{"id": "notes", "path": source.name, "sha256": sha256_file(source)}],
+        },
+    )
+    request, _ = lecture.prepare_lecture(
+        docs, _options(tmp_path / "opts.json"), tmp_path / "prep", documents=True
+    )
+    content = _fixture_content(request)
+    ref = request.sources[0].id
+    stages = [
+        {
+            "type": "operation",
+            "id": key,
+            "title": key,
+            "rationale": "Draw it.",
+            "explanation": "It fixes the construction.",
+            "figure_id": f"fig-{key}",
+            "source_refs": [ref],
+        }
+        for key in ("origin", "axis")
+    ]
+    content["blocks"][-1] = {
+        "type": "procedure",
+        "id": "example",
+        "kind": "drawing",
+        "steps": stages,
+        "source_refs": [ref],
+    }
+    content["figures"] = [
+        {
+            "id": item["figure_id"],
+            "kind": "geometry",
+            "spec": {},
+            "alt": item["id"],
+            "caption": item["title"],
+            "factuality": "derived_diagram",
+            "source_refs": [ref],
+        }
+        for item in stages
+    ]
+    for item in content["coverage"]:
+        if item["topic"] == "visuals":
+            item.update(status="covered", block_ids=["example"])
+    lecture._check_content(lecture.RichContent.model_validate(content), request)
+    for key in (None, stages[0]["figure_id"], "absent"):
+        stages[1]["figure_id"] = key
+        with pytest.raises(ValueError, match="stage figure"):
+            lecture.RichContent.model_validate(content)

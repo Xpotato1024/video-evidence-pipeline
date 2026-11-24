@@ -41,3 +41,5 @@ apparatus, boundary, observation or calculated point the learner was asked to lo
 counterpart in the actual lesson. A missing figure can be reported against the containing block or the
 visuals coverage topic. Verify the first occurrence of a symbol in tables and captions as well as equations;
 a later glossary cannot explain an earlier axis during a first reading.
+
+Read each procedure with its explanations skipped. Check whether the problem, equation and instructions are sufficient to reproduce the intermediate answer. Follow every step-to-explanation link and return to its exact step. For drawing problems compare adjacent stages on the same axes, check that each operation has a distinct in-place figure with its new marks, and compare its coordinates and the scope of any cancellation mark against the equation. A single final plot cannot demonstrate an intermediate operation.

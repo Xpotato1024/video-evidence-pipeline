@@ -91,3 +91,10 @@ th { background: #edf4f6; }
   thead { display: table-header-group; }
   tr { break-inside: avoid; }
 }
+
+.procedure-reasons { border-block-start: 1px solid #c6d7d9; margin-block: 1.1rem; }
+.procedure-reasons h4 { margin: .8em 0 .2em; }
+.procedure-reasons section, .steps > li { scroll-margin-block-start: .75rem; }
+.procedure-reasons section:target, .steps > li:target { outline: 2px solid #367c80; outline-offset: .15rem; }
+.step-reason-link, .procedure-reasons section > a { display: inline-block; padding-block: .5em; }
+@media print { .step-reason-link, .procedure-reasons section > a { display: none; } }

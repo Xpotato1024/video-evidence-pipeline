@@ -130,7 +130,8 @@ export function createDocument(content, equations, figures, stepEquations) {
   if (!/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/u.test(lang)) throw new Error('Invalid language tag');
   const words = lang.startsWith('ja') ? messages.ja : messages.en;
   const targets = new Set(content.blocks.map(block => identifier(block.id)));
-  const operations = block => block.type === 'steps' ? block.steps.filter(step => step.type === 'operation') : [];
+  const hasSteps = block => block.type === 'steps' || block.type === 'procedure';
+  const operations = block => hasSteps(block) ? block.steps.filter(step => step.type === 'operation') : [];
   for (const step of content.blocks.flatMap(operations)) targets.add(identifier(step.id));
   const rich = text => inline(text, targets);
   const navigation = lang.startsWith('ja') ? '目次' : 'Contents';
@@ -138,7 +139,7 @@ export function createDocument(content, equations, figures, stepEquations) {
   const sources = new Map(content.sources.map(source => [sourceIdentifier(source.id), source]));
   const referenceIds = new Set([
     ...content.blocks, ...content.equations, ...content.figures,
-    ...content.blocks.filter(block => block.type === 'steps').flatMap(block => block.steps),
+    ...content.blocks.filter(hasSteps).flatMap(block => block.steps),
   ].flatMap(item => item.source_refs ?? []));
   const usedSources = [...sources.values()].filter(source => referenceIds.has(source.id));
   const references = work => (work.source_refs ?? []).map(id => {
@@ -155,7 +156,7 @@ export function createDocument(content, equations, figures, stepEquations) {
     const section = sections.at(-1);
     section.blocks.push(block);
     const related = [block];
-    if (block.type === 'steps') related.push(...block.steps);
+    if (hasSteps(block)) related.push(...block.steps);
     if (block.type === 'equation') related.push(equations.get(block.equation_id));
     if (block.type === 'figure') related.push(figures.get(block.figure_id));
     for (const item of related) for (const source of references(item)) section.ids.add(source.id);
@@ -205,13 +206,38 @@ export function createDocument(content, equations, figures, stepEquations) {
     return metadata;
   };
 
-  function stepHtml(block, step) {
+  const ja = lang.startsWith('ja');
+  const stepLabel = n => ja ? '手順' + n : 'Step ' + n;
+  const whyLabel = ja ? '理由を読む' : 'Read the explanation';
+  const returnTo = n => ja ? stepLabel(n) + 'に戻る' : 'Return to step ' + n;
+  const reasonsLabel = ja ? '手順の解説' : 'Explanations';
+
+  function figureHtml(figure, mode, id) {
+    const src = mode === 'standalone' ? figure.dataUri : figure.path;
+    const data = figure.data ? `<details><summary>${words.values}</summary>` +
+      htmlTable(figure.data.headers, figure.data.rows, words.values) + '</details>' : '';
+    const kind = words.figureTypes[figure.factuality] ?? '';
+    return `<figure id="${id}"><div class="figure-scroll" tabindex="0" aria-label="${escape(figure.alt)}">` +
+      `<img src="${src}" alt="${escape(figure.alt)}" width="${figure.width}" height="${figure.height}">\n</div>` +
+      `<figcaption>${rich(figure.caption)}${kind ? '（' + kind + '）' : ''}</figcaption>${data}</figure>`;
+  }
+
+  function explanationsHtml(steps) {
+    return `<section class="procedure-reasons"><h3>${reasonsLabel}</h3>` +
+      steps.map((step, i) => `<section id="why-${identifier(step.id)}" tabindex="-1"><h4>${stepLabel(i + 1)}　${rich(step.title)}</h4>` +
+        `<p class="prose">${rich(step.explanation)}</p><a href="#block-${step.id}">${returnTo(i + 1)}</a></section>`).join('') + '</section>';
+  }
+
+  function stepHtml(block, step, mode) {
     const parts = stepEquations.get(block.id).get(step.id);
     if (step.type === 'operation') {
       const expression = parts.get('expression');
       const back = navigable ? `<a class="back" href="#overview">${returnLabel}</a>` : '';
-      return `<li id="block-${identifier(step.id)}"><p class="step-title">${rich(step.title)}${back}</p>` +
-        `<p class="prose">${rich(step.rationale)}</p>` + (expression ? eqHtml(expression, step.id) : '') + '</li>';
+      const guided = block.type === 'procedure';
+      const stage = guided && step.figure_id ? figureHtml(figures.get(step.figure_id), mode, 'stage-' + step.id) : '';
+      const why = guided ? `<a class="step-reason-link" href="#why-${identifier(step.id)}">${whyLabel}</a>` : '';
+      return `<li id="block-${identifier(step.id)}"${guided ? ' tabindex="-1"' : ''}><p class="step-title">${rich(step.title)}${back}</p>` +
+        `<p class="prose">${rich(step.rationale)}</p>` + (expression ? eqHtml(expression, step.id) : '') + stage + why + '</li>';
     }
     const numeric = [...parts.entries()].map(([kind, expression]) => {
       const equation = eqHtml(expression, step.id, kind);
@@ -253,17 +279,19 @@ export function createDocument(content, equations, figures, stepEquations) {
       case 'figure': {
         const figure = figures.get(block.figure_id);
         if (!figure) throw new Error('Unknown figure ' + block.figure_id);
-        const src = mode === 'standalone' ? figure.dataUri : figure.path;
-        const data = figure.data ? `<details><summary>${words.values}</summary>` +
-          htmlTable(figure.data.headers, figure.data.rows, words.values) + '</details>' : '';
-        const kind = words.figureTypes[figure.factuality] ?? '';
-        return `<figure id="block-${id}"><div class="figure-scroll" tabindex="0" aria-label="${escape(figure.alt)}">` +
-          `<img src="${src}" alt="${escape(figure.alt)}" width="${figure.width}" height="${figure.height}">\n</div>` +
-          `<figcaption>${rich(figure.caption)}${kind ? '（' + kind + '）' : ''}</figcaption>${data}</figure>`;
+        return figureHtml(figure, mode, 'block-' + id);
       }
-      case 'steps': return `<ol class="steps" id="block-${id}">${block.steps.map(step => stepHtml(block, step)).join('')}</ol>`;
+      case 'procedure':
+      case 'steps': return `<ol class="steps" id="block-${id}">${block.steps.map(step => stepHtml(block, step, mode)).join('')}</ol>` +
+        (block.type === 'procedure' ? explanationsHtml(block.steps) : '');
       default: throw new Error('Unknown lecture block ' + block.type);
     }
+  }
+
+  function mdFigure(figure, mode) {
+    return mode === 'mdx'
+      ? `<Figure assetId="${figure.id}" src="${figure.path}" alt="${escape(figure.alt)}" caption="${escape(figure.caption)}" />`
+      : `![${markdown(figure.alt)}](${figure.path})\n\n${markdown(figure.caption)}`;
   }
 
   function md(block, mode) {
@@ -291,21 +319,31 @@ export function createDocument(content, equations, figures, stepEquations) {
       }
       case 'figure': {
         const figure = figures.get(block.figure_id);
-        const view = mode === 'mdx'
-          ? `<Figure assetId="${figure.id}" src="${figure.path}" alt="${escape(figure.alt)}" caption="${escape(figure.caption)}" />`
-          : `![${markdown(figure.alt)}](${figure.path})\n\n${markdown(figure.caption)}`;
+        const view = mdFigure(figure, mode);
         return view + mdReferences(figure) + mdReferences(block, figure.source_refs) +
           (figure.data ? `\n\n[${words.values}](data/${figure.id}.csv)` : '');
       }
+      case 'procedure':
       case 'steps': {
+        const guided = block.type === 'procedure';
         const steps = block.steps.map((step, index) => {
           const parts = step.type === 'operation' ? (step.expression ? ['expression'] : []) : ['symbolic', 'substitution', 'intermediate', 'result'].filter(kind => step[kind] != null);
-          const body = [markdown(step.rationale), ...parts.map(kind =>
+          let body = [markdown(step.rationale), ...parts.map(kind =>
             (kind === 'expression' ? '' : '**' + words[kind] + '**\n\n') + mdMath(step[kind], `${block.id}-${step.id}-${kind}`))].join('\n\n') + mdReferences(step);
+          if (guided) {
+            const anchor = identifier(step.id);
+            const figure = step.figure_id ? figures.get(step.figure_id) : null;
+            body = `<a id="block-${anchor}"></a>\n\n` + body +
+              (figure ? '\n\n' + mdFigure(figure, mode) + mdReferences(figure) +
+                (figure.data ? `\n\n[${words.values}](data/${figure.id}.csv)` : '') : '') +
+              `\n\n[${whyLabel}](#why-${anchor})`;
+          }
           return mode === 'mdx' ? `<Step title="${escape(step.title)}">\n\n${body}\n\n</Step>`
             : `${index + 1}. **${markdown(step.title)}**\n\n` + body.split('\n').map(line => line ? '   ' + line : '').join('\n');
         }).join('\n\n');
-        return (mode === 'mdx' ? '<Steps>\n\n' + steps + '\n\n</Steps>' : steps) + refs;
+        const reasons = guided ? '\n\n### ' + reasonsLabel + '\n\n' + block.steps.map((step, i) =>
+          `<a id="why-${identifier(step.id)}"></a>\n\n#### ${stepLabel(i + 1)}\n\n${markdown(step.explanation)}\n\n[${returnTo(i + 1)}](#block-${step.id})`).join('\n\n') : '';
+        return (mode === 'mdx' ? '<Steps>\n\n' + steps + '\n\n</Steps>' : steps) + reasons + refs;
       }
       default: throw new Error('Unknown lecture block ' + block.type);
     }

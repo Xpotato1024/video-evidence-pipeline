@@ -29,6 +29,12 @@ const fixture = {
       { id: 'select', type: 'operation', title: '値を選ぶ', rationale: '等値線の高さを決める。', expression: 'h=1', source_refs: ['current'] },
       { id: 'connect', type: 'operation', title: '点を結ぶ', rationale: '同じ高さの点をつなぐ。', source_refs: ['current'] },
     ] },
+    { id: 'construction', type: 'procedure', kind: 'drawing', source_refs: ['supplement'], steps: [
+      { type: 'operation', id: 'draw-axes', title: '軸を引く', rationale: '横軸と縦軸を引く。', expression: 'x=0',
+        figure_id: 'axes', explanation: 'これが測定の基準になる。', source_refs: ['supplement'] },
+      { type: 'operation', id: 'draw-points', title: '測定点を打つ', rationale: '座標ごとに点を打つ。',
+        figure_id: 'chart', explanation: '点の位置が測定結果を示す。', source_refs: ['supplement'] },
+    ] },
     { id: 'formula', type: 'equation', equation_id: 'partial', source_refs: ['current'] },
     { id: 'curve-block', type: 'figure', figure_id: 'chart', source_refs: ['supplement'] },
     { id: 'diagram-block', type: 'figure', figure_id: 'axes', source_refs: ['supplement'] },
@@ -135,6 +141,16 @@ test('renderer builds editable, offline and same-origin outputs from matching so
     assert.match(body, /<section class="background" id="block-basis-note"><details><summary>/u);
     assert.match(mdx.toString(), /<Background title="なぜ方向を分ける？">/u);
     assert.match(md.toString(), /\*\*なぜ方向を分ける？\*\*/u);
+    for (const [i, step] of ['draw-axes', 'draw-points'].entries()) {
+      assert.match(body, new RegExp(`<li id="block-${step}"[^>]*>(?:(?!</li>)[\\s\\S])*<figure id="stage-${step}"(?:(?!</li>)[\\s\\S])*href="#why-${step}"`));
+      assert.match(body, new RegExp(`<section id="why-${step}"[^>]*>(?:(?!</section>)[\\s\\S])*href="#block-${step}">手順${i+1}に戻る`));
+      for (const editable of [md, mdx]) {
+        for (const id of ['block-' + step, 'why-' + step]) {
+          assert.ok(editable.toString().includes('id="' + id + '"'));
+          assert.ok(editable.toString().includes('](#' + id + ')'));
+        }
+      }
+    }
     assert.match(body, /class="calculation"/);
     assert.match(body, /<nav class="study-nav"/);
     assert.match(body, /href="#block-values-heading"/);
