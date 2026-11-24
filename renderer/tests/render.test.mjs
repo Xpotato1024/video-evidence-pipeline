@@ -25,6 +25,10 @@ const fixture = {
     { id: 'heading', type: 'heading', level: 2, text: String.raw`式と図 \(u\)`, source_refs: ['current'] },
     { id: 'basis-note', type: 'background', title: 'なぜ方向を分ける？', paragraphs: ['各軸の向きを使う。', String.raw`変化率を \(q\) と置く。`], source_refs: ['supplement'] },
     { id: 'directions', type: 'bullets', title: '二方向', items: [String.raw`**縦** \(y\)`, '横'], source_refs: ['current'] },
+    { id: 'angles', type: 'comparison', title: '同じ移動', source_refs: ['current'], cases: [
+      { label: '角度', items: ['角度の変化（rad）'] },
+      { label: '弧長', items: ['円周上の距離（m）'] },
+    ] },
     { id: 'actions', type: 'steps', source_refs: ['current'], steps: [
       { id: 'select', type: 'operation', title: '値を選ぶ', rationale: '等値線の高さを決める。', expression: 'h=1', source_refs: ['current'] },
       { id: 'connect', type: 'operation', title: '点を結ぶ', rationale: '同じ高さの点をつなぐ。', source_refs: ['current'] },
@@ -75,6 +79,9 @@ const fixture = {
 test('KaTeX emits structural math without a raw TeX annotation', () => {
   const math = mathml(String.raw`\vec{v} = \frac{\partial \phi}{\partial x} + \begin{bmatrix} a & b \\ c & d \end{bmatrix}`);
   for (const tag of ['math', 'mover', 'mfrac', 'mtable']) assert.match(math, new RegExp('<' + tag));
+  const marked = mathml(String.raw`\underbrace{\cancel{x}}_{\text{定常で }0}+y`);
+  assert.match(marked, /<menclose notation="updiagonalstrike"><mi>x<\/mi><\/menclose>/u);
+  assert.match(marked, /<munder[\s\S]*定常で/u);
   assert.doesNotMatch(math, /annotation|\\frac/);
   assert.throws(() => mathml('x = \theta'), /unsupported/);
   assert.throws(() => mathml(String.raw`\href{https://example.invalid/}{x}`), /unsupported/);
@@ -141,6 +148,11 @@ test('renderer builds editable, offline and same-origin outputs from matching so
     assert.match(body, /<section class="background" id="block-basis-note"><details><summary>/u);
     assert.match(mdx.toString(), /<Background title="なぜ方向を分ける？">/u);
     assert.match(md.toString(), /\*\*なぜ方向を分ける？\*\*/u);
+    for (const view of [body, site.toString()]) {
+      assert.match(view, /class="article-comparison__cases">[\s\S]*?角度[\s\S]*?（rad）[\s\S]*?弧長[\s\S]*?（m）/u);
+    }
+    assert.match(mdx.toString(), /<Comparison>\s*<ComparisonCase label="角度">[\s\S]*?<ComparisonCase label="弧長">/u);
+    assert.match(md.toString(), /\*\*角度\*\*\s+- 角度の変化（rad）/u);
     const firstStage = fixture.blocks.find(block => block.id === 'construction').steps[0];
     for (const view of [body, site.toString(), md.toString(), mdx.toString()]) {
       const start = view.indexOf('id="block-' + firstStage.id + '"');

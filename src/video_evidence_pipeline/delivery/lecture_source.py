@@ -115,6 +115,16 @@ def apply_mdx_edits(content: dict[str, Any], original: str, edited: str) -> dict
                 fields.append((block, "title", "**", "**", _markdown, _decode_markdown))
                 for index in range(len(block["items"])):
                     fields.append((block["items"], index, "- ", "\n", _markdown, _decode_markdown))
+            case "comparison":
+                fields.append((block, "title", "**", "**", _markdown, _decode_markdown))
+                for entry in block["cases"]:
+                    fields.append(
+                        (entry, "label", '<ComparisonCase label="', '">', _escape, html.unescape)
+                    )
+                    for index in range(len(entry["items"])):
+                        fields.append(
+                            (entry["items"], index, "- ", "\n", _markdown, _decode_markdown)
+                        )
             case "paragraph":
                 fields.append((block, "text", "\n\n", "\n\n", _markdown, _decode_markdown))
             case "background":

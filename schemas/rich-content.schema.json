@@ -227,6 +227,83 @@
       "title": "CalloutBlock",
       "type": "object"
     },
+    "ComparisonBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "cases": {
+          "items": {
+            "$ref": "#/$defs/ComparisonCase"
+          },
+          "maxItems": 12,
+          "minItems": 2,
+          "title": "Cases",
+          "type": "array"
+        },
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "source_refs": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "title": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "type": {
+          "const": "comparison",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source_refs",
+        "type",
+        "title",
+        "cases"
+      ],
+      "title": "ComparisonBlock",
+      "type": "object"
+    },
+    "ComparisonCase": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Items",
+          "type": "array"
+        },
+        "label": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "items"
+      ],
+      "title": "ComparisonCase",
+      "type": "object"
+    },
     "Coverage": {
       "additionalProperties": false,
       "properties": {
@@ -1249,6 +1326,7 @@
             "background": "#/$defs/BackgroundBlock",
             "bullets": "#/$defs/BulletListBlock",
             "callout": "#/$defs/CalloutBlock",
+            "comparison": "#/$defs/ComparisonBlock",
             "equation": "#/$defs/EquationBlock",
             "figure": "#/$defs/FigureBlock",
             "heading": "#/$defs/HeadingBlock",
@@ -1283,6 +1361,9 @@
           },
           {
             "$ref": "#/$defs/BulletListBlock"
+          },
+          {
+            "$ref": "#/$defs/ComparisonBlock"
           },
           {
             "$ref": "#/$defs/StepsBlock"

@@ -40,3 +40,16 @@ criteria = [
   { id = "source-gap", description = "Records unresolved evidence without guessing" },
   { id = "human-boundary", description = "Leaves human approval to the reviewer" },
 ]
+
+[[cases]]
+id = "comparison-and-marked-equations"
+prompt = "Revise a standalone guide to two coordinate frames. It has concise unit-labelled definitions, a short three-term vector sum, and a balance where symmetry makes a derivative of a nonzero velocity vanish. The instructor marked that derivative on the board."
+expected = ["Two aligned cases preserving individual meanings and units; one-line sum and a direct mark on the derivative with its condition"]
+forbidden = ["Turning existing unit-labelled bullets into prose", "Crossing out the nonzero velocity", "Separating a short sum by summand"]
+criteria = [
+  { id = "request-bound", description = "Retains the first-use definitions and the requested outputs" },
+  { id = "traceable", description = "Distinguishes the source-supported operation from editorial markings" },
+  { id = "technical", description = "Aligns the same criteria and units in both cases; keeps the short sum on one line and anchors the condition at the zero derivative; verifies phone-size rendering" },
+  { id = "source-gap", description = "Leaves unsupported conditions unresolved" },
+  { id = "human-boundary", description = "Leaves human approval to the reviewer" },
+]

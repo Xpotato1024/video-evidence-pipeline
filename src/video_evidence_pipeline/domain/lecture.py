@@ -312,6 +312,17 @@ class BulletListBlock(ReferencedBlock):
     items: list[Text] = Field(min_length=1, max_length=128)
 
 
+class ComparisonCase(StrictModel):
+    label: Text
+    items: list[Text] = Field(min_length=1, max_length=128)
+
+
+class ComparisonBlock(ReferencedBlock):
+    type: Literal["comparison"]
+    title: Text
+    cases: list[ComparisonCase] = Field(min_length=2, max_length=12)
+
+
 class OperationStep(ReferencedBlock):
     type: Literal["operation"]
     title: Text
@@ -352,6 +363,7 @@ Block = Annotated[
     | EquationBlock
     | FigureBlock
     | BulletListBlock
+    | ComparisonBlock
     | StepsBlock
     | ProcedureBlock,
     Field(discriminator="type"),

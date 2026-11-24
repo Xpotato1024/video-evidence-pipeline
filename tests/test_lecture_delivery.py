@@ -491,3 +491,37 @@ def test_drawing_steps_require_distinct_figures_and_bound_reasons(tmp_path: Path
         stages[1]["figure_id"] = key
         with pytest.raises(ValueError, match="stage figure"):
             lecture.RichContent.model_validate(content)
+
+
+def test_comparison_keeps_order_and_units_in_editable_cases() -> None:
+    from pydantic import ValidationError
+
+    from video_evidence_pipeline.delivery.lecture_source import apply_mdx_edits
+    from video_evidence_pipeline.domain.lecture import ComparisonBlock
+
+    cases = [{"label": "Angle", "items": ["Angle (rad)"]}, {"label": "Arc", "items": ["Arc (m)"]}]
+    block = {
+        "id": "pair",
+        "type": "comparison",
+        "source_refs": ["notes"],
+        "title": "Compare",
+        "cases": cases,
+    }
+    ComparisonBlock.model_validate(block)
+    with pytest.raises(ValidationError):
+        ComparisonBlock.model_validate({**block, "cases": cases[:1]})
+    source = (
+        "# Guide\n\n{/* vep:block pair */}\n\n**Compare**\n\n<Comparison>\n\n"
+        '<ComparisonCase label="Angle">\n\n- Angle (rad)\n\n</ComparisonCase>\n\n'
+        '<ComparisonCase label="Arc">\n\n- Arc (m)\n\n</ComparisonCase>\n\n'
+        "</Comparison>\n\n{/* vep:sources */}\n\n## Sources\n"
+    )
+    content = {"title": "Guide", "blocks": [block], "equations": [], "figures": []}
+    edited = (
+        source.replace("Compare", "Circle")
+        .replace('label="Arc"', 'label="Length"')
+        .replace("Arc (m)", "Path (m)")
+    )
+    result = apply_mdx_edits(content, source, edited)["blocks"][0]
+    assert result["title"] == "Circle"
+    assert result["cases"] == [cases[0], {"label": "Length", "items": ["Path (m)"]}]

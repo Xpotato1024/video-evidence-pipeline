@@ -98,3 +98,18 @@ th { background: #edf4f6; }
 .procedure-reasons section:target, .steps > li:target { outline: 2px solid #367c80; outline-offset: .15rem; }
 .step-reason-link, .procedure-reasons section > a { display: inline-block; padding-block: .5em; }
 @media print { .step-reason-link, .procedure-reasons section > a { display: none; } }
+
+.article-comparison { margin-block: .85rem 1.1rem; }
+.article-comparison__cases { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,14rem),1fr)); gap: .8rem; align-items: stretch; }
+.article-comparison__case { min-width: 0; border: 1px solid #c9d9d4; border-radius: .35rem; padding: .7rem .85rem; background: #fff; overflow-wrap: anywhere; }
+.article-comparison__case-title { display: block; font-weight: 700; border-bottom: 2px solid #4a837b; padding-bottom: .28rem; margin-bottom: .35rem; }
+.article-comparison__case-body ul { margin: 0; padding-inline-start: 1.12em; }
+.article-comparison__case-body li { margin-block: .23rem; }
+@media (max-width: 600px) {
+  .article-comparison__cases { grid-template-columns: repeat(auto-fit,minmax(min(100%,10rem),1fr)); gap: .45rem; }
+  .article-comparison__case { padding: .55rem .55rem; font-size: .91rem; line-height: 1.6; }
+}
+@media print { .article-comparison__case { break-inside: avoid; } }
+
+math menclose[notation="updiagonalstrike"]{background:linear-gradient(to bottom right,transparent calc(50% - 1.1px),#a72c28 calc(50% - .7px),#a72c28 calc(50% + .7px),transparent calc(50% + 1.1px));print-color-adjust:exact;-webkit-print-color-adjust:exact}
+math munder mtext,math mover mtext{color:#075d59;font-family:system-ui,sans-serif;font-weight:600}

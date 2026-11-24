@@ -259,6 +259,12 @@ export function createDocument(content, equations, figures, stepEquations) {
       }
       case 'bullets': return `<section id="block-${id}" class="bullet-group"><p><strong>${rich(block.title)}</strong></p>` +
         `<ul>${block.items.map(item => `<li>${rich(item)}</li>`).join('')}</ul></section>`;
+      case 'comparison': return `<section id="block-${id}" class="article-comparison"><p><strong>${rich(block.title)}</strong></p>` +
+        '<div class="article-comparison__cases">' + block.cases.map(entry =>
+          '<section class="article-comparison__case"><strong class="article-comparison__case-title">' +
+          rich(entry.label) + '</strong><div class="article-comparison__case-body"><ul>' +
+          entry.items.map(item => `<li>${rich(item)}</li>`).join('') + '</ul></div></section>'
+        ).join('') + '</div></section>';
       case 'background': {
         const optional = lang.startsWith('ja') ? '補足' : 'Background';
         const label = `<span class="background-label">${optional}</span> ${rich(block.title)}`;
@@ -301,6 +307,16 @@ export function createDocument(content, equations, figures, stepEquations) {
         return '#'.repeat(Math.max(2, block.level)) + ' ' + markdown(block.text) + refs;
       case 'bullets': return '**' + markdown(block.title) + '**\n\n' +
         block.items.map(item => '- ' + markdown(item)).join('\n') + refs;
+      case 'comparison': {
+        const cases = block.cases.map(entry => {
+          const items = entry.items.map(item => '- ' + markdown(item)).join('\n');
+          return mode === 'mdx'
+            ? `<ComparisonCase label="${escape(entry.label)}">\n\n${items}\n\n</ComparisonCase>`
+            : '**' + markdown(entry.label) + '**\n\n' + items;
+        }).join('\n\n');
+        return '**' + markdown(block.title) + '**\n\n' +
+          (mode === 'mdx' ? '<Comparison>\n\n' + cases + '\n\n</Comparison>' : cases) + refs;
+      }
       case 'background': {
         const body = block.paragraphs.map(text => markdown(text)).join('\n\n');
         return mode === 'mdx' ? `<Background title="${escape(block.title)}">\n\n${body}${refs}\n\n</Background>`
