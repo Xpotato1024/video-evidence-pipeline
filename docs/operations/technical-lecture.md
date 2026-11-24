@@ -6,6 +6,8 @@ transition history and its v1 approvals retain their original meaning.
 
 ## Run a lecture exchange
 
+See the [ownership decision](../decisions/0002-lecture-production-boundary.md) and the [exchange criteria](../../config/lecture-guidance.yaml). New requests carry the text used at preparation. Existing requests keep the criteria and audit targets of their version.
+
 Install VEP and the renderer from the source checkout. Use the pinned dependencies and local browser
 installed by `npm ci --prefix renderer` and `npx --prefix renderer playwright install chromium webkit`.
 Install Poppler's `pdftotext` and `pdftoppm` for direct PDF sources. Install a Japanese font with the glyphs
@@ -79,7 +81,7 @@ to `lecture render`. Pass the bundle's `inputs/` as `--assets` if the package co
 To edit the portable MDX, copy `lesson.mdx` from a verified render or review package and edit the
 copy. Retain its block markers, component structure and provenance references. Prepare the next version and
 import the edited title, paragraphs, heading and callout text, displayed equations, step text/calculations and
-figure labels. For structural, source-reference, table, figure geometry or data edits, update the typed
+figure labels. Table captions, headers and cell text can also be edited. For structural, source-reference, figure geometry or data edits, update the typed
 content instead. A new render and both audits are required for review of either edit route.
 
 ```sh
@@ -111,3 +113,16 @@ Use a `bullets` block with `title` and `items` for parallel facts. A `steps` blo
 A `background` block contains a question in `title`, ordered `paragraphs` with inline notation, and its own `source_refs`. Standalone and same-origin HTML use native disclosures. PDF includes their expanded contents. The portable MDX view preserves the editable title, paragraphs and source binding in a `Background` component. Keep prerequisites needed to read the main formula visible even when the question is closed.
 
 For worked methods the author can supply a `procedure` block with `kind: calculation` or `kind: drawing`. Each operation has a short actionable `rationale`, an optional typeset `expression` and a separate `explanation`. The renderer places explanations after the procedure and generates reciprocal fragment links. Bind a separate cumulative `figure_id` to each drawing step. A step must cite all sources used in its figure. The same fields are retained in editable MDX. Earlier `steps` blocks retain their existing layout.
+
+### Reuse a construction across stages
+
+Define the coordinate canvas and initial marks in the first geometry figure. A later figure can extend an earlier geometry figure and provide only its new marks. Reference each resulting figure ID from its drawing step. Keep the parent sources in the child’s source references. The renderer retains the original typed specification and resolves each stage for all output formats.
+
+```json
+[
+  {"id":"axis","kind":"geometry","alt":"Horizontal axis","caption":"Draw the axis.","source_refs":["notes"],"spec":{"width":320,"height":160,"items":[{"kind":"arrow","x1":24,"y1":120,"x2":290,"y2":120}]}},
+  {"id":"point","kind":"geometry","alt":"Point on axis","caption":"Mark the observation.","source_refs":["notes"],"spec":{"extends":"axis","items":[{"kind":"circle","cx":175,"cy":120,"r":4,"fill":"black"}]}}
+]
+```
+
+Both stages share dimensions. Each stage allows up to 160 cumulative marks. A missing parent, changed coordinate canvas or dropped source fails validation. For a page photograph use a bound raster crop. Content-addressed figure files also appear in the static site. Rich text can cite numbered equations in tables, lists and comparisons. A step with its own reason generates a link in each direction.

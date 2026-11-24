@@ -10,7 +10,7 @@ import { mermaidSource } from '../browser.mjs';
 import { renderChart, toCsv } from '../chart.mjs';
 import { hash, safeSvg } from '../common.mjs';
 import { createDocument, inline, mathml } from '../document.mjs';
-import { geometrySvg } from '../geometry.mjs';
+import { geometrySvg, resolveGeometryStages } from '../geometry.mjs';
 
 const exec = promisify(execFile);
 const fixture = {
@@ -46,7 +46,7 @@ const fixture = {
     { id: 'flow-block', type: 'figure', figure_id: 'flow', source_refs: ['supplement'] },
     { id: 'crop-block', type: 'figure', figure_id: 'crop', source_refs: ['handout:P0002'] },
     { id: 'values-heading', type: 'heading', level: 2, text: '測定値', source_refs: ['current'] },
-    { id: 'table-block', type: 'table', caption: '値の並び', headers: ['値', '単位'], rows: [['4.5', '1']], source_refs: ['current'] },
+    { id: 'table-block', type: 'table', caption: '値の並び', headers: ['値', '単位'], rows: [['4.5', '1'], ['参照 @eq(formula) [測定](#block-values-heading)', '1']], source_refs: ['current'] },
     { id: 'steps', type: 'steps', source_refs: ['current'], steps: [
       { id: 'solve', title: '面積を計算する', rationale: '幅と高さの積を用いる。', symbolic: String.raw`A = b h`,
         substitution: 'A = 2 \u00d7 3', intermediate: 'A=6.0000', result: String.raw`A = 6.000\,\mathrm{m}^2`, source_refs: ['current'] },
@@ -156,7 +156,7 @@ test('renderer builds editable, offline and same-origin outputs from matching so
     const [body, notes] = html.toString().split('<section class="sources">');
     assert.equal((body.match(/href="#note-1"/g) ?? []).length, 1);
     assert.doesNotMatch(body, /<p class="source-link"|>合成資料<|<p>数値代入<\/p>/);
-    assert.match(body, /<ul><li><strong>縦<\/strong> <math[\s\S]*?<\/math><\/li><li>横<\/li><\/ul>/u);
+    assert.match(body, /<ul><li><strong>縦<\/strong> <span class="inline-math"><math[\s\S]*?<\/math><\/span><\/li><li>横<\/li><\/ul>/u);
     assert.match(body, /href="#block-select"/u);
     assert.match(body, /<li id="block-connect">/u);
     assert.match(mdx.toString(), /<Step title="値を選ぶ">[\s\S]*?```math id="actions-select-expression"/u);
@@ -177,6 +177,8 @@ test('renderer builds editable, offline and same-origin outputs from matching so
     }
     for (const view of [md.toString(), mdx.toString()]) {
       assert.ok(view.includes('[式 (2)](#eq-formula)'));
+      assert.ok(view.includes('参照 [式 (2)](#eq-formula) [測定](#block-values-heading)'));
+      assert.ok(view.includes('id="block-values-heading"'));
       assert.match(view, /<a id="eq-select"><\/a>\s+\(1\)/u);
     }
     const firstStage = fixture.blocks.find(block => block.id === 'construction').steps[0];
@@ -231,4 +233,16 @@ test('renderer builds editable, offline and same-origin outputs from matching so
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test('a drawing stage inherits the same canvas and every previous mark', () => {
+  const base = fixture.figures.find(item => item.id === 'axes');
+  const child = { ...base, id: 'point', spec: { extends: 'axes', items: [{kind:'circle', cx:80, cy:80, r:3}] } };
+  const [, stage] = resolveGeometryStages([base, child]);
+  assert.equal(stage.spec.width, base.spec.width);
+  assert.deepEqual(stage.spec.items, [...base.spec.items, ...child.spec.items]);
+  assert.equal(child.spec.items.length, 1);
+  assert.throws(() => resolveGeometryStages([child, base]), /earlier/);
+  assert.throws(() => resolveGeometryStages([base, {...child, source_refs:[]}]), /sources/);
+  assert.throws(() => resolveGeometryStages([base, {...child, spec:{...child.spec, width:400}}]), /fields/);
 });

@@ -1,0 +1,27 @@
+revision: "1"
+authoring: |-
+  ## Establish the scope
+
+  Read the current evidence, ambiguity list, assignment, output mode and caller profile. Trace each material teaching decision to its source locator and planned block before writing. Repeated explanations in distinct contexts, a single explicit warning, a board check and an invitation to solve can all be significant. Discount duplicate captions and verbal tics. Attribute current instruction, earlier lectures and editorial reconstruction separately. Keep unresolved evidence visible.
+
+  ## Write the manuscript
+
+  1. State the givens and the answer the reader must produce. For practice, place the question before hints. For a derivation, show the target after defining its notation. Begin with the governing equation, definition or diagram. Identify the missing part before computing it, and substitute it back into that relation.
+  2. Put each choice and its immediate operation in a procedure. The student should be able to reproduce the next equality with the optional explanation closed. Keep detailed reasons in the step's linked explanation. Differentiate both factors of a product when necessary. Show what is fixed, which coefficient is needed, when a mixed derivative can be exchanged and why the indicated contributions cancel. Use equivalent detail for parallel directions. Reserve numerical substitution and rounding fields for numerical work.
+  3. Define symbols beside their first equation or figure, with units and orientation where relevant. Use short grouped bullets for definitions, comparisons for parallel cases and tables for row-wise checks. Use consistent inline TeX. Reading actions such as recall, calculate, draw, explain or observe need source support; repetition alone cannot establish an exam prediction.
+  4. Use numbered equations and stable references. Keep short sums on one line, align successive operations and group simultaneous components with a stretching brace. Put an annotation on the affected term. Distinguish zero derivatives, zero factors, pairwise cancellations and divisions by nonzero factors. Include the clean result.
+  5. Place a diagram immediately before the text that interprets it. Match symbols, scale, axes and boundary conditions to the calculation. Give each drawing step its own figure showing the construction so far. Select the renderer's geometry, quantitative chart, diagram or verified crop according to the evidence.
+
+  ## Hand off
+
+  Check the source-to-block map in reverse. A cited heading alone does not teach the calculation. Separate documented lecturer emphasis from additions. Verify the answer, the learner's route from givens to result, orientation and units, and links in reading and print views. Use the public lecture CLI to validate and render. Consult the technical lecture operations guide for manuscript syntax and output formats. Change the source to correct findings and render a new version.
+visual_planning: |-
+  Select the comparison or spatial relationship the student must read. Cite sources for the quantities, dimensions, signs, viewing direction, axes and boundary conditions. Choose a chart with units and data for a measured or calculated trend, geometry for an apparatus or construction, and a flowchart for a process. A verified page crop preserves original observations when a reconstruction would be speculative. Identify derived curves and illustrative dimensions.
+
+  Place the visual before its interpretation. Introduce symbols at their first visible use; show the viewing side and legend for out-of-plane vectors. Preserve scale and reference axes across construction stages. Include alternative text, a caption and the evidence references for each visual. Check labels, domain and sampled values against the governing equation.
+visual_audit: |-
+  Start from the verified sources. Locate each apparatus, observation, drawing operation and point the lecturer asked the student to identify. Match each to a rendered figure, equation or coverage entry. Record missing visuals against the containing block or coverage topic. Keep material uncertainty and its source explicit.
+
+  Inspect actual HTML and PDF, including a narrow viewport. Check axes, viewing direction and handedness, symbols at first use, dimensions, units, boundaries, supports, loads, plotted values, and whether captions match the picture. Recalculate representative points. Check vector weight and indices, direct annotations, grouping of short sums and equalities, section notes and their targets. Open optional background by keyboard and check that it prints.
+
+  Read each problem with the detailed reasons closed. Use its givens, numbered equations and operations to reproduce the result. Follow the links between the overview, step and explanation in both directions. Compare adjacent drawing stages on the same axes; each must show its new marks. Track the scope and signs of cancelled terms. Record evidence-linked findings and target IDs. An unavailable view cannot be marked as inspected.

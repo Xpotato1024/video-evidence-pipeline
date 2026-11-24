@@ -1,4 +1,5 @@
-import katex from 'katex';
+import { inline, markdown, prose, symbolMarkup } from './document/inline.mjs';
+export { inline, mathml } from './document/inline.mjs';
 import { escape, identifier, label, sourceIdentifier } from './common.mjs';
 
 const messages = {
@@ -24,83 +25,14 @@ const messages = {
   },
 };
 
-const blockedMath = /\\(?:href|url|includegraphics|html\w*|class|style|color|textcolor|definecolor|require|def|gdef|edef|xdef|let|futurelet|newcommand|renewcommand|providecommand|global)\b/u;
-const unrenderedMath = /\$\$|\\(?:\(|\[|frac\b|dfrac\b|partial\b|begin\{|sqrt\b|vec\b|sum\b)/u;
-
-export function mathml(source, displayMode = true) {
-  if (typeof source !== 'string' || !source.trim() || source.length > 4096 ||
-      /[`\x00-\x09\x0b-\x1f\x7f]/u.test(source) || blockedMath.test(source))
-    throw new Error('Invalid or unsupported TeX source');
-  const result = katex.renderToString(source, {
-    output: 'mathml', displayMode, trust: false, strict: 'error',
-    throwOnError: true, maxExpand: 100, maxSize: 8,
-  });
-  // The editable bundle holds .tex files and the reading view holds
-  // presentation MathML plus accessibility labels supplied by the document.
-  const math = /<math(?:\s[^>]*)?>[\s\S]*<\/math>/u.exec(result)?.[0];
-  if (!math || /<merror|<script|<(?:maction|mglyph)\b|(?:href|src)=/iu.test(math) ||
-      !/<m(?:i|n|o|frac|table|space)\b/u.test(math))
-    throw new Error('KaTeX returned invalid presentation MathML');
-  return math.replace(/<annotation\b[^>]*>[\s\S]*?<\/annotation>/gu, '');
-}
-
-function prose(text) {
-  if (typeof text !== 'string' || unrenderedMath.test(text)) throw new Error('Use a numbered equation or step for TeX');
-  return escape(text);
-}
-
-// Portable prose has a deliberately small inline vocabulary. Every text leaf is
-// escaped and links can only target blocks in the same verified document.
-export function inline(text, targets = new Set(), equationLink) {
-  const token = /\\\(([^\n]*?)\\\)|\*\*([^*\n]+)\*\*|\[([^\[\]\n]+)\]\(#block-([A-Za-z0-9][A-Za-z0-9._-]{0,79})\)|@eq\(([A-Za-z0-9][A-Za-z0-9._-]{0,79})\)/gu;
-  let cursor = 0;
-  let out = '';
-  for (const match of text.matchAll(token)) {
-    out += prose(text.slice(cursor, match.index));
-    const [, tex, strong, link, id, equationId] = match;
-    if (tex !== undefined) out += mathml(tex, false);
-    else if (strong !== undefined) out += '<strong>' + inline(strong, targets, equationLink) + '</strong>';
-    else if (equationId !== undefined) out += equationLink ? equationLink(equationId) : prose(match[0]);
-    else {
-      if (!targets.has(id)) throw new Error('Missing lecture link target: ' + id);
-      out += `<a href="#block-${id}">${prose(link)}</a>`;
-    }
-    cursor = match.index + match[0].length;
-  }
-  return out + prose(text.slice(cursor));
-}
-
-// Older editable packages store bare symbol names. Preserve any vector styling
-// actually used by the equation; descriptive glossary keys stay plain text.
-function symbolMarkup(key, tex) {
-  if (!/^[A-Za-z\p{Script=Greek}](?:_[A-Za-z0-9\p{Script=Greek}]+)?$/u.test(key)) return key;
-  const greek = { 'θ': '\\theta', 'φ': '\\phi', 'ψ': '\\psi', 'Ω': '\\Omega',
-    'μ': '\\mu', 'ν': '\\nu', 'ρ': '\\rho' };
-  const [letter, index] = key.split('_');
-  const base = greek[letter] ?? letter;
-  const sub = index ? '_{' + (greek[index] ?? index) + '}' : '';
-  const decorated = [...tex.matchAll(/(\\(?:mathbf|boldsymbol|vec))\s*(?:\{([a-zA-Z])\}|([a-zA-Z]))(?:_(?:\{([^{}\s]+)\}|(\\[A-Za-z]+|[A-Za-z0-9])))?/gu)]
-    .find(m => (m[2] ?? m[3]) === base && (m[4] ?? m[5]) === (greek[index] ?? index));
-  const expression = decorated ? decorated[1] + '{' + base + '}' + sub : base + sub;
-  return '\\(' + expression + '\\)';
-}
-
-const markdown = (text, table = false) => escape(text)
-  .replace(/[\\`*_{}\[\]$]/gu, '\\$&')
-  .replace(/(^|\n)(?=[#>+\-]|\d+[.)])/gu, table ? '$1' : '$1\\')
-  .replace(/(^|\n)(import|export)\b/gu, (_, line, keyword) =>
-    line + (keyword === 'import' ? '&#105;mport' : '&#101;xport'))
-  .replace(/\|/gu, table ? '\\|' : '|')
-  .replace(/\r?\n/gu, table ? ' / ' : '\n');
-
 const htmlTable = (headers, rows, caption, renderCell = escape) =>
   `<div class="table-scroll" tabindex="0" aria-label="${escape(caption)}"><table><caption>${renderCell(caption)}</caption><thead><tr>` +
   headers.map(value => `<th scope="col">${renderCell(value)}</th>`).join('') + '</tr></thead><tbody>' +
   rows.map(row => '<tr>' + row.map(value => `<td>${renderCell(value)}</td>`).join('') + '</tr>').join('') +
   '</tbody></table></div>';
 
-function mdTable(headers, rows) {
-  const rowText = row => `| ${row.map(value => markdown(String(value), true)).join(' | ')} |`;
+function mdTable(headers, rows, renderCell) {
+  const rowText = row => `| ${row.map(value => renderCell(String(value), true)).join(' | ')} |`;
   return [
     rowText(headers),
     `| ${headers.map(() => '---').join(' | ')} |`,
@@ -134,7 +66,6 @@ export function createDocument(content, equations, figures, stepEquations) {
   const hasSteps = block => block.type === 'steps' || block.type === 'procedure';
   const operations = block => hasSteps(block) ? block.steps.filter(step => step.type === 'operation') : [];
   for (const step of content.blocks.flatMap(operations)) targets.add(identifier(step.id));
-  const rich = text => inline(text, targets);
   const numbered = new Map();
   for (const block of content.blocks) {
     const entries = block.type === 'equation' ? [block] : operations(block);
@@ -145,16 +76,26 @@ export function createDocument(content, equations, figures, stepEquations) {
       numbered.set(id, numbered.size + 1);
     }
   }
+  const navText = text => inline(text, targets, id => escape(equationLink(id, 'text'))).replace(/<\/?a(?:\s[^>]*)?>/gu, '');
   const refPrefix = lang.startsWith('ja') ? '式' : 'Eq.';
   function equationLink(id, mode) {
     if (!numbered.has(id)) throw new Error('Missing numbered equation: ' + id);
     const name = refPrefix + ' (' + numbered.get(id) + ')';
+    if (mode === 'text') return name;
     return mode === 'html' ? `<a class="equation-ref" href="#eq-${id}">${name}</a>` : `[${name}](#eq-${id})`;
   }
-  const linkedProse = value => inline(value, targets, id => equationLink(id, 'html'));
-  const linkedMarkdown = value => !value.includes('@eq(') ? markdown(value) : value.split(/(\\\([^\n]*?\\\)|@eq\([A-Za-z0-9][A-Za-z0-9._-]{0,79}\))/gu)
-    .map(part => /^@eq\([A-Za-z0-9][A-Za-z0-9._-]{0,79}\)$/u.test(part)
-      ? equationLink(part.slice(4, -1), 'md') : markdown(part)).join('');
+  const rich = value => inline(value, targets, id => equationLink(id, 'html'));
+  function linkedMarkdown(value, table = false) {
+    const tokens = /(\\\([^\n]*?\\\)|@eq\([A-Za-z0-9][A-Za-z0-9._-]{0,79}\)|\[[^\[\]\n]+\]\(#block-[A-Za-z0-9][A-Za-z0-9._-]{0,79}\))/gu;
+    return value.split(tokens).map(part => {
+      if (part.startsWith('@eq(') && /^@eq\([A-Za-z0-9][A-Za-z0-9._-]{0,79}\)$/u.test(part))
+        return equationLink(part.slice(4, -1), 'md');
+      const link = /^\[([^\[\]\n]+)\]\(#block-([A-Za-z0-9][A-Za-z0-9._-]{0,79})\)$/u.exec(part);
+      if (!link) return markdown(part, table);
+      if (!targets.has(link[2])) throw new Error('Missing lecture link target: ' + link[2]);
+      return '[' + markdown(link[1], table) + '](#block-' + link[2] + ')';
+    }).join('');
+  }
   function numberHtml(body, id) {
     if (!numbered.has(id)) return body;
     return `<div class="numbered-equation" id="eq-${id}" tabindex="-1">${body}<span class="equation-number">(${numbered.get(id)})</span></div>`;
@@ -191,7 +132,7 @@ export function createDocument(content, equations, figures, stepEquations) {
     : operations(block).map(step => ({ id: step.id, level: 3, text: step.title })));
   const navigable = content.output_mode === 'worked_explanation' && headings.length > 1;
   const contents = navigable ? `<nav class="study-nav" aria-label="${navigation}"><details><summary>${navigation}</summary><ol>` +
-    headings.map(block => `<li class="level-${block.level}"><a href="#block-${identifier(block.id)}">${rich(block.text)}</a></li>`).join('') +
+    headings.map(block => `<li class="level-${block.level}"><a href="#block-${identifier(block.id)}">${navText(block.text)}</a></li>`).join('') +
     '</ol></details></nav>' : '';
   const marker = index => `<sup class="note-mark"><a href="#note-${index}" aria-label="${words.sourceList} ${index}">[${index}]</a></sup>`;
   function endnote(section, index) {
@@ -251,7 +192,7 @@ export function createDocument(content, equations, figures, stepEquations) {
   function explanationsHtml(steps) {
     return `<section class="procedure-reasons"><h3>${reasonsLabel}</h3>` +
       steps.map((step, i) => `<section id="why-${identifier(step.id)}" tabindex="-1"><h4>${stepLabel(i + 1)}　${rich(step.title)}</h4>` +
-        `<p class="prose">${linkedProse(step.explanation)}</p><a href="#block-${step.id}">${returnTo(i + 1)}</a></section>`).join('') + '</section>';
+        `<p class="prose">${rich(step.explanation)}</p><a href="#block-${step.id}">${returnTo(i + 1)}</a></section>`).join('') + '</section>';
   }
 
   function stepHtml(block, step, mode) {
@@ -263,14 +204,14 @@ export function createDocument(content, equations, figures, stepEquations) {
       const stage = guided && step.figure_id ? figureHtml(figures.get(step.figure_id), mode, 'stage-' + step.id) : '';
       const why = guided ? `<a class="step-reason-link" href="#why-${identifier(step.id)}">${whyLabel}</a>` : '';
       return `<li id="block-${identifier(step.id)}"${guided ? ' tabindex="-1"' : ''}><p class="step-title">${rich(step.title)}${back}</p>` +
-        stage + `<p class="prose">${linkedProse(step.rationale)}</p>` + (expression ? numberHtml(eqHtml(expression, step.id), step.id) : '') + why + '</li>';
+        stage + `<p class="prose">${rich(step.rationale)}</p>` + (expression ? numberHtml(eqHtml(expression, step.id), step.id) : '') + why + '</li>';
     }
     const numeric = [...parts.entries()].map(([kind, expression]) => {
       const equation = eqHtml(expression, step.id, kind);
       return content.output_mode === 'submission_answer'
         ? `<div class="step-equation"><p>${words[kind]}</p>${equation}</div>` : equation;
     }).join('');
-    return `<li id="${block.id}-${step.id}"><p class="step-title">${rich(step.title)}</p><p>${linkedProse(step.rationale)}</p>` +
+    return `<li id="${block.id}-${step.id}"><p class="step-title">${rich(step.title)}</p><p>${rich(step.rationale)}</p>` +
       (content.output_mode === 'submission_answer' ? numeric : `<div class="calculation">${numeric}</div>`) + '</li>';
   }
 
@@ -299,7 +240,7 @@ export function createDocument(content, equations, figures, stepEquations) {
         return `<section class="background" id="block-${id}"><details><summary>${label}</summary>${body}</details>` +
           `<div class="background-print"><p class="background-question">${label}</p>${body}</div></section>`;
       }
-      case 'paragraph': return `<p id="block-${id}" class="prose">${linkedProse(block.text)}</p>`;
+      case 'paragraph': return `<p id="block-${id}" class="prose">${rich(block.text)}</p>`;
       case 'callout': return `<aside id="block-${id}"><p><strong>${rich(block.title)}</strong></p><p class="prose">${rich(block.text)}</p></aside>`;
       case 'table': return `<section id="block-${id}">${htmlTable(block.headers, block.rows, block.caption, rich)}</section>`;
       case 'equation': {
@@ -323,41 +264,41 @@ export function createDocument(content, equations, figures, stepEquations) {
   function mdFigure(figure, mode) {
     return mode === 'mdx'
       ? `<Figure assetId="${figure.id}" src="${figure.path}" alt="${escape(figure.alt)}" caption="${escape(figure.caption)}" />`
-      : `![${markdown(figure.alt)}](${figure.path})\n\n${markdown(figure.caption)}`;
+      : `![${linkedMarkdown(figure.alt)}](${figure.path})\n\n${linkedMarkdown(figure.caption)}`;
   }
 
   function md(block, mode) {
     const refs = mdReferences(block);
     switch (block.type) {
       case 'heading':
-        return '#'.repeat(Math.max(2, block.level)) + ' ' + markdown(block.text) + refs;
-      case 'bullets': return '**' + markdown(block.title) + '**\n\n' +
-        block.items.map(item => '- ' + markdown(item)).join('\n') + refs;
+        return '#'.repeat(Math.max(2, block.level)) + ' ' + linkedMarkdown(block.text) + refs;
+      case 'bullets': return '**' + linkedMarkdown(block.title) + '**\n\n' +
+        block.items.map(item => '- ' + linkedMarkdown(item)).join('\n') + refs;
       case 'comparison': {
         const cases = block.cases.map(entry => {
-          const items = entry.items.map(item => '- ' + markdown(item)).join('\n');
+          const items = entry.items.map(item => '- ' + linkedMarkdown(item)).join('\n');
           return mode === 'mdx'
             ? `<ComparisonCase label="${escape(entry.label)}">\n\n${items}\n\n</ComparisonCase>`
-            : '**' + markdown(entry.label) + '**\n\n' + items;
+            : '**' + linkedMarkdown(entry.label) + '**\n\n' + items;
         }).join('\n\n');
-        return '**' + markdown(block.title) + '**\n\n' +
+        return '**' + linkedMarkdown(block.title) + '**\n\n' +
           (mode === 'mdx' ? '<Comparison>\n\n' + cases + '\n\n</Comparison>' : cases) + refs;
       }
       case 'background': {
-        const body = block.paragraphs.map(text => markdown(text)).join('\n\n');
+        const body = block.paragraphs.map(text => linkedMarkdown(text)).join('\n\n');
         return mode === 'mdx' ? `<Background title="${escape(block.title)}">\n\n${body}${refs}\n\n</Background>`
-          : '**' + markdown(block.title) + '**\n\n' + body + refs;
+          : '**' + linkedMarkdown(block.title) + '**\n\n' + body + refs;
       }
       case 'paragraph': return linkedMarkdown(block.text) + refs;
       case 'callout': return mode === 'mdx'
-        ? `<Callout title="${escape(block.title)}">\n\n${markdown(block.text)}${refs}\n\n</Callout>`
-        : '> **' + markdown(block.title) + '**\n>\n' + markdown(block.text).replaceAll('\n', '\n> ') + refs;
+        ? `<Callout title="${escape(block.title)}">\n\n${linkedMarkdown(block.text)}${refs}\n\n</Callout>`
+        : '> **' + linkedMarkdown(block.title) + '**\n>\n' + linkedMarkdown(block.text).replaceAll('\n', '\n> ') + refs;
       case 'table':
-        return '**' + markdown(block.caption) + '**\n\n' + mdTable(block.headers, block.rows) + refs;
+        return '**' + linkedMarkdown(block.caption) + '**\n\n' + mdTable(block.headers, block.rows, linkedMarkdown) + refs;
       case 'equation': {
         const equation = equations.get(block.equation_id);
         return numberMd(block.id) + mdMath(equation.tex, equation.id) + eqMeta(equation).map(([name, value]) =>
-          `\n\n**${name}** ${markdown(value)}`).join('') + mdReferences(equation) + mdReferences(block, equation.source_refs);
+          `\n\n**${name}** ${linkedMarkdown(value)}`).join('') + mdReferences(equation) + mdReferences(block, equation.source_refs);
       }
       case 'figure': {
         const figure = figures.get(block.figure_id);
@@ -379,8 +320,9 @@ export function createDocument(content, equations, figures, stepEquations) {
               (figure.data ? `\n\n[${words.values}](data/${figure.id}.csv)` : '') + '\n\n' : '';
             body = `<a id="block-${anchor}"></a>\n\n` + stage + body + `\n\n[${whyLabel}](#why-${anchor})`;
           }
+          if (!guided && step.type === 'operation') body = `<a id="block-${identifier(step.id)}"></a>\n\n` + body;
           return mode === 'mdx' ? `<Step title="${escape(step.title)}">\n\n${body}\n\n</Step>`
-            : `${index + 1}. **${markdown(step.title)}**\n\n` + body.split('\n').map(line => line ? '   ' + line : '').join('\n');
+            : `${index + 1}. **${linkedMarkdown(step.title)}**\n\n` + body.split('\n').map(line => line ? '   ' + line : '').join('\n');
         }).join('\n\n');
         const reasons = guided ? '\n\n### ' + reasonsLabel + '\n\n' + block.steps.map((step, i) =>
           `<a id="why-${identifier(step.id)}"></a>\n\n#### ${stepLabel(i + 1)}\n\n${linkedMarkdown(step.explanation)}\n\n[${returnTo(i + 1)}](#block-${step.id})`).join('\n\n') : '';
@@ -409,7 +351,8 @@ export function createDocument(content, equations, figures, stepEquations) {
       return `- ${markdown(source.id + ' · ' + words[source.kind] + ' · ' + source.title + (details ? ' · ' + details : ''))}`;
     }).join('\n');
     const blocks = content.blocks.map(block =>
-      (mode === 'mdx' ? `{/* vep:block ${identifier(block.id)} */}\n\n` : '') + md(block, mode));
+      (mode === 'mdx' ? `{/* vep:block ${identifier(block.id)} */}\n\n` : '') +
+      `<a id="block-${identifier(block.id)}"></a>\n\n` + md(block, mode));
     return `# ${markdown(content.title)}\n\n` + blocks.join('\n\n') +
       (mode === 'mdx' ? '\n\n{/* vep:sources */}' : '') + `\n\n## ${words.sourceList}\n\n${list}\n`;
   }

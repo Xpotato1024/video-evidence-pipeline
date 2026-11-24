@@ -5,7 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated, Literal, Self
 
-from pydantic import AfterValidator, Field, JsonValue, StringConstraints, model_validator
+from pydantic import (
+    AfterValidator,
+    Field,
+    JsonValue,
+    StringConstraints,
+    model_serializer,
+    model_validator,
+)
 
 from video_evidence_pipeline.domain import StrictModel, UtcDateTime
 from video_evidence_pipeline.domain.authoring import AgentIdentity, AgentRole, AuditSeverity
@@ -186,9 +193,17 @@ class LectureAsset(StrictModel):
         return self
 
 
+class LectureGuidance(StrictModel):
+    revision: Literal["1"] = "1"
+    authoring: Text
+    visual_planning: Text
+    visual_audit: Text
+
+
 class LectureRequest(StrictModel):
     schema_version: Literal["2.0"] = "2.0"
     job_id: JobId
+    guidance: LectureGuidance | None = None
     source_state: Literal[
         "EVIDENCE_READY",
         "DRAFTED",
@@ -212,6 +227,14 @@ class LectureRequest(StrictModel):
     crop_assets: list[LectureAsset] = Field(default_factory=list, max_length=10000)
     legacy_draft_sha256: Sha256 | None = None
     external_api_allowed: bool
+
+    @model_serializer(mode="wrap")
+    def serialize_frozen_request(self, handler):
+        fields = handler(self)
+        # The original v2 request fingerprint did not include a null guidance field.
+        if self.guidance is None:
+            fields.pop("guidance", None)
+        return fields
 
 
 class Equation(StrictModel):

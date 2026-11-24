@@ -7,7 +7,7 @@ import { cropImage, imagePage, launchChromium, mermaidSource, mermaidSvg, offlin
 import { renderChart, toCsv } from './chart.mjs';
 import { hash, identifier, json, label, object, safeSvg, sourceIdentifier } from './common.mjs';
 import { createDocument, mathml } from './document.mjs';
-import { geometrySvg } from './geometry.mjs';
+import { geometrySvg, resolveGeometryStages } from './geometry.mjs';
 
 const rendererDirectory = dirname(fileURLToPath(import.meta.url));
 const inputLimit = 4_000_000;
@@ -72,7 +72,7 @@ function equation(source, id) {
 async function buildFigures(content, context, write, inputAssetDirectory) {
   const figures = new Map();
   const copiedInputs = new Set();
-  for (const figure of content.figures) {
+  for (const figure of resolveGeometryStages(content.figures)) {
     const id = identifier(figure.id);
     if (figures.has(id)) throw new Error('Duplicate figure ID ' + id);
     label(figure.alt, 450);
@@ -230,7 +230,7 @@ async function printReview(context, html, equationCount) {
 
 async function toolchain(browser) {
   const manifest = JSON.parse(await readFile(join(rendererDirectory, 'package.json'), 'utf8'));
-  const files = ['browser.mjs', 'chart.mjs', 'common.mjs', 'document.mjs', 'geometry.mjs', 'lesson.css', 'package.json', 'package-lock.json', 'render.mjs'];
+  const files = ['browser.mjs', 'chart.mjs', 'common.mjs', 'document.mjs', 'document/inline.mjs', 'geometry.mjs', 'lesson.css', 'package.json', 'package-lock.json', 'render.mjs'];
   const hashes = await Promise.all(files.map(async path => [path, hash(await readFile(join(rendererDirectory, path)))]));
   const fonts = {};
   for (const name of ['sans-serif', 'math', 'Noto Sans CJK JP']) {

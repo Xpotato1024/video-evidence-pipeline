@@ -197,6 +197,42 @@
       "title": "LectureAsset",
       "type": "object"
     },
+    "LectureGuidance": {
+      "additionalProperties": false,
+      "properties": {
+        "authoring": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Authoring",
+          "type": "string"
+        },
+        "revision": {
+          "const": "1",
+          "default": "1",
+          "title": "Revision",
+          "type": "string"
+        },
+        "visual_audit": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Visual Audit",
+          "type": "string"
+        },
+        "visual_planning": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Visual Planning",
+          "type": "string"
+        }
+      },
+      "required": [
+        "authoring",
+        "visual_planning",
+        "visual_audit"
+      ],
+      "title": "LectureGuidance",
+      "type": "object"
+    },
     "LectureSource": {
       "additionalProperties": false,
       "properties": {
@@ -554,6 +590,17 @@
     "external_api_allowed": {
       "title": "External Api Allowed",
       "type": "boolean"
+    },
+    "guidance": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LectureGuidance"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "job_id": {
       "maxLength": 63,

@@ -254,6 +254,14 @@ def test_audit_rules_and_omissions_use_frozen_sources(tmp_path: Path, monkeypatc
     _write(options, values)
     prepared = tmp_path / "prepared"
     request, _ = lecture.prepare_lecture(index, options, prepared, documents=True)
+    assert request.guidance is not None
+    monkeypatch.setattr(
+        lecture,
+        "_lecture_guidance",
+        lambda: pytest.fail("Read current criteria for a frozen request"),
+    )
+    same, reused = lecture.prepare_lecture(index, options, prepared, documents=True)
+    assert reused and same == request
     draft = _fixture_content(request)
     omitted = draft["sources"].pop()["id"]
     content = _write(tmp_path / "content.json", draft)
@@ -551,3 +559,28 @@ def test_comparison_keeps_order_and_units_in_editable_cases() -> None:
     result = apply_mdx_edits(content, source, edited)["blocks"][0]
     assert result["title"] == "Circle"
     assert result["cases"] == [cases[0], {"label": "Length", "items": ["Path (m)"]}]
+
+
+def test_table_mdx_edit_preserves_unchanged_multiline_source() -> None:
+    from video_evidence_pipeline.delivery.lecture_source import apply_mdx_edits
+
+    content = {
+        "title": "Guide",
+        "figures": [],
+        "equations": [],
+        "blocks": [
+            {
+                "id": "values",
+                "type": "table",
+                "caption": "Table",
+                "headers": ["A", "B"],
+                "rows": [["a\nb", "old"]],
+            }
+        ],
+    }
+    mdx = (
+        "# Guide\n\n{/* vep:block values */}\n\n**Table**\n\n| A | B |\n"
+        "| --- | --- |\n| a / b | old |\n\n{/* vep:sources */}\n"
+    )
+    edited = mdx.replace("old", "new").replace("\n", "\r\n")
+    assert apply_mdx_edits(content, mdx, edited)["blocks"][0]["rows"] == [["a\nb", "new"]]

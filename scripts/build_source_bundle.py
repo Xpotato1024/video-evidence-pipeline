@@ -24,6 +24,8 @@ REQUIRED_FILES = (
     ".agents/skills/refine-video-transcript/SKILL.md",
     "config/asr-profiles.yaml",
     "schemas/job-spec.schema.json",
+    "config/lecture-guidance.yaml",
+    "renderer/document/inline.mjs",
     "renderer/package-lock.json",
     "renderer/render.mjs",
     "containers/asr/Dockerfile",

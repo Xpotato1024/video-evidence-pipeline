@@ -19,6 +19,29 @@ function paint(value, fallback) {
   return color;
 }
 
+// A later construction stage can add marks on the same coordinate canvas.
+export function resolveGeometryStages(figures) {
+  const stages = new Map();
+  return figures.map(figure => {
+    if (figure.kind !== 'geometry') return figure;
+    let spec = figure.spec;
+    if (Object.hasOwn(spec, 'extends')) {
+      const parent = stages.get(spec.extends);
+      if (!parent) throw new Error('Geometry stage needs an earlier geometry figure: ' + spec.extends);
+      object(spec, ['extends', 'items', 'physical_model']);
+      if (!Array.isArray(spec.items) || !spec.items.length || parent.spec.items.length + spec.items.length > 160)
+        throw new Error('Geometry stage needs additional items and allows 160 cumulative items');
+      if (!parent.source_refs.every(id => figure.source_refs.includes(id)))
+        throw new Error('Geometry stage must cite the sources of its parent');
+      spec = { ...parent.spec, ...spec, items: [...parent.spec.items, ...spec.items] };
+      delete spec.extends;
+    }
+    const resolved = { ...figure, spec };
+    stages.set(figure.id, resolved);
+    return resolved;
+  });
+}
+
 export function geometrySvg(raw, description) {
   const spec = object(raw, ['width', 'height', 'items', 'physical_model']);
   const width = number(spec.width, 100, 1200);

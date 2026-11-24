@@ -1,5 +1,7 @@
 # Video Evidence Pipeline
 
+The [technical lecture workflow](docs/operations/technical-lecture.md) covers verified sources, a reusable manuscript, HTML/PDF generation and independent review.
+
 認可済みの動画・音声・文字起こしを、根拠と監査結果が結び付いた成果物へ変換する、local-firstの証拠パイプラインです。
 
 VEPの出力は「AIが書いた文章」だけではありません。source、transcript、evidence、要件、監査、承認の関係を保存したprivate workspaceから、human reviewへ渡せるMarkdownを生成します。

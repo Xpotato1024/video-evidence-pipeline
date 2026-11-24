@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import yaml
 from pydantic import BaseModel, ValidationError
 
 from video_evidence_pipeline import __version__
@@ -48,6 +49,7 @@ from video_evidence_pipeline.domain.lecture import (
     LectureAsset,
     LectureAuditResponse,
     LectureDocumentIndex,
+    LectureGuidance,
     LectureInput,
     LectureRequest,
     LectureSource,
@@ -361,6 +363,13 @@ def _workspace_evidence(path: Path) -> dict[str, Any]:
     }
 
 
+def _lecture_guidance() -> LectureGuidance:
+    root = resource_root(Path(__file__).resolve().parents[3])
+    return LectureGuidance.model_validate(
+        yaml.safe_load(_read(root / "config" / "lecture-guidance.yaml", limit=64 * 1024))
+    )
+
+
 def prepare_lecture(
     workspace: Path,
     input_path: Path,
@@ -406,8 +415,11 @@ def prepare_lecture(
     evidence["sources"] += options.previous_context
     if len({item.id for item in evidence["sources"]}) != len(evidence["sources"]):
         raise configuration_error("LECTURE_SOURCE_COLLISION", "lecture source IDs collide")
+    target = _safe_absolute(destination) / "request.json"
+    frozen = validate_lecture_request(target) if target.is_file() else None
     request = LectureRequest(
         **evidence,
+        guidance=frozen.guidance if frozen is not None else _lecture_guidance(),
         version=options.version,
         output_mode=options.output_mode,
         profile=options.profile,
@@ -417,9 +429,8 @@ def prepare_lecture(
     request = request.model_copy(
         update={"request_fingerprint": payload_fingerprint(request, "request_fingerprint")}
     )
-    target = _safe_absolute(destination) / "request.json"
     if target.parent.exists():
-        if _read_model(target, LectureRequest) == request:
+        if frozen == request:
             if source_images:
                 found = _inventory(target.parent / "source-assets")
                 if found != sorted(
@@ -755,10 +766,11 @@ def _audit_request(
 ) -> dict[str, Any]:
     checked_figures = [item.id for item in content.figures] if kind == "visual" else []
     checked_equations = [item.id for item in content.equations] if kind == "visual" else []
+    visual_blocks = {"equation", "figure", "steps"}
+    if request.guidance is not None:
+        visual_blocks.update({"procedure", "comparison", "table", "bullets"})
     checked_blocks = [
-        item.id
-        for item in content.blocks
-        if kind == "content" or item.type in {"equation", "figure", "steps"}
+        item.id for item in content.blocks if kind == "content" or item.type in visual_blocks
     ]
     criteria = {
         "content": [
@@ -772,6 +784,8 @@ def _audit_request(
             "Check equations and step calculations, consistency with diagrams, alt text and visual legibility.",
         ],
     }
+    if kind == "visual" and request.guidance is not None:
+        criteria[kind].append(request.guidance.visual_audit)
     criteria[kind].extend(
         rule.text for rule in request.profile.rules if rule.scope == f"{kind}_audit"
     )

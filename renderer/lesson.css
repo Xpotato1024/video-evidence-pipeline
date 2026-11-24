@@ -24,6 +24,8 @@ h2 { margin-top: 1.65em; font-size: 1.45rem; }
 .study-nav li a { display: block; min-height: 44px; padding: .45em .2em; }
 .back { display: inline-block; vertical-align: middle; margin-inline-start: .65rem; font-size: .72rem; font-weight: normal; color: #56626a; padding: .45em; }
 .prose math, td math, .equation-meta math, figcaption math { font-size: 1.06em; }
+.inline-math { display: inline-block; max-inline-size: 100%; overflow-x: auto; vertical-align: middle; }
+@media print { .inline-math { overflow: visible; } }
 section:has(> .table-scroll) table { width: 100%; }
 .table-scroll td { line-height: 1.55; }
 p { margin: .6em 0; }
@@ -119,3 +121,7 @@ math munder mtext,math mover mtext{color:#075d59;font-family:system-ui,sans-seri
 .equation-number { color: #40565c; margin-inline-start: auto; font-size: .88em; white-space: nowrap; }
 .equation-ref { white-space: nowrap; }
 .numbered-equation:target { outline: 2px solid #4a837b; outline-offset: 2px; }
+
+/* KaTeX aligned pairs retain equation alignment in native MathML viewers. */
+mtable[columnalign="right left"] > mtr > mtd:nth-child(odd) { text-align: right; }
+mtable[columnalign="right left"] > mtr > mtd:nth-child(even) { text-align: left; }
