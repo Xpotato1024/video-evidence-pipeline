@@ -784,6 +784,11 @@ def _audit_request(
             "Check equations and step calculations, consistency with diagrams, alt text and visual legibility.",
         ],
     }
+    if kind == "content" and content.continuity:
+        criteria[kind].append(
+            "Verify each cross-session relation against the current utterance and the earlier "
+            "prompt or diagram. Keep ambiguous targets unresolved and identify later corrections."
+        )
     if kind == "visual" and request.guidance is not None:
         criteria[kind].append(request.guidance.visual_audit)
     criteria[kind].extend(

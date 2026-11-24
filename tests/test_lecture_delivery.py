@@ -584,3 +584,52 @@ def test_table_mdx_edit_preserves_unchanged_multiline_source() -> None:
     )
     edited = mdx.replace("old", "new").replace("\n", "\r\n")
     assert apply_mdx_edits(content, mdx, edited)["blocks"][0]["rows"] == [["a\nb", "new"]]
+
+
+def test_later_solution_requires_current_and_prior_evidence(tmp_path: Path) -> None:
+    from pydantic import ValidationError
+
+    from video_evidence_pipeline.domain.lecture import RichContent
+
+    notes = tmp_path / "notes.txt"
+    notes.write_text("The preceding exercise used two values.", encoding="utf-8")
+    docs = _write(
+        tmp_path / "documents.json",
+        {
+            "job_id": "fixture-recap",
+            "sources": [{"id": "notes", "path": notes.name, "sha256": sha256_file(notes)}],
+        },
+    )
+    options = _options(tmp_path / "input.json")
+    data = json.loads(options.read_bytes())
+    prior = {
+        "kind": "previous_assignment",
+        "id": "earlier-task",
+        "title": "Exercise",
+        "locator": {"ref_id": "Q2", "session_id": "S01", "sha256": "a" * 64},
+        "excerpt": "Compute their mean.",
+    }
+    data["previous_context"] = [prior]
+    _write(options, data)
+    request, _ = lecture.prepare_lecture(docs, options, tmp_path / "prepared", documents=True)
+    raw = _fixture_content(request)
+    block = raw["blocks"][0]
+    current = block["source_refs"][0]
+    block["source_refs"].append(prior["id"])
+    link = {
+        "kind": "solution",
+        "block_id": block["id"],
+        "current_source": current,
+        "target_source": prior["id"],
+        "basis": "The same exercise and values are shown.",
+    }
+    raw["continuity"] = [link]
+    lecture._check_content(RichContent.model_validate(raw), request)
+    link["target_source"] = current
+    with pytest.raises(ValidationError, match="earlier material"):
+        RichContent.model_validate(raw)
+    link["target_source"] = None
+    link["basis"] = "Earlier exercise is unidentified."
+    assert RichContent.model_validate(raw).continuity[0].target_source is None
+    del raw["continuity"]
+    assert "continuity" not in RichContent.model_validate(raw).model_dump(mode="json")

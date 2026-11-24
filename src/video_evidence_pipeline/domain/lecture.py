@@ -90,7 +90,7 @@ class SourceLocator(StrictModel):
 
 class LectureSource(StrictModel):
     id: Identifier
-    kind: Literal["current_lecture", "previous_lecture", "supplement"]
+    kind: Literal["current_lecture", "previous_lecture", "previous_assignment", "supplement"]
     title: Text
     locator: SourceLocator
     excerpt: Text | None = None
@@ -103,7 +103,9 @@ class LectureSource(StrictModel):
             case "current_lecture":
                 if not self.source_refs or not self.excerpt:
                     raise ValueError("current lecture sources require verified evidence")
-            case "previous_lecture":
+            case "previous_lecture" | "previous_assignment":
+                if self.kind == "previous_assignment" and not self.locator.ref_id:
+                    raise ValueError("previous assignment requires its stable target ID")
                 if not self.locator.session_id or not self.locator.sha256 or not self.excerpt:
                     raise ValueError(
                         "previous lecture sources require session and artifact binding"
@@ -143,8 +145,11 @@ class LectureInput(StrictModel):
 
     @model_validator(mode="after")
     def check_previous_context(self) -> Self:
-        if any(source.kind != "previous_lecture" for source in self.previous_context):
-            raise ValueError("previous context must be labeled as previous lecture")
+        if any(
+            source.kind not in {"previous_lecture", "previous_assignment"}
+            for source in self.previous_context
+        ):
+            raise ValueError("previous context must identify an earlier lecture or assignment")
         if len({source.id for source in self.previous_context}) != len(self.previous_context):
             raise ValueError("previous context source IDs must be unique")
         return self
@@ -194,7 +199,7 @@ class LectureAsset(StrictModel):
 
 
 class LectureGuidance(StrictModel):
-    revision: Literal["1"] = "1"
+    revision: Literal["1", "2"] = "1"
     authoring: Text
     visual_planning: Text
     visual_audit: Text
@@ -416,6 +421,16 @@ class Coverage(StrictModel):
         return self
 
 
+class LectureRelation(StrictModel):
+    """A teaching block in this recording and the material discussed in it."""
+
+    block_id: Identifier
+    kind: Literal["recap", "solution", "continuation", "correction", "new_condition"]
+    current_source: Identifier
+    target_source: Identifier | None = None
+    basis: Text
+
+
 class RichContent(StrictModel):
     schema_version: Literal["2.0"] = "2.0"
     title: Text
@@ -428,6 +443,15 @@ class RichContent(StrictModel):
     equations: list[Equation] = Field(max_length=512)
     figures: list[Figure] = Field(max_length=55)
     coverage: list[Coverage] = Field(min_length=1, max_length=10)
+
+    continuity: list[LectureRelation] = Field(default_factory=list, max_length=2048)
+
+    @model_serializer(mode="wrap")
+    def serialize_compatible_content(self, handler):
+        fields = handler(self)
+        if not self.continuity:
+            fields.pop("continuity", None)
+        return fields
 
     @model_validator(mode="after")
     def check_references(self) -> Self:
@@ -485,6 +509,22 @@ class RichContent(StrictModel):
         ):
             raise ValueError("step provenance must belong to its enclosing block")
         block_ids = {block.id for block in self.blocks}
+        blocks = {block.id: block for block in self.blocks}
+        kinds = {source.id: source.kind for source in self.sources}
+        for relation in self.continuity:
+            block = blocks.get(relation.block_id)
+            if (
+                block is None
+                or relation.current_source not in block.source_refs
+                or kinds.get(relation.current_source) != "current_lecture"
+            ):
+                raise ValueError("continuity requires current evidence cited by its block")
+            target = relation.target_source
+            if target is not None and (
+                target not in block.source_refs
+                or kinds.get(target) not in {"previous_lecture", "previous_assignment"}
+            ):
+                raise ValueError("continuity target must be cited earlier material")
         if len({item.topic for item in self.coverage}) != len(self.coverage) or any(
             not set(item.block_ids) <= block_ids for item in self.coverage
         ):

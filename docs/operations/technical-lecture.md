@@ -126,3 +126,7 @@ Define the coordinate canvas and initial marks in the first geometry figure. A l
 ```
 
 Both stages share dimensions. Each stage allows up to 160 cumulative marks. A missing parent, changed coordinate canvas or dropped source fails validation. For a page photograph use a bound raster crop. Content-addressed figure files also appear in the static site. Rich text can cite numbered equations in tables, lists and comparisons. A step with its own reason generates a link in each direction.
+
+### Cross-session explanations
+
+A caller can pass source-bound earlier assignments in `previous_context` with kind `previous_assignment`, an earlier session, a stable target in `locator.ref_id`, the source SHA-256 and an excerpt. The current lecture remains the evidence for what was taught. In rich content, each optional `continuity` entry identifies a visible block, its current source, the referenced prior source (or null), its kind and the matching basis. Cite both identified sources from the block. Kinds are `recap`, `solution`, `continuation`, `correction` and `new_condition`. Describe the explanation and any uncertainty in the visible text. The independent content audit receives these links. Archive consumers can build reverse references without changing older material.
