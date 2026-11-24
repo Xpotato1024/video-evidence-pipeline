@@ -141,6 +141,16 @@ test('renderer builds editable, offline and same-origin outputs from matching so
     assert.match(body, /<section class="background" id="block-basis-note"><details><summary>/u);
     assert.match(mdx.toString(), /<Background title="なぜ方向を分ける？">/u);
     assert.match(md.toString(), /\*\*なぜ方向を分ける？\*\*/u);
+    const firstStage = fixture.blocks.find(block => block.id === 'construction').steps[0];
+    for (const view of [body, site.toString(), md.toString(), mdx.toString()]) {
+      const start = view.indexOf('id="block-' + firstStage.id + '"');
+      const end = view.indexOf('#why-' + firstStage.id, start);
+      assert.ok(start >= 0 && end > start);
+      const stepBody = view.slice(start, end);
+      const caption = fixture.figures.find(figure => figure.id === firstStage.figure_id).caption;
+      assert.ok(stepBody.indexOf(caption) >= 0);
+      assert.ok(stepBody.indexOf(firstStage.rationale) > stepBody.indexOf(caption));
+    }
     for (const [i, step] of ['draw-axes', 'draw-points'].entries()) {
       assert.match(body, new RegExp(`<li id="block-${step}"[^>]*>(?:(?!</li>)[\\s\\S])*<figure id="stage-${step}"(?:(?!</li>)[\\s\\S])*href="#why-${step}"`));
       assert.match(body, new RegExp(`<section id="why-${step}"[^>]*>(?:(?!</section>)[\\s\\S])*href="#block-${step}">手順${i+1}に戻る`));

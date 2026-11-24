@@ -18,7 +18,7 @@ criteria = [
 [[cases]]
 id = "unexplained-intermediate"
 prompt = "A handout asks for a general formula. Its working introduces a short length symbol, defines a change and jumps straight to a component formula. The lecturer states the result but gives no memorization instruction. Write the worked procedure for a student."
-expected = ["A specific answer form and either a justified use for the intermediate or a direct route"]
+expected = ["A stated target expression the reader can identify with the handout closed and either a justified use for the intermediate or a direct route"]
 forbidden = ["A new identity treated as already known", "Invented recall instructions"]
 criteria = [
   { id = "request-bound", description = "Names the inputs and what form the final answer takes" },

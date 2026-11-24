@@ -237,7 +237,7 @@ export function createDocument(content, equations, figures, stepEquations) {
       const stage = guided && step.figure_id ? figureHtml(figures.get(step.figure_id), mode, 'stage-' + step.id) : '';
       const why = guided ? `<a class="step-reason-link" href="#why-${identifier(step.id)}">${whyLabel}</a>` : '';
       return `<li id="block-${identifier(step.id)}"${guided ? ' tabindex="-1"' : ''}><p class="step-title">${rich(step.title)}${back}</p>` +
-        `<p class="prose">${rich(step.rationale)}</p>` + (expression ? eqHtml(expression, step.id) : '') + stage + why + '</li>';
+        stage + `<p class="prose">${rich(step.rationale)}</p>` + (expression ? eqHtml(expression, step.id) : '') + why + '</li>';
     }
     const numeric = [...parts.entries()].map(([kind, expression]) => {
       const equation = eqHtml(expression, step.id, kind);
@@ -333,10 +333,9 @@ export function createDocument(content, equations, figures, stepEquations) {
           if (guided) {
             const anchor = identifier(step.id);
             const figure = step.figure_id ? figures.get(step.figure_id) : null;
-            body = `<a id="block-${anchor}"></a>\n\n` + body +
-              (figure ? '\n\n' + mdFigure(figure, mode) + mdReferences(figure) +
-                (figure.data ? `\n\n[${words.values}](data/${figure.id}.csv)` : '') : '') +
-              `\n\n[${whyLabel}](#why-${anchor})`;
+            const stage = figure ? mdFigure(figure, mode) + mdReferences(figure) +
+              (figure.data ? `\n\n[${words.values}](data/${figure.id}.csv)` : '') + '\n\n' : '';
+            body = `<a id="block-${anchor}"></a>\n\n` + stage + body + `\n\n[${whyLabel}](#why-${anchor})`;
           }
           return mode === 'mdx' ? `<Step title="${escape(step.title)}">\n\n${body}\n\n</Step>`
             : `${index + 1}. **${markdown(step.title)}**\n\n` + body.split('\n').map(line => line ? '   ' + line : '').join('\n');
