@@ -79,3 +79,16 @@ criteria = [
   { id = "source-gap", description = "Distinguishes added working from the source" },
   { id = "human-boundary", description = "Leaves human approval to the reviewer" },
 ]
+
+[[cases]]
+id = "repeated-derivative-variable-coefficients"
+prompt = "Students know D1 f = cos(v) f_u + sin(v) f_v and D2 f = -sin(v) f_u + cos(v) f_v for a twice continuously differentiable f. A lecture adds D1(D1 f) and D2(D2 f). Write a worked calculation students can reproduce independently."
+expected = ["Both product-rule expansions, evaluated coefficient derivatives, chain-rule substitutions, and a comparison yielding f_uu + f_vv - f_u"]
+forbidden = ["Treating operator coefficients as constants", "Jumping from a named rule to the collected results", "Setting mixed derivatives individually to zero"]
+criteria = [
+  { id = "request-bound", description = "Reconstructs the sum from the given two operators and states conditions used to commute the mixed derivatives" },
+  { id = "traceable", description = "Keeps the supplied operation distinct from the editorial working" },
+  { id = "technical", description = "Shows where both contributions to each mixed term originate, the cancellation between directions, and the two differentiated coefficients that sum to minus one for f_u" },
+  { id = "source-gap", description = "Does not infer exam or memorization claims from the worked example" },
+  { id = "human-boundary", description = "Leaves human approval to the reviewer" },
+]
