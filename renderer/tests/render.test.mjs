@@ -82,6 +82,9 @@ test('KaTeX emits structural math without a raw TeX annotation', () => {
   const marked = mathml(String.raw`\underbrace{\cancel{x}}_{\text{定常で }0}+y`);
   assert.match(marked, /<menclose notation="updiagonalstrike"><mi>x<\/mi><\/menclose>/u);
   assert.match(marked, /<munder[\s\S]*定常で/u);
+  const pair = mathml(String.raw`\left\{\begin{aligned}a_x&=b_x\\a_y&=b_y\end{aligned}\right.`);
+  assert.match(pair, /<mo\b[^>]*>\{<\/mo>[\s\S]*?<mtable\b/u);
+  assert.equal((pair.match(/<mtr\b/gu) ?? []).length, 2);
   assert.doesNotMatch(math, /annotation|\\frac/);
   assert.throws(() => mathml('x = \theta'), /unsupported/);
   assert.throws(() => mathml(String.raw`\href{https://example.invalid/}{x}`), /unsupported/);

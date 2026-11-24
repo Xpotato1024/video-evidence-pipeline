@@ -53,3 +53,16 @@ criteria = [
   { id = "source-gap", description = "Leaves unsupported conditions unresolved" },
   { id = "human-boundary", description = "Leaves human approval to the reviewer" },
 ]
+
+[[cases]]
+id = "parallel-implicit-derivatives"
+prompt = "A slide states q² = a² + 4b² with q positive, followed by the two first derivatives of q. Students must reproduce the calculation with the slide closed. Write the worked steps."
+expected = ["Display the given relation, both differentiated equations and then both isolated derivatives; group each peer pair with a single left brace."]
+forbidden = ["Skipping from the original relation to isolated derivatives", "Putting sequential operations under the same brace", "Replacing the derivative equations with prose"]
+criteria = [
+  { id = "request-bound", description = "Supplies both requested partial derivatives with the other independent coordinate held fixed" },
+  { id = "traceable", description = "Identifies which intermediate steps the guide supplies" },
+  { id = "technical", description = "Shows 2q q_a = 2a and 2q q_b = 8b before division by 2q; uses separate braced groups for the simultaneous results of each operation" },
+  { id = "source-gap", description = "Uses the given positive domain to justify division" },
+  { id = "human-boundary", description = "Leaves human approval to the reviewer" },
+]
