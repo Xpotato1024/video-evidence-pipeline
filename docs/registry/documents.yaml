@@ -398,3 +398,21 @@ documents:
   owners:
   - Xpotato1024
   metadata_mode: front-matter
+- document_id: VEP-OPS-TECHNICAL-LECTURE
+  path: docs/operations/technical-lecture.md
+  document_type: operations
+  status: active
+  canonical: true
+  canonical_for: technical-lecture-review
+  owners:
+  - Xpotato1024
+  metadata_mode: registry-only
+- document_id: VEP-ADR-0002
+  path: docs/decisions/0002-lecture-production-boundary.md
+  document_type: architecture-decision-record
+  status: proposed
+  canonical: false
+  canonical_for: null
+  owners:
+  - Xpotato1024
+  metadata_mode: front-matter

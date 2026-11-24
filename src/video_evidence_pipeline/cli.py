@@ -53,6 +53,7 @@ from video_evidence_pipeline.domain.job import (
     load_job_yaml,
     primary_input_kind,
 )
+from video_evidence_pipeline.domain.lecture import AuditKind
 from video_evidence_pipeline.domain.transcription import (
     MAXIMUM_ASR_WORKER_REQUEST_BYTES,
     AsrWorkerRequest,
@@ -192,6 +193,7 @@ audit_app = typer.Typer(no_args_is_help=True)
 revision_app = typer.Typer(no_args_is_help=True)
 asr_app = typer.Typer(no_args_is_help=True)
 workflow_app = typer.Typer(no_args_is_help=True)
+lecture_app = typer.Typer(no_args_is_help=True)
 app.add_typer(job_app, name="job")
 app.add_typer(schema_app, name="schema")
 app.add_typer(evidence_app, name="evidence")
@@ -202,6 +204,7 @@ app.add_typer(audit_app, name="audit")
 app.add_typer(revision_app, name="revision")
 app.add_typer(asr_app, name="asr")
 app.add_typer(workflow_app, name="workflow")
+app.add_typer(lecture_app, name="lecture")
 
 
 def _emit(value: Any, *, json_output: bool) -> None:
@@ -1603,10 +1606,6 @@ def schema_check(
     _emit({"ok": True, "checked": checked}, json_output=json_output)
 
 
-if __name__ == "__main__":
-    app()
-
-
 @app.command("bundle-validate")
 def bundle_validate(
     bundle: Path,
@@ -1628,3 +1627,220 @@ def bundle_validate(
         },
         json_output=json_output,
     )
+
+
+@lecture_app.command("prepare")
+def lecture_prepare(
+    workspace: Path,
+    request: Annotated[Path, typer.Option("--request")],
+    destination: Annotated[Path, typer.Option("--destination")],
+    archive: Annotated[bool, typer.Option("--archive")] = False,
+    documents: Annotated[bool, typer.Option("--documents")] = False,
+    document_index: Annotated[Path | None, typer.Option("--document-index")] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Freeze validated evidence and the lecture authoring profile."""
+    from video_evidence_pipeline.delivery.lecture import prepare_lecture
+
+    value, reused = _run(
+        lambda: prepare_lecture(
+            workspace,
+            request,
+            destination,
+            archive=archive,
+            documents=documents,
+            document_index=document_index,
+        ),
+        json_output=json_output,
+    )
+    _emit(
+        {
+            "ok": True,
+            "job_id": value.job_id,
+            "source_state": value.source_state,
+            "version": value.version,
+            "request_path": str((destination / "request.json").absolute()),
+            "request_fingerprint": value.request_fingerprint,
+            "evidence_bundle_fingerprint": value.evidence_bundle_fingerprint,
+            "profile_snapshot_sha256": value.profile_snapshot_sha256,
+            "response_schema": "rich-content.schema.json",
+            "reused": reused,
+        },
+        json_output=json_output,
+    )
+
+
+@lecture_app.command("request-validate")
+def lecture_request_validate(
+    request: Path,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Verify transferable authoring request identity without a source workspace."""
+    from video_evidence_pipeline.delivery.lecture import validate_lecture_request
+
+    value = _run(lambda: validate_lecture_request(request), json_output=json_output)
+    _emit(
+        {
+            "ok": True,
+            "job_id": value.job_id,
+            "version": value.version,
+            "source_state": value.source_state,
+            "request_fingerprint": value.request_fingerprint,
+            "evidence_bundle_fingerprint": value.evidence_bundle_fingerprint,
+            "profile_snapshot_sha256": value.profile_snapshot_sha256,
+        },
+        json_output=json_output,
+    )
+
+
+@lecture_app.command("render")
+def lecture_render(
+    request: Path,
+    content: Path,
+    destination: Annotated[Path, typer.Option("--destination")],
+    assets: Annotated[Path | None, typer.Option("--assets")] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Validate the authoring response and render a candidate offline."""
+    from video_evidence_pipeline.delivery.lecture import render_lecture
+
+    digest, reused = _run(
+        lambda: render_lecture(request, content, destination, assets=assets),
+        json_output=json_output,
+    )
+    _emit(
+        {
+            "ok": True,
+            "state": "DRAFTED",
+            "render_path": str(destination.absolute()),
+            "render_fingerprint": digest,
+            "reused": reused,
+        },
+        json_output=json_output,
+    )
+
+
+@lecture_app.command("source-import")
+def lecture_source_import(
+    base: Path,
+    edited_mdx: Path,
+    request: Annotated[Path, typer.Option("--request")],
+    destination: Annotated[Path, typer.Option("--destination")],
+    editor: Annotated[str, typer.Option("--editor")],
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Validate edits to portable MDX for a new lecture candidate."""
+    from video_evidence_pipeline.delivery.lecture import import_lecture_source
+
+    _run(
+        lambda: import_lecture_source(base, edited_mdx, request, destination, editor=editor),
+        json_output=json_output,
+    )
+    _emit({"ok": True, "content_path": str(destination.absolute())}, json_output=json_output)
+
+
+@lecture_app.command("audit-prepare")
+def lecture_audit_prepare(
+    rendered: Path,
+    kind: Annotated[AuditKind, typer.Option("--kind")],
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Generate an audit request with no author identity or history."""
+    from video_evidence_pipeline.delivery.lecture import prepare_lecture_audit
+
+    value = _run(lambda: prepare_lecture_audit(rendered, kind), json_output=json_output)
+    _emit({"ok": True, **value}, json_output=json_output)
+
+
+@lecture_app.command("review")
+def lecture_review(
+    rendered: Path,
+    content_audit: Annotated[Path, typer.Option("--content-audit")],
+    visual_audit: Annotated[Path, typer.Option("--visual-audit")],
+    destination: Annotated[Path, typer.Option("--destination")],
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Package the rendered version after independent content and visual audits."""
+    from video_evidence_pipeline.delivery.lecture import publish_lecture_review
+
+    manifest, reused = _run(
+        lambda: publish_lecture_review(rendered, content_audit, visual_audit, destination),
+        json_output=json_output,
+    )
+    _emit(
+        {
+            "ok": True,
+            **manifest.model_dump(mode="json", exclude={"inventory"}),
+            "bundle_path": str(destination.absolute()),
+            "reused": reused,
+        },
+        json_output=json_output,
+    )
+
+
+@lecture_app.command("validate")
+def lecture_validate(
+    bundle: Path,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Verify the review package's full inventory and immutable audit binding."""
+    from video_evidence_pipeline.delivery.lecture import validate_lecture_bundle
+
+    manifest = _run(lambda: validate_lecture_bundle(bundle), json_output=json_output)
+    _emit({"ok": True, **manifest.model_dump(mode="json")}, json_output=json_output)
+
+
+@lecture_app.command("approve")
+def lecture_approve(
+    bundle: Path,
+    approval_target_sha256: Annotated[str, typer.Option("--approval-target-sha256")],
+    reviewer: Annotated[str, typer.Option("--reviewer")],
+    basis: Annotated[str, typer.Option("--basis")],
+    confirm: Annotated[bool, typer.Option("--confirm")] = False,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Record explicit human approval of an unchanged lecture package."""
+    from video_evidence_pipeline.delivery.lecture import approve_lecture_bundle
+
+    record, path, reused = _run(
+        lambda: approve_lecture_bundle(
+            bundle,
+            target_sha256=approval_target_sha256,
+            reviewer=reviewer,
+            basis=basis,
+            confirm=confirm,
+        ),
+        json_output=json_output,
+    )
+    _emit(
+        {
+            "ok": True,
+            **record.model_dump(mode="json"),
+            "approval_path": str(path),
+            "reused": reused,
+        },
+        json_output=json_output,
+    )
+
+
+@lecture_app.command("approval-validate")
+def lecture_approval_validate(
+    bundle: Path,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Verify a human approval receipt against the unchanged lecture package."""
+    from video_evidence_pipeline.delivery.lecture import validate_lecture_approval
+
+    record, path = _run(lambda: validate_lecture_approval(bundle), json_output=json_output)
+    _emit(
+        {
+            "ok": True,
+            **record.model_dump(mode="json"),
+            "approval_path": str(path),
+        },
+        json_output=json_output,
+    )
+
+
+if __name__ == "__main__":
+    app()

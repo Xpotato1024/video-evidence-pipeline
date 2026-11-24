@@ -1,0 +1,107 @@
+schema_version = "1.0"
+skill_id = "draft-technical-lecture"
+minimum_score = 9
+
+[[cases]]
+id = "grounded-lecture"
+prompt = "A slide gives a result. On the board, the lecturer checks a transformation and later asks students to use it. A duplicated caption repeats an unrelated remark. The exercise builds a graph in stages. Draft the study guide."
+expected = ["Source-linked result with precise unresolved items"]
+forbidden = ["Unverified assertions", "Human approval"]
+criteria = [
+  { id = "request-bound", description = "Uses the frozen request and selected scope" },
+  { id = "traceable", description = "Binds the board operation and its check to their verified locators; discounts duplicate captions" },
+  { id = "technical", description = "Shows the decisive transformation and presents the in-class question before its worked method; gives every construction step a distinct stage figure and a round trip to its explanation" },
+  { id = "source-gap", description = "Records unresolved evidence without guessing" },
+  { id = "human-boundary", description = "Leaves human approval to the reviewer" },
+]
+
+[[cases]]
+id = "goal-led-average-power"
+prompt = "The board gives a force parallel to a displacement, increasing linearly from 2 N to 8 N over 3 m in 5 s. The question asks for average mechanical power. Write a short worked solution a student can reproduce."
+expected = ["Starts with average power as work divided by elapsed time, identifies work as the missing numerator, obtains 15 J from the area under the force-displacement graph or equivalent calculation, and substitutes 15 J / 5 s = 3 W"]
+forbidden = ["Computing a series of unexplained intermediate values before revealing what they are for", "Implying constant speed is required"]
+criteria = [
+  { id = "request-bound", description = "Gives the requested average mechanical power and preserves the stated force-displacement dependence" },
+  { id = "traceable", description = "Keeps board data distinct from the chosen solution method" },
+  { id = "technical", description = "With optional explanations closed, a reader can identify the missing numerator and the relation that supplies it before calculating the area" },
+  { id = "source-gap", description = "Does not assign the method an undocumented exam or memorization requirement" },
+  { id = "human-boundary", description = "Leaves approval to the reviewer" },
+]
+
+[[cases]]
+id = "unexplained-intermediate"
+prompt = "A handout asks for a general formula. Its working introduces a short length symbol, defines a change and jumps straight to a component formula. The lecturer states the result but gives no memorization instruction. Write the worked procedure for a student."
+expected = ["A stated target expression the reader can identify with the handout closed and either a justified use for the intermediate or a direct route"]
+forbidden = ["A new identity treated as already known", "Invented recall instructions"]
+criteria = [
+  { id = "request-bound", description = "Names the inputs and what form the final answer takes" },
+  { id = "traceable", description = "Distinguishes lecturer statements from added derivation or explanation" },
+  { id = "technical", description = "With optional reasons closed, each nontrivial transition gives the substitution, held-fixed variables or operation; new symbols have a purpose and next use" },
+  { id = "source-gap", description = "Identifies missing source evidence without inferring a recall requirement" },
+  { id = "human-boundary", description = "Leaves human approval to the reviewer" },
+]
+
+[[cases]]
+id = "missing-conditions"
+prompt = "Source does not establish an assumption or include the assignment."
+expected = ["Source-linked result with precise unresolved items"]
+forbidden = ["Unverified assertions", "Human approval"]
+criteria = [
+  { id = "request-bound", description = "Uses the frozen request and selected scope" },
+  { id = "traceable", description = "Cites the exact support and target IDs" },
+  { id = "technical", description = "Checks applicable math, units and conditions" },
+  { id = "source-gap", description = "Records unresolved evidence without guessing" },
+  { id = "human-boundary", description = "Leaves human approval to the reviewer" },
+]
+
+[[cases]]
+id = "comparison-and-marked-equations"
+prompt = "Revise a standalone guide to two coordinate frames. It has concise unit-labelled definitions, a short three-term vector sum, and a balance where symmetry makes a derivative of a nonzero velocity vanish. The instructor marked that derivative on the board."
+expected = ["Two aligned cases preserving individual meanings and units; one-line sum and a direct mark on the derivative with its condition"]
+forbidden = ["Turning existing unit-labelled bullets into prose", "Crossing out the nonzero velocity", "Separating a short sum by summand"]
+criteria = [
+  { id = "request-bound", description = "Retains the first-use definitions and the requested outputs" },
+  { id = "traceable", description = "Distinguishes the source-supported operation from editorial markings" },
+  { id = "technical", description = "Aligns the same criteria and units in both cases; keeps the short sum on one line and anchors the condition at the zero derivative; verifies phone-size rendering" },
+  { id = "source-gap", description = "Leaves unsupported conditions unresolved" },
+  { id = "human-boundary", description = "Leaves human approval to the reviewer" },
+]
+
+[[cases]]
+id = "parallel-implicit-derivatives"
+prompt = "A slide states q² = a² + 4b² with q positive, followed by the two first derivatives of q. Students must reproduce the calculation with the slide closed. Write the worked steps."
+expected = ["Display the given relation, both differentiated equations and then both isolated derivatives; group each peer pair with a single left brace."]
+forbidden = ["Skipping from the original relation to isolated derivatives", "Putting sequential operations under the same brace", "Replacing the derivative equations with prose"]
+criteria = [
+  { id = "request-bound", description = "Supplies both requested partial derivatives with the other independent coordinate held fixed" },
+  { id = "traceable", description = "Identifies which intermediate steps the guide supplies" },
+  { id = "technical", description = "Shows 2q q_a = 2a and 2q q_b = 8b before division by 2q; uses separate braced groups for the simultaneous results of each operation" },
+  { id = "source-gap", description = "Uses the given positive domain to justify division" },
+  { id = "human-boundary", description = "Leaves human approval to the reviewer" },
+]
+
+[[cases]]
+id = "referenced-total-differential"
+prompt = "A lesson derives radial partial derivatives, then says 'take the total differential of the coordinates above' and gives the result. Draft a standalone worked method for x=r cos θ and y=r sin θ."
+expected = ["A numbered coordinate pair, total differential, evaluated coefficient pairs, and substitution into the differential"]
+forbidden = ["Only positional references to the coordinate formula", "Skipping from positions to the simplified differentials"]
+criteria = [
+  { id = "request-bound", description = "States the two requested differentials" },
+  { id = "traceable", description = "The reference resolves to the coordinate equations by stable identifier" },
+  { id = "technical", description = "Shows the two-variable rule, what is fixed, and all four partial derivatives with correct signs before substitution" },
+  { id = "source-gap", description = "Distinguishes added working from the source" },
+  { id = "human-boundary", description = "Leaves human approval to the reviewer" },
+]
+
+[[cases]]
+id = "repeated-derivative-variable-coefficients"
+prompt = "Students know D1 f = cos(v) f_u + sin(v) f_v and D2 f = -sin(v) f_u + cos(v) f_v for a twice continuously differentiable f. The target is Lf = D1(D1 f) + D2(D2 f) + f_ww, where w is an independent third coordinate. Write a worked calculation students can reproduce independently."
+expected = ["Both product-rule expansions, evaluated coefficient derivatives, chain-rule substitutions, and a comparison yielding f_uu + f_vv - f_u for the first two summands, followed by substitution in the given definition of Lf with f_ww carried through"]
+forbidden = ["Treating operator coefficients as constants", "Jumping from a named rule to the collected results", "Setting mixed derivatives individually to zero"]
+criteria = [
+  { id = "request-bound", description = "Reconstructs the sum from the given two operators and states conditions used to commute the mixed derivatives" },
+  { id = "traceable", description = "Keeps the supplied operation distinct from the editorial working" },
+  { id = "technical", description = "Shows where both contributions to each mixed term originate, the cancellation between directions, and the two differentiated coefficients that sum to minus one for f_u" },
+  { id = "source-gap", description = "Does not infer exam or memorization claims from the worked example" },
+  { id = "human-boundary", description = "Leaves human approval to the reviewer" },
+]

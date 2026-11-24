@@ -78,3 +78,5 @@ Limits: at most 10,000 included files, 512 MiB per included file, 2 GiB total pa
 For restoration, clone the learning repository to a new path, run `vep bundle-validate`, open the PDF assets
 and read the summary/transcripts without starting the original job. Do not edit a completed package;
 store subsequent processing as a new package such as R002.
+
+A validated archive can supply its evidence to a new [technical lecture review](technical-lecture.md).

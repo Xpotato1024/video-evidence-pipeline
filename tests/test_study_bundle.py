@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 
 from video_evidence_pipeline.application import export_job, export_study_bundle_job
 from video_evidence_pipeline.cli import app
+from video_evidence_pipeline.delivery.lecture import prepare_lecture
 from video_evidence_pipeline.delivery.study_bundle import validate_study_bundle
 from video_evidence_pipeline.domain.study_bundle import portable_path
 from video_evidence_pipeline.errors import VepError
@@ -146,6 +147,45 @@ def test_portable_bundle_roundtrip_tampering_and_markdown_compatibility(tmp_path
     cloned = tmp_path / "git-clone"
     git("-c", "core.autocrlf=true", "clone", "--quiet", "--no-local", str(repository), str(cloned))
     assert validate_study_bundle(cloned / "R001") == manifest
+
+
+def test_lecture_prepare_reads_legacy_ambiguity_json_without_changing_approval(
+    tmp_path: Path,
+) -> None:
+    workspace, _draft, audit = _human_review_ready(tmp_path, "lecture-archive")
+    _approve(workspace, audit.human_review.approval_target_sha256)
+    archive = tmp_path / "archive"
+    manifest = export_study_bundle_job(
+        workspace.root, archive, confirm_private_export=True
+    ).manifest
+    ambiguity_file = archive / manifest.entrypoints["ambiguities"]
+    approval_file = archive / manifest.entrypoints["approval"]
+    ambiguity_bytes = ambiguity_file.read_bytes()
+    approval_bytes = approval_file.read_bytes()
+    assert "records" in json.loads(ambiguity_bytes)
+    options = tmp_path / "options.json"
+    options.write_text(
+        json.dumps(
+            {
+                "version": "v002",
+                "output_mode": "worked_explanation",
+                "profile": {"profile_id": "fixture", "version": "1", "language": "en"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    request, reused = prepare_lecture(archive, options, tmp_path / "author", archive=True)
+
+    assert request.source_state == "APPROVED_ARCHIVE"
+    assert request.version == "v002"
+    assert not reused
+    assert request.legacy_draft_sha256 == manifest.approved_draft_sha256
+    assert [record.model_dump(mode="json") for record in request.ambiguities] == json.loads(
+        ambiguity_bytes
+    )["records"]
+    assert approval_file.read_bytes() == approval_bytes
+    assert validate_study_bundle(archive) == manifest
 
 
 def test_bundle_validator_rejects_directory_links(tmp_path: Path) -> None:

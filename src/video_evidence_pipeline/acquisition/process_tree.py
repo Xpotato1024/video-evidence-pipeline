@@ -220,6 +220,9 @@ class ManagedProcessTree:
     def poll(self) -> int | None:
         return self._process.poll()
 
+    def wait(self, timeout: float | None = None) -> int:
+        return self._process.wait(timeout=timeout)
+
     def stop(self) -> None:
         if self._closed:
             return

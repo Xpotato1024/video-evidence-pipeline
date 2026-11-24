@@ -1,0 +1,19 @@
+{
+  "name": "vep-lecture-renderer",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test",
+    "render": "node render.mjs"
+  },
+  "dependencies": {
+    "@xmldom/xmldom": "0.9.12",
+    "katex": "0.19.1",
+    "mermaid": "12.3.0",
+    "playwright": "1.62.1",
+    "vega": "6.4.0",
+    "vega-lite": "6.5.0"
+  }
+}

@@ -54,6 +54,15 @@ FFmpeg capability probes. Neither form provisions tools/models or proves ASR rea
 | Linux media | distribution FFmpeg with VEP capabilities | Ubuntu example: `sudo apt-get install ffmpeg`; then `vep doctor --media`; package version alone is insufficient |
 | macOS / Windows ARM media | operator-provided compatible FFmpeg | no pinned VEP binary or platform CI guarantee; run `doctor --media` before use |
 | Caption gaps requiring ASR | Docker + pinned repository image + explicitly provisioned model | follow [ASR operations](asr-runtime.md); CPU works without an NVIDIA GPU, explicit CUDA remains fail-closed |
+| Technical lecture HTML/PDF | Node.js 22 or newer, the renderer lockfile, Chromium and fonts for the source language | Install with `npm ci --prefix renderer` and `npx --prefix renderer playwright install chromium`. |
+| PDF pages as lecture sources | Poppler `pdftotext` and `pdftoppm` | Provision both on PATH before preparing document evidence. |
+
+The lecture renderer uses local dependencies at build time. On Linux include the
+Playwright browser system libraries and a CJK font such as Noto Sans CJK for
+Japanese PDF output. For example, on the CI image run
+`npx --prefix renderer playwright install --with-deps chromium webkit` for
+both rendering and the layout checks. After provisioning, the lesson build runs
+offline. The single-file HTML and PDF can be opened offline on another machine.
 
 On Windows, the installer prints a process-local `VEP_FFMPEG_BIN_DIR` instruction.
 Use that instruction in the shell running VEP, or use an already approved pair on
@@ -73,7 +82,8 @@ FFmpeg options. ASR image smoke and GPU preflight are separate, explicit command
 The first distribution format is a commit-addressed **source bundle** plus checksum,
 not an all-in-one executable. `python scripts/build_source_bundle.py --output dist`
 requires a clean committed checkout and uses `git archive` of that exact commit.
-It includes tracked repository resources and `LICENSE`, and records commit ID, archive SHA-256
+It includes tracked repository resources, the lecture renderer source and lockfile, and
+`LICENSE`. It records commit ID, archive SHA-256
 and lock SHA-256 in `source-bundle.json` / `SHA256SUMS`. It contains no environment,
 model, FFmpeg executable or job. Extract it to a new directory, verify the checksum,
 then run the same sync/doctor commands. Git is needed for building, not for running

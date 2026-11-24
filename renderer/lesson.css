@@ -1,0 +1,127 @@
+:root {
+  color: #182737;
+  background: #f4f7f8;
+  font: 100%/1.7 system-ui, "Noto Sans CJK JP", sans-serif;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+main {
+  max-width: 61rem;
+  margin: 0 auto;
+  padding: clamp(.8rem, 4vw, 3rem);
+  background: #fff;
+  min-height: 100vh;
+  overflow-wrap: anywhere;
+}
+h1, h2, h3, h4, h5, h6 { line-height: 1.35; break-after: avoid; }
+h1 { border-bottom: .2rem solid #0d6c76; padding-bottom: .55em; margin: 0 0 1em; font-size: 1.9rem; }
+h2 { margin-top: 1.65em; font-size: 1.45rem; }
+.prose strong, td strong { font-weight: 750; color: #152d40; }
+.study-nav { margin: -.5em 0 .8em; }
+.study-nav summary { width: fit-content; padding: .4em .2em; min-height: 44px; }
+.study-nav ol { margin: 0; padding-inline-start: 2.2em; }
+.study-nav li[class^="level-"]:not(.level-2) { margin-inline-start: 1.4em; list-style: circle; }
+.study-nav li a { display: block; min-height: 44px; padding: .45em .2em; }
+.back { display: inline-block; vertical-align: middle; margin-inline-start: .65rem; font-size: .72rem; font-weight: normal; color: #56626a; padding: .45em; }
+.prose math, td math, .equation-meta math, figcaption math { font-size: 1.06em; }
+.inline-math { display: inline-block; max-inline-size: 100%; overflow-x: auto; vertical-align: middle; }
+@media print { .inline-math { overflow: visible; } }
+section:has(> .table-scroll) table { width: 100%; }
+.table-scroll td { line-height: 1.55; }
+p { margin: .6em 0; }
+.prose { white-space: pre-line; }
+a { color: #0b5962; }
+:focus-visible { outline: .15rem solid #0c747d; outline-offset: .15rem; }
+aside { background: #f0f6f8; border-left: .2rem solid #0d6c76; margin: 1rem 0; padding: .35rem .85rem; }
+figure { margin: 1.2rem 0; }
+figure, .equation-block, .step-equation { break-inside: avoid; }
+figcaption { margin-top: .5em; font-weight: 590; }
+.figure-scroll, .equation, .table-scroll { max-width: 100%; overflow-x: auto; }
+.figure-scroll { border: 1px solid #d7e1e9; border-radius: .3rem; }
+.figure-scroll img { display: block; width: auto; max-width: min(100%, 36rem); height: auto; margin-inline: auto; }
+.equation { padding: .7rem .75rem; background: #f4f7fa; border-radius: .3rem; }
+.equation math { display: block; margin-inline: auto; width: max-content; }
+.calculation { background: #f4f7fa; padding: .45em .7em; border-radius: .3rem; }
+.calculation .equation { padding: .12em 0; background: transparent; }
+.calculation math { margin-inline: 0; }
+.equation-meta, .step-equation > p { font-size: .88em; }
+.note-mark { font: normal .62rem/1 system-ui, sans-serif; margin-inline-start: .35em; }
+.note-mark a { color: #525c62; text-decoration: none; padding: .2em; }
+.note-mark a:hover { text-decoration: underline; }
+.sources { font-size: .86em; color: #42494d; }
+.sources > ol { padding-inline-start: 1.65em; }
+.sources > ol > li { margin: .5em 0; }
+.sources summary { color: inherit; }
+.sources { border-top: 1px solid #d0dce4; margin-top: 2em; }
+.sources p { font-size: .87em; margin: .05em 0 .4em; }
+.bullet-group { margin: .7rem 0; break-inside: avoid; }
+.bullet-group > p { margin-bottom: .2em; }
+.bullet-group ul { margin: 0; padding-inline-start: 1.45em; }
+.bullet-group li { margin-block: .16em; }
+.steps { list-style: decimal; padding-inline-start: 1.65em; }
+.steps > li { margin: .55em 0; padding: .12em 0 .4em .55em; border-inline-start: 2px solid #d1dfe0; }
+.steps > li::marker { color: #17515a; font-weight: 750; font-variant-numeric: tabular-nums; }
+.steps > li > p { margin: .2em 0 .35em; }
+.steps .equation { padding-inline: .25em; }
+.step-title { font-weight: 700; break-after: avoid; }
+.step-equation > p { break-after: avoid; }
+details { margin-top: .6em; }
+summary { color: #0b5962; cursor: pointer; }
+.background { margin: .8rem 0; border-inline-start: 2px solid #c4d0d6; padding-inline-start: .75rem; }
+.background-print { display: none; }
+.background summary { padding: .4rem 0; min-height: 44px; color: #254251; font-weight: 600; }
+.background-label { font-size: .8em; font-weight: normal; color: #4d606c; margin-inline-end: .4em; }
+.background-body { margin: .15rem 0 .6rem; }
+table { border-collapse: collapse; margin: .55rem 0; }
+caption { text-align: left; font-weight: 600; }
+th, td { border: 1px solid #d2dce4; padding: .3rem .65rem; vertical-align: top; text-align: start; }
+th { background: #edf4f6; }
+@page { size: A4; margin: 14mm; }
+@media print {
+  :root { background: #fff; }
+  main { max-width: none; min-height: auto; margin: 0; padding: 0; font-size: 10.5pt; }
+  h1 { font-size: 20pt; }
+  h2 { font-size: 15pt; }
+  .prose:has(+ .equation-block), .step-title, .step-title + p { break-after: avoid; }
+  .steps > li, .sources > ol > li { break-inside: avoid; }
+  .figure-scroll img { width: auto; max-width: 100%; min-width: 0; max-height: 136mm; }
+  .figure-scroll, .equation, .table-scroll { overflow: visible; }
+  details { display: none; }
+  .background-print { display: block; }
+  .background-question { font-weight: 600; break-after: avoid; }
+  .back, .study-nav { display: none; }
+  thead { display: table-header-group; }
+  tr { break-inside: avoid; }
+}
+
+.procedure-reasons { border-block-start: 1px solid #c6d7d9; margin-block: 1.1rem; }
+.procedure-reasons h4 { margin: .8em 0 .2em; }
+.procedure-reasons section, .steps > li { scroll-margin-block-start: .75rem; }
+.procedure-reasons section:target, .steps > li:target { outline: 2px solid #367c80; outline-offset: .15rem; }
+.step-reason-link, .procedure-reasons section > a { display: inline-block; padding-block: .5em; }
+@media print { .step-reason-link, .procedure-reasons section > a { display: none; } }
+
+.article-comparison { margin-block: .85rem 1.1rem; }
+.article-comparison__cases { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,14rem),1fr)); gap: .8rem; align-items: stretch; }
+.article-comparison__case { min-width: 0; border: 1px solid #c9d9d4; border-radius: .35rem; padding: .7rem .85rem; background: #fff; overflow-wrap: anywhere; }
+.article-comparison__case-title { display: block; font-weight: 700; border-bottom: 2px solid #4a837b; padding-bottom: .28rem; margin-bottom: .35rem; }
+.article-comparison__case-body ul { margin: 0; padding-inline-start: 1.12em; }
+.article-comparison__case-body li { margin-block: .23rem; }
+@media (max-width: 600px) {
+  .article-comparison__cases { grid-template-columns: repeat(auto-fit,minmax(min(100%,10rem),1fr)); gap: .45rem; }
+  .article-comparison__case { padding: .55rem .55rem; font-size: .91rem; line-height: 1.6; }
+}
+@media print { .article-comparison__case { break-inside: avoid; } }
+
+math menclose[notation="updiagonalstrike"]{background:linear-gradient(to bottom right,transparent calc(50% - 1.1px),#a72c28 calc(50% - .7px),#a72c28 calc(50% + .7px),transparent calc(50% + 1.1px));print-color-adjust:exact;-webkit-print-color-adjust:exact}
+math munder mtext,math mover mtext{color:#075d59;font-family:system-ui,sans-serif;font-weight:600}
+
+.numbered-equation { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .12rem .4rem; break-inside: avoid; scroll-margin-top: 1rem; }
+.numbered-equation > .equation { flex: 1 1 max-content; min-width: 0; }
+.equation-number { color: #40565c; margin-inline-start: auto; font-size: .88em; white-space: nowrap; }
+.equation-ref { white-space: nowrap; }
+.numbered-equation:target { outline: 2px solid #4a837b; outline-offset: 2px; }
+
+/* KaTeX aligned pairs retain equation alignment in native MathML viewers. */
+mtable[columnalign="right left"] > mtr > mtd:nth-child(odd) { text-align: right; }
+mtable[columnalign="right left"] > mtr > mtd:nth-child(even) { text-align: left; }
