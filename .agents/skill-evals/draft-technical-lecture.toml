@@ -82,8 +82,8 @@ criteria = [
 
 [[cases]]
 id = "repeated-derivative-variable-coefficients"
-prompt = "Students know D1 f = cos(v) f_u + sin(v) f_v and D2 f = -sin(v) f_u + cos(v) f_v for a twice continuously differentiable f. A lecture adds D1(D1 f) and D2(D2 f). Write a worked calculation students can reproduce independently."
-expected = ["Both product-rule expansions, evaluated coefficient derivatives, chain-rule substitutions, and a comparison yielding f_uu + f_vv - f_u"]
+prompt = "Students know D1 f = cos(v) f_u + sin(v) f_v and D2 f = -sin(v) f_u + cos(v) f_v for a twice continuously differentiable f. The target is Lf = D1(D1 f) + D2(D2 f) + f_ww, where w is an independent third coordinate. Write a worked calculation students can reproduce independently."
+expected = ["Both product-rule expansions, evaluated coefficient derivatives, chain-rule substitutions, and a comparison yielding f_uu + f_vv - f_u for the first two summands, followed by substitution in the given definition of Lf with f_ww carried through"]
 forbidden = ["Treating operator coefficients as constants", "Jumping from a named rule to the collected results", "Setting mixed derivatives individually to zero"]
 criteria = [
   { id = "request-bound", description = "Reconstructs the sum from the given two operators and states conditions used to commute the mixed derivatives" },
