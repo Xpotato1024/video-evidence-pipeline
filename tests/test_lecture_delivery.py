@@ -245,10 +245,12 @@ def test_audit_rules_and_omissions_use_frozen_sources(tmp_path: Path, monkeypatc
     values = json.loads(options.read_text(encoding="utf-8"))
     content_rule = "Trace the operation from the board."
     visual_rule = "Find the illustrated boundary."
-    values["profile"]["rules"].extend([
-        {"scope": "content_audit", "text": content_rule},
-        {"scope": "visual_audit", "text": visual_rule},
-    ])
+    values["profile"]["rules"].extend(
+        [
+            {"scope": "content_audit", "text": content_rule},
+            {"scope": "visual_audit", "text": visual_rule},
+        ]
+    )
     _write(options, values)
     prepared = tmp_path / "prepared"
     request, _ = lecture.prepare_lecture(index, options, prepared, documents=True)
@@ -259,15 +261,18 @@ def test_audit_rules_and_omissions_use_frozen_sources(tmp_path: Path, monkeypatc
     monkeypatch.setattr(lecture, "_render", _fake_render)
     lecture.render_lecture(prepared / "request.json", content, rendered)
     for kind, included, excluded in (
-        ("content", content_rule, visual_rule), ("visual", visual_rule, content_rule)
+        ("content", content_rule, visual_rule),
+        ("visual", visual_rule, content_rule),
     ):
         criteria = lecture.prepare_lecture_audit(rendered, kind)["criteria"]
         assert included in criteria and excluded not in criteria
 
     audit = _audit(rendered, "content", "reader")
     finding = {
-        "severity": "P1", "target_id": "derivations",
-        "detail": "A required operation is missing.", "source_refs": [omitted],
+        "severity": "P1",
+        "target_id": "derivations",
+        "detail": "A required operation is missing.",
+        "source_refs": [omitted],
     }
     audit["findings"] = [finding]
     content_audit = _write(tmp_path / "content-audit.json", audit)
