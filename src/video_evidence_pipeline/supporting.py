@@ -14,7 +14,12 @@ from pydantic import ValidationError
 
 from video_evidence_pipeline.domain.artifacts import ArtifactRef, artifact_file_matches
 from video_evidence_pipeline.domain.hashing import sha256_bytes, sha256_file
-from video_evidence_pipeline.domain.job import JobSpec, SupportingInputKind
+from video_evidence_pipeline.domain.job import (
+    RECOVERY_CLARIFICATION_PREFIX,
+    JobSpec,
+    SupportingInputKind,
+)
+from video_evidence_pipeline.domain.recovery import RecoveryClarificationPacket
 from video_evidence_pipeline.domain.serialization import fingerprint, pretty_json_bytes
 from video_evidence_pipeline.domain.supporting import (
     RenderedPdfPage,
@@ -30,6 +35,9 @@ from video_evidence_pipeline.storage.permissions import (
 )
 
 SUPPORTING_INPUT_IMPLEMENTATION_VERSION = "supporting-inputs-v1"
+CLARIFICATION_ORIGINAL = "supporting_clarification_original"
+CLARIFICATION_HISTORY = "supporting_clarification_history"
+CLARIFICATION_CONFIRMATIONS = "supporting_clarification_confirmations"
 _MAXIMUM_BINARY_BYTES = 512 * 1024 * 1024
 _MAXIMUM_TEXT_BYTES = 64 * 1024 * 1024
 _MAXIMUM_RENDERED_PAGE_BYTES = 32 * 1024 * 1024
@@ -59,6 +67,38 @@ def _verify_artifact(path: Path, artifact: ArtifactRef, *, deep: bool = False) -
         ) from None
 
 
+def _supporting_artifact(
+    payload: bytes,
+    *,
+    input_id: str,
+    artifact_type: str,
+    directory: str,
+    filename: str,
+) -> ArtifactRef:
+    content_sha256 = sha256_bytes(payload)
+    return ArtifactRef(
+        artifact_id=f"{input_id.lower()}-{artifact_type}-{content_sha256[:16]}",
+        artifact_type=artifact_type,
+        content_sha256=content_sha256,
+        size_bytes=len(payload),
+        relative_storage_path=f"supporting/{directory}/{content_sha256}/{filename}",
+    )
+
+
+def _publish_artifact(workspace: JobWorkspace, artifact: ArtifactRef, payload: bytes) -> None:
+    target = workspace.safe_path(artifact.relative_storage_path)
+    directory = workspace.root
+    for component in target.parent.relative_to(workspace.root).parts:
+        directory /= component
+        ensure_private_directory(directory)
+    try:
+        atomic_write_new_bytes(target, payload, private=True)
+    except VepError as exc:
+        if exc.code != "FILE_EXISTS":
+            raise
+    _verify_artifact(target, artifact)
+
+
 def _store(
     workspace: JobWorkspace,
     payload: bytes,
@@ -68,28 +108,81 @@ def _store(
     directory: str,
     filename: str,
 ) -> ArtifactRef:
-    content_sha256 = sha256_bytes(payload)
-    artifact = ArtifactRef(
-        artifact_id=f"{input_id.lower()}-{artifact_type}-{content_sha256[:16]}",
+    artifact = _supporting_artifact(
+        payload,
+        input_id=input_id,
         artifact_type=artifact_type,
-        content_sha256=content_sha256,
-        size_bytes=len(payload),
-        relative_storage_path=f"supporting/{directory}/{content_sha256}/{filename}",
+        directory=directory,
+        filename=filename,
     )
-    target = workspace.safe_path(artifact.relative_storage_path)
-    for directory_path in (
-        workspace.safe_path("supporting"),
-        workspace.safe_path(f"supporting/{directory}"),
-        target.parent,
-    ):
-        ensure_private_directory(directory_path)
-    try:
-        atomic_write_new_bytes(target, payload, private=True)
-    except VepError as exc:
-        if exc.code != "FILE_EXISTS":
-            raise
-    _verify_artifact(target, artifact)
+    _publish_artifact(workspace, artifact, payload)
     return artifact
+
+
+def recovery_clarification_note(payload: bytes, *, input_index: int) -> SupportingInputRecord:
+    """Describe exact original and text bytes for attributed clarification JSON."""
+    if not 0 < len(payload) <= _MAXIMUM_TEXT_BYTES:
+        raise state_error("RECOVERY_CLARIFICATIONS_TOO_LARGE", "clarification packet is too large")
+    input_id = f"S{input_index:06d}"
+    effective = _clarification_confirmations(payload)
+    return SupportingInputRecord(
+        input_id=input_id,
+        kind=SupportingInputKind.NOTES,
+        original_artifact=_supporting_artifact(
+            payload,
+            input_id=input_id,
+            artifact_type=CLARIFICATION_ORIGINAL,
+            directory="original",
+            filename="source.bin",
+        ),
+        canonical_text_artifact=_supporting_artifact(
+            effective if effective is not None else payload,
+            input_id=input_id,
+            artifact_type=CLARIFICATION_CONFIRMATIONS
+            if effective is not None
+            else CLARIFICATION_HISTORY,
+            directory="text",
+            filename="clarifications.json",
+        ),
+    )
+
+
+def _clarification_confirmations(payload: bytes) -> bytes | None:
+    packet = RecoveryClarificationPacket.model_validate_json(payload)
+    active = set(packet.active_resolutions.values())
+    if not active:
+        return None
+    return pretty_json_bytes(
+        {
+            "role": "effective_clarification_confirmations",
+            "parent_job_id": packet.parent_job_id,
+            "confirmations": [
+                item.model_dump(mode="json")
+                for item in packet.clarifications
+                if item.fingerprint in active
+            ],
+        }
+    )
+
+
+def publish_recovery_clarification_note(
+    workspace: JobWorkspace, record: SupportingInputRecord, payload: bytes
+) -> None:
+    _publish_artifact(workspace, record.original_artifact, payload)
+    text = record.canonical_text_artifact
+    assert text is not None
+    effective = _clarification_confirmations(payload)
+    _publish_artifact(workspace, text, effective if effective is not None else payload)
+
+
+def verify_recovery_clarification_note(
+    workspace: JobWorkspace, record: SupportingInputRecord
+) -> None:
+    for artifact in (record.original_artifact, record.canonical_text_artifact):
+        if artifact is not None:
+            _verify_artifact(
+                workspace.safe_path(artifact.relative_storage_path), artifact, deep=True
+            )
 
 
 def _read_local(path: Path, *, maximum_bytes: int) -> bytes:
@@ -185,6 +278,11 @@ def supporting_fingerprint(job: JobSpec, records: list[SupportingInputRecord]) -
 def _records(workspace: JobWorkspace, job: JobSpec) -> list[SupportingInputRecord]:
     records: list[SupportingInputRecord] = []
     for index, specification in enumerate(job.supporting_inputs, start=1):
+        if specification.locator.startswith(RECOVERY_CLARIFICATION_PREFIX):
+            raise integrity_error(
+                "RECOVERY_CLARIFICATION_SOURCE_INVALID",
+                "a generated clarification note requires its recovery manifest",
+            )
         input_id = f"S{index:06d}"
         source = Path(specification.locator)
         payload = _read_local(
@@ -299,7 +397,28 @@ def load_supporting_inputs(
         or [item.kind for item in manifest.inputs] != [item.kind for item in job.supporting_inputs]
     ):
         raise state_error("SUPPORTING_INPUT_STALE", "supporting input manifest does not match job")
-    for record in manifest.inputs:
+    for spec, record in zip(job.supporting_inputs, manifest.inputs, strict=True):
+        text = record.canonical_text_artifact
+        clarification = record.original_artifact.artifact_type == CLARIFICATION_ORIGINAL
+        if (
+            clarification != spec.locator.startswith(RECOVERY_CLARIFICATION_PREFIX)
+            or (
+                clarification
+                and spec.locator
+                != (
+                    f"{RECOVERY_CLARIFICATION_PREFIX}{record.input_id[1:]}/"
+                    f"{record.original_artifact.content_sha256}"
+                )
+            )
+            or (
+                text is not None
+                and clarification
+                != (text.artifact_type in {CLARIFICATION_CONFIRMATIONS, CLARIFICATION_HISTORY})
+            )
+        ):
+            raise integrity_error(
+                "RECOVERY_CLARIFICATION_SOURCE_INVALID", "clarification input binding is invalid"
+            )
         for artifact in (
             record.original_artifact,
             record.canonical_text_artifact,

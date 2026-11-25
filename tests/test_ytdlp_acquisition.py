@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import shutil
@@ -10,9 +11,12 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
-from yt_dlp import YoutubeDL
+from yt_dlp import YoutubeDL, parse_options
 from yt_dlp.extractor.panopto import PanoptoIE
+from yt_dlp.networking.common import Response
+from yt_dlp.networking.exceptions import HTTPError
 from yt_dlp.options import create_parser
+from yt_dlp.utils import DownloadError
 
 from video_evidence_pipeline.acquisition import ytdlp_runner
 from video_evidence_pipeline.acquisition.generic_ytdlp import GenericYtdlpAdapter
@@ -22,7 +26,7 @@ from video_evidence_pipeline.acquisition.runtime import (
     AcquisitionRuntimeConfig,
     BrowserCookieSource,
 )
-from video_evidence_pipeline.acquisition.staged import load_network_result
+from video_evidence_pipeline.acquisition.staged import StagedSource, load_network_result
 from video_evidence_pipeline.acquisition.ytdlp_runner import hardened_argv, run_ytdlp
 from video_evidence_pipeline.application import acquire_job, authorize_job, initialize_job
 from video_evidence_pipeline.domain.job import SourceKind, load_job_yaml
@@ -136,13 +140,13 @@ def test_panopto_progressive_lineage_from_pinned_extractor(tmp_path: Path) -> No
         ytdlp_runner._parse_lineage(path, None)
 
 
-def write_lineage(argv: list[str], *, adaptive: bool = False) -> None:
+def write_lineage(argv: list[str], *, adaptive: bool = False, protocol: str = "https") -> None:
     payload = {
         "final": {
             "format_id": "137+140" if adaptive else "22",
             "vcodec": "avc1.640028",
             "acodec": "mp4a.40.2",
-            "protocol": "https",
+            "protocol": protocol,
         },
         "components": (
             [
@@ -241,6 +245,13 @@ def test_hardened_ytdlp_argv_is_fixed_and_single_file(tmp_path: Path) -> None:
         "--no-update",
         "--no-playlist",
         "--abort-on-error",
+        "--abort-on-unavailable-fragments",
+        "--retries",
+        "3",
+        "--fragment-retries",
+        "3",
+        "--concurrent-fragments",
+        "1",
         "--no-cache-dir",
         "--no-write-info-json",
         "--no-write-description",
@@ -321,6 +332,85 @@ def test_hardened_argv_is_accepted_by_pinned_ytdlp_parser(
     assert positional == [locator]
     assert options.ignoreconfig is True
     assert options.usenetrc is False
+    assert options.skip_unavailable_fragments is False
+    assert options.fragment_retries == "3"
+
+
+@pytest.mark.parametrize("protocol", ["m3u8_native", "http_dash_segments"])
+@pytest.mark.parametrize("recover", [True, False], ids=["retry-recovers", "retry-exhausted"])
+def test_segmented_download_retries_in_order_and_rejects_missing_fragments(
+    tmp_path: Path, protocol: str, recover: bool
+) -> None:
+    workspace = workspace_for(tmp_path)
+    toolchain, toolchain_factory = fake_toolchain_factory(tmp_path)
+    calls: list[str] = []
+    origin = "https://cdn.example.invalid"
+    fragments = {"first.ts": b"first fragment", "second.ts": b"second", "last.ts": b"last"}
+    playlist = "\n".join(
+        ["#EXTM3U", "#EXT-X-PLAYLIST-TYPE:VOD", "#EXT-X-TARGETDURATION:1"]
+        + [line for name in fragments for line in ("#EXTINF:1.0,", name)]
+        + ["#EXT-X-ENDLIST", ""]
+    )
+
+    def runner(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        parsed = parse_options(argv[3:])
+        target = output_directory(argv) / "source.mp4"
+        info = {
+            "url": origin + ("/index.m3u8" if protocol == "m3u8_native" else "/manifest.mpd"),
+            "id": "synthetic-stream",
+            "title": "Synthetic stream",
+            "ext": "mp4",
+            "protocol": protocol,
+            "is_live": False,
+        }
+        if protocol == "http_dash_segments":
+            info["fragments"] = [{"url": f"{origin}/{name}"} for name in fragments]
+
+        def urlopen(request: object) -> Response:
+            url = request if isinstance(request, str) else request.url  # type: ignore[attr-defined]
+            name = url.rsplit("/", 1)[-1]
+            if name == "index.m3u8":
+                body = playlist.encode("utf-8")
+            else:
+                calls.append(name)
+                if name == "second.ts" and (not recover or calls.count(name) == 1):
+                    raise HTTPError(Response(io.BytesIO(), url, {}, status=503))
+                body = fragments[name]
+            return Response(io.BytesIO(body), url, {"Content-Length": str(len(body))})
+
+        with YoutubeDL(parsed.ydl_opts) as downloader:
+            downloader.urlopen = urlopen
+            try:
+                success, _ = downloader.dl(str(target), info)
+            except DownloadError:
+                success = False
+        if success:
+            write_lineage(argv, protocol=protocol)
+        return subprocess.CompletedProcess(argv, 0 if success else 1)
+
+    def acquire() -> StagedSource:
+        return run_ytdlp(
+            "https://videos.example.invalid/watch?v=stable-id",
+            workspace,
+            AcquisitionRuntimeConfig(maximum_download_bytes=64 * 1024),
+            adapter_kind=SourceKind.GENERIC_YTDLP,
+            runner=runner,
+            resolver=public_resolver,
+            toolchain_factory=toolchain_factory,
+        )
+
+    if recover:
+        staged = acquire()
+        assert staged.path.read_bytes() == b"".join(fragments.values())
+        assert staged.evidence.selected_formats[0].protocol == protocol
+        assert calls == ["first.ts", "second.ts", "second.ts", "last.ts"]
+    else:
+        with pytest.raises(VepError, match="last recorded fragment index: 1") as failure:
+            acquire()
+        assert failure.value.code == "YTDLP_SEGMENTED_INCOMPLETE"
+        assert calls == ["first.ts", "second.ts", "second.ts", "second.ts", "second.ts"]
+        assert not toolchain.validated
+        assert list(workspace.safe_path("source/staging").iterdir()) == []
 
 
 def test_browser_cookie_is_only_added_when_explicit(tmp_path: Path) -> None:

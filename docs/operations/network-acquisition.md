@@ -55,6 +55,25 @@ browser cookieは`--cookies-from-browser`が明示された`generic_ytdlp`、ま
 `panopto`だけで使用します。token value、Cookie file、Authorization header、任意のyt-dlp引数はCLI入力に
 できません。adapterに無関係なcredential optionはfail closedです。
 
+### AIから本人へ認証を引き継ぐ
+
+`vep workflow start --json`、`vep workflow run --json`、`vep acquire --json` は、
+PanoptoまたはBoxの認証待ちで `workflow_status: waiting_for_authentication` を返します。
+`authentication.actor` が `user` のとき、呼び出し側は `provider` と `methods` を使って本人の操作を案内します。
+
+| `authentication.methods[].kind` | 本人が行う操作 |
+| --- | --- |
+| `browser_session` | `browser` で示されたブラウザーでSSOやMFAを完了する。Panopto提供ドメインでは、元の入力を正規化した閲覧先を `browser_url` に返す。 |
+| `environment_token` | サービスで取得・更新したトークンを実行環境に設定する。`credential_options` は次回実行に必要なオプション名を示す。 |
+
+`authentication.action` は認証参照または値の設定が必要な `configure_credential` と、
+既存の認証を更新する `authenticate` を区別します。本人が操作を終えたら `resume.operation` が示す
+`workflow.run` または `acquire` に `resume.workspace` を渡して同じジョブを実行します。
+前回の実行時オプションを引き継ぎ、`resume.stop_after` があれば `--stop-after` に指定します。
+`workflow.start` が返る場合は workspace が未作成なので、元の入力から開始します。
+パスワード、MFAコード、トークン値はブラウザーまたは実行環境だけで扱います。
+提供元が認証済み利用者のアクセスを拒否した場合は、再認証の案内を出しません。
+
 ## Shared acquisition
 
 network adapterはmetadataだけのprobeを許容し、probeのためにbodyをdownloadしません。取得bodyはprivate
@@ -101,6 +120,10 @@ video／audio multistreamとcomponent残存は許可しません。yt-dlpへ渡�
 version／capability／executable SHA-256を検証してpinしたFFmpeg／ffprobe共通のabsolute bin directoryです。
 PATH上の別FFmpegへfallbackせず、実行後と公開前にidentity replacementを再検査します。
 
+ネイティブHLS・DASH取得ではHTTPと断片の自動再試行をそれぞれ3回に制限し、取得できない断片があれば中断します。
+断片取得の進捗を検出できる場合は `YTDLP_SEGMENTED_INCOMPLETE` を返します。
+途中ファイルは破棄し、再実行では取得をやり直します。検証と公開まで終えた取得物は同じジョブで再利用します。
+
 outputはprivate staging内のexactly one regular non-link fileだけを許可します。stdout／stderrはuser outputへ
 転送しません。browser cookieは明示時だけ使用し、Cookie file exportは標準経路にしません。
 全通信は内部のHTTPS-only local proxyを固定指定し、各`CONNECT`先をpublic-address検査して検証済みIPへpinします。
@@ -132,6 +155,10 @@ API認証を使う場合は`--panopto-token-env`にトークンを格納した�
 job IDはtenantと講義IDから自動生成します。認証を更新した後は同じ講義URLで再実行します。
 別のjobとして始めるときは`workflow start lecture-09`のように名前を指定できます。
 GPUの準備は[ASR runtimeの手順](asr-runtime.md)を参照してください。
+
+動画を取得して止める場合は `workflow start` または `workflow run` に `--stop-after acquired` を
+指定します。認可済みの既存ネットワークジョブにも `workflow run WORKSPACE --stop-after acquired` を
+使えます。ボックスAPI認証の参照を渡すときは `--box-token-env` を指定します。
 
 ### 取得経路の選択
 
@@ -176,8 +203,8 @@ Box SHA-1等はSHA-256の代用にせず、実bytesから独自にSHA-256を計�
 Shared-link failures are explicit: `BOX_SHARED_LINK_INVALID` covers an
 invalid/expired link or malformed shared-item response,
 `BOX_SHARED_ITEM_NOT_FILE` covers folders and other non-file items, and
-`BOX_ACCESS_DENIED` covers provider access denial. A missing configured token
-continues to use `BOX_CREDENTIAL_REQUIRED`.
+`BOX_REAUTH_REQUIRED` signals an HTTP 401 from the Box API, while `BOX_ACCESS_DENIED` signals HTTP 403.
+A missing configured token continues to use `BOX_CREDENTIAL_REQUIRED`.
 
 - `NETWORK_ACQUISITION_NOT_AUTHORIZED`: network permissionを明示して再認可可能な新jobを作成する。
 - `NETWORK_SSRF_REJECTED`: public HTTPS destinationか確認する。検査無効化optionはない。

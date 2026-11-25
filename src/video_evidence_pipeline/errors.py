@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import IntEnum
+from typing import Literal
 
 
 class ExitCode(IntEnum):
@@ -19,6 +20,7 @@ class VepError(Exception):
     code: str
     safe_message: str
     exit_code: ExitCode
+    authentication_method: Literal["browser_session", "environment_token"] | None = None
 
     def __str__(self) -> str:
         return self.safe_message

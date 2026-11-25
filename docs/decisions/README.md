@@ -18,7 +18,7 @@ source_issue: 1
 change_control: pull-request
 supersedes: []
 superseded_by: null
-related_documents: ["VEP-GOV-CHANGE", "VEP-ADR-TEMPLATE", "VEP-ARCH-TECH", "VEP-ADR-0001", "VEP-ADR-0002"]
+related_documents: ["VEP-GOV-CHANGE", "VEP-ADR-TEMPLATE", "VEP-ARCH-TECH", "VEP-ADR-0001", "VEP-ADR-0002", "VEP-ADR-0003"]
 ---
 # Architecture Decision Records
 
@@ -54,6 +54,7 @@ NNNN-short-kebab-title.md
 
 ## 5. 一覧
 
+- [0003-public-pipeline-exchange.md](0003-public-pipeline-exchange.md) — proposed
 - [0002-lecture-production-boundary.md](0002-lecture-production-boundary.md) — proposed
 - [`0001-network-acquisition-credential-and-ephemeral-locator-boundary.md`](0001-network-acquisition-credential-and-ephemeral-locator-boundary.md): accepted
 

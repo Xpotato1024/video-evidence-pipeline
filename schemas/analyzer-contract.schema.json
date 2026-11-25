@@ -29,6 +29,20 @@
       "title": "Response Schema Version",
       "type": "string"
     },
+    "uncertainty_policy": {
+      "anyOf": [
+        {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Uncertainty Policy"
+    },
     "version": {
       "const": "1.0",
       "default": "1.0",

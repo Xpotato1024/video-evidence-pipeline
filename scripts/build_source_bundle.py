@@ -27,6 +27,7 @@ REQUIRED_FILES = (
     "config/lecture-guidance.yaml",
     "renderer/document/inline.mjs",
     "renderer/package-lock.json",
+    "renderer/print-document.mjs",
     "renderer/render.mjs",
     "containers/asr/Dockerfile",
     "tools/ffmpeg-toolchain.json",

@@ -47,11 +47,14 @@ from video_evidence_pipeline.application import (
 )
 from video_evidence_pipeline.cli import app
 from video_evidence_pipeline.domain.authoring import DraftSpan
+from video_evidence_pipeline.domain.clarification import ClarificationInput, Confirmation
 from video_evidence_pipeline.domain.evidence import (
+    AmbiguityRecord,
     AnalyzerExecutionMode,
     EvidenceConfidence,
     EvidenceRecord,
     InterpretationLevel,
+    SourceRefKind,
 )
 from video_evidence_pipeline.domain.job import (
     AssignmentSpec,
@@ -66,6 +69,7 @@ from video_evidence_pipeline.domain.job import (
     requires_transcript_refinement,
 )
 from video_evidence_pipeline.domain.length import CharacterLengthConstraint
+from video_evidence_pipeline.domain.recovery import RecoveryManifest
 from video_evidence_pipeline.domain.refinement import (
     RefinementExecutionMode,
     RefinementResponseManifest,
@@ -75,7 +79,13 @@ from video_evidence_pipeline.domain.serialization import pretty_json_bytes
 from video_evidence_pipeline.domain.state import JobState
 from video_evidence_pipeline.domain.transitions import TransitionRecord
 from video_evidence_pipeline.errors import VepError
+from video_evidence_pipeline.evidence.clarifications import (
+    list_uncertainties,
+    record_clarification,
+)
 from video_evidence_pipeline.storage.jsonl import read_jsonl
+from video_evidence_pipeline.storage.layout import JobWorkspace
+from video_evidence_pipeline.supporting import load_supporting_inputs
 
 _BOX_SHARED_LINK = "https://acme.ent.box.com/s/syntheticsharedtoken"
 _FACT_ONE = "前年に100周年事業が行われた。"
@@ -91,6 +101,7 @@ def _transcript_parent(
     *,
     source_text: str | None = None,
     evidence_response_factory=None,
+    supporting_inputs: list[SupportingInputSpec] | None = None,
 ):
     repository = tmp_path / "r"
     repository.mkdir()
@@ -109,6 +120,7 @@ def _transcript_parent(
         output_format="markdown",
         requirements=["根拠のある事実だけを記述する"],
         primary_input=PrimaryInputKind.TRANSCRIPT,
+        supporting_inputs=supporting_inputs,
     )
     authorize_job(
         workspace.root,
@@ -153,7 +165,9 @@ def _transcript_parent(
     return workspace
 
 
-def _prepare_fresh_semantic_inputs(tmp_path: Path, workspace, job_id: str) -> None:
+def _prepare_fresh_semantic_inputs(
+    tmp_path: Path, workspace, job_id: str, *, evidence_response_factory=None
+) -> None:
     job = load_job_yaml(workspace.job_yaml)
     if requires_transcript_refinement(job):
         refinement = prepare_transcript_refinement_job(workspace.root).request
@@ -179,7 +193,11 @@ def _prepare_fresh_semantic_inputs(tmp_path: Path, workspace, job_id: str) -> No
     evidence_path = tmp_path / f"{job_id}-fresh-evidence.json"
     _write_evidence_response(
         evidence_path,
-        _evidence_response(evidence, execution_mode=AnalyzerExecutionMode.TEST_FIXTURE),
+        (
+            evidence_response_factory(evidence)
+            if evidence_response_factory is not None
+            else _evidence_response(evidence, execution_mode=AnalyzerExecutionMode.TEST_FIXTURE)
+        ),
     )
     _import_evidence_fixture(workspace.root, evidence_path)
     assert validate_job(workspace.root)["state"] == JobState.EVIDENCE_READY.value
@@ -489,6 +507,249 @@ def test_recovery_fork_reuses_only_pre_semantic_artifacts_and_keeps_parent_immut
     assert recovery["parent_job_id"] == parent.root.name
     assert recovery["parent_final_draft_sha256"] is None
     assert recovery["parent_finding_ids"] == []
+
+
+def test_recovery_freezes_attributed_clarifications_and_preserves_supporting_inputs(
+    tmp_path: Path,
+) -> None:
+    pdf = tmp_path / "evidence.pdf"
+    pdf.write_bytes(b"%PDF-1.4\nsynthetic supporting input\n")
+
+    def evidence_response(request):
+        return _evidence_response(
+            request,
+            execution_mode=AnalyzerExecutionMode.TEST_FIXTURE,
+            ambiguities=[
+                AmbiguityRecord(
+                    ambiguity_id="A000001",
+                    description="Owner could not be identified",
+                    source_refs=[request.transcript_refs[0]],
+                )
+            ],
+        )
+
+    parent = _transcript_parent(
+        tmp_path,
+        "confirmations-parent",
+        evidence_response_factory=evidence_response,
+        supporting_inputs=[SupportingInputSpec(kind=SupportingInputKind.PDF, locator=str(pdf))],
+    )
+    parent_job = load_job_yaml(parent.job_yaml)
+    parent_support = load_supporting_inputs(parent, parent_job)
+    parent_transcript = parent.transcript_manifest_json.read_bytes()
+    parent_evidence = parent.evidence_manifest_json.read_bytes()
+    pdf.unlink()
+
+    with pytest.raises(VepError) as missing:
+        recover_job(
+            parent.root,
+            "confirmations-missing",
+            confirm=True,
+            basis="follow up on the missing owner",
+            with_clarifications=True,
+        )
+    assert missing.value.code == "RECOVERY_CLARIFICATIONS_REQUIRED"
+    assert not (parent.jobs_root / "confirmations-missing").exists()
+
+    parent_fingerprint = list_uncertainties(parent.root)["evidence_bundle_fingerprint"]
+    confirmation_path = tmp_path / "clarification.json"
+    confirmation_path.write_bytes(
+        pretty_json_bytes(
+            ClarificationInput(
+                evidence_bundle_fingerprint=parent_fingerprint,
+                ambiguity_id="A000001",
+                decision="deferred",
+                rationale="The coordinator has not responded yet",
+            )
+        )
+    )
+    deferred = record_clarification(
+        parent.root, confirmation_path, operator="pytest", confirm=True
+    )["fingerprint"]
+    pending = recover_job(
+        parent.root,
+        "confirmations-pending",
+        confirm=True,
+        basis="carry the open question",
+        with_clarifications=True,
+    )
+    pending_note = (
+        load_supporting_inputs(pending.workspace, pending.job).inputs[-1].canonical_text_artifact
+    )
+    assert pending_note is not None
+    assert pending_note.artifact_type == "supporting_clarification_history"
+
+    def evidence_from_pending_notes(request):
+        pending_ref = next(
+            ref
+            for ref in request.approved_artifact_refs
+            if ref.content_sha256 == pending_note.content_sha256
+        )
+        assert pending_ref.kind is SourceRefKind.NOTES
+        return _evidence_response(
+            request,
+            execution_mode=AnalyzerExecutionMode.TEST_FIXTURE,
+            evidence=[
+                EvidenceRecord(
+                    evidence_id="E000001",
+                    observation="An owner was assigned.",
+                    interpretation_level=InterpretationLevel.EXTERNAL_FACT,
+                    confidence=EvidenceConfidence.HIGH,
+                    source_refs=[pending_ref],
+                )
+            ],
+        )
+
+    with pytest.raises(VepError, match="notes alone") as not_confirmed:
+        _prepare_fresh_semantic_inputs(
+            tmp_path,
+            pending.workspace,
+            pending.job.job_id,
+            evidence_response_factory=evidence_from_pending_notes,
+        )
+    assert not_confirmed.value.code == "NOTES_ONLY_EXTERNAL_FACT"
+
+    def confirm_owner(name: str, *, supersedes: str | None = None) -> str:
+        value = ClarificationInput(
+            evidence_bundle_fingerprint=parent_fingerprint,
+            ambiguity_id="A000001",
+            decision="resolved",
+            rationale="Confirmed after the meeting",
+            resolution=f"担当は「{name}」。",
+            confirmation=Confirmation(provided_by="会議の進行役", statement=f"担当は「{name}」。"),
+            supersedes=supersedes,
+        )
+        confirmation_path.write_bytes(pretty_json_bytes(value))
+        return record_clarification(
+            parent.root, confirmation_path, operator="pytest", confirm=True
+        )["fingerprint"]
+
+    first = confirm_owner("田中")
+    initial = recover_job(
+        parent.root,
+        "confirmations-child",
+        confirm=True,
+        basis="include the attributed follow-up",
+        with_clarifications=True,
+    )
+    assert initial.manifest.clarification_snapshot is not None
+    assert initial.manifest.clarification_snapshot.record_count == 2
+    new_support = load_supporting_inputs(initial.workspace, initial.job)
+    assert new_support.inputs[:-1] == parent_support.inputs
+    assert initial.job.supporting_inputs[:-1] == parent_job.supporting_inputs
+    note = new_support.inputs[-1].canonical_text_artifact
+    assert note is not None
+    note_path = initial.workspace.safe_path(note.relative_storage_path)
+    packet_path = initial.workspace.safe_path(
+        new_support.inputs[-1].original_artifact.relative_storage_path
+    )
+    frozen = note_path.read_bytes()
+    packet = json.loads(packet_path.read_bytes())
+    assert packet["role"] == "clarification_followup"
+    assert packet["ambiguities"][0]["status"] == "unresolved"
+    assert packet["active_resolutions"] == {"A000001": first}
+    record = packet["clarifications"][1]["record"]["clarification"]
+    assert record["confirmation"] == {
+        "provided_by": "会議の進行役",
+        "statement": "担当は「田中」。",
+    }
+    assert [item["fingerprint"] for item in json.loads(frozen)["confirmations"]] == [first]
+
+    second = confirm_owner("佐藤", supersedes=first)
+    assert validate_job(initial.workspace.root, deep=True)["state"] == JobState.TRANSCRIBED
+    assert note_path.read_bytes() == frozen
+    updated_result = CliRunner().invoke(
+        app,
+        [
+            "job",
+            "recover",
+            str(parent.root),
+            "confirmations-updated-child",
+            "--confirm",
+            "--basis",
+            "include the updated owner",
+            "--with-clarifications",
+            "--json",
+        ],
+    )
+    assert updated_result.exit_code == 0, updated_result.stdout
+    updated = JobWorkspace.open(Path(json.loads(updated_result.stdout)["workspace"]))
+    updated_manifest = RecoveryManifest.model_validate_json(
+        updated.recovery_manifest_json.read_bytes()
+    )
+    assert updated_manifest.clarification_snapshot is not None
+    assert updated_manifest.clarification_snapshot.record_count == 3
+    updated_support = load_supporting_inputs(updated, load_job_yaml(updated.job_yaml))
+    updated_note = updated_support.inputs[-1].canonical_text_artifact
+    assert updated_note is not None
+    updated_packet = json.loads(
+        updated.safe_path(
+            updated_support.inputs[-1].original_artifact.relative_storage_path
+        ).read_bytes()
+    )
+    assert updated_packet["active_resolutions"] == {"A000001": second}
+    assert [item["fingerprint"] for item in updated_packet["clarifications"]] == [
+        deferred,
+        first,
+        second,
+    ]
+    updated_view = json.loads(updated.safe_path(updated_note.relative_storage_path).read_bytes())
+    assert [item["fingerprint"] for item in updated_view["confirmations"]] == [second]
+    assert parent.transcript_manifest_json.read_bytes() == parent_transcript
+    assert parent.evidence_manifest_json.read_bytes() == parent_evidence
+
+    refinement = prepare_transcript_refinement_job(initial.workspace.root).request
+    assert all(
+        reference.content_sha256 != note.content_sha256
+        for reference in refinement.available_source_refs
+    )
+    assert any(
+        reference.kind is SourceRefKind.APPROVED_ARTIFACT
+        for reference in refinement.available_source_refs
+    )
+
+    def evidence_from_confirmation(request):
+        reference = next(
+            item
+            for item in request.approved_artifact_refs
+            if item.content_sha256 == note.content_sha256
+        )
+        assert reference.kind is SourceRefKind.APPROVED_ARTIFACT
+        return _evidence_response(
+            request,
+            execution_mode=AnalyzerExecutionMode.TEST_FIXTURE,
+            evidence=[
+                EvidenceRecord(
+                    evidence_id="E000001",
+                    observation="The coordinator later confirmed the owner.",
+                    interpretation_level=InterpretationLevel.EXTERNAL_FACT,
+                    confidence=EvidenceConfidence.HIGH,
+                    source_refs=[reference],
+                )
+            ],
+        )
+
+    _prepare_fresh_semantic_inputs(
+        tmp_path,
+        initial.workspace,
+        initial.job.job_id,
+        evidence_response_factory=evidence_from_confirmation,
+    )
+    request = prepare_authoring_job(initial.workspace.root, "draft-video-report").request
+    assert (
+        request.fixed_evidence.evidence_records[0].source_refs[0].content_sha256
+        == note.content_sha256
+    )
+    assert any(
+        reference.kind is SourceRefKind.APPROVED_ARTIFACT
+        and reference.content_sha256 == note.content_sha256
+        for reference in request.fixed_evidence.evidence_request.approved_artifact_refs
+    )
+
+    note_path.write_bytes(b" " + frozen[1:])
+    with pytest.raises(VepError) as changed:
+        validate_job(initial.workspace.root, deep=True)
+    assert changed.value.code == "SUPPORTING_INPUT_TAMPERED"
 
 
 def test_recovery_accepts_a_blocked_parent_without_category_gate(tmp_path: Path) -> None:

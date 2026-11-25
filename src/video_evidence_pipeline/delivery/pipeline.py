@@ -260,10 +260,12 @@ def _require_marker_free(payload: bytes) -> None:
 def ensure_approved_draft_marker_free(
     workspace: JobWorkspace,
     artifact: ArtifactRef,
+    *,
+    deep: bool = False,
 ) -> bytes:
-    """Return fully verified approved bytes only when they contain no confirmation marker."""
+    """Read approved bytes and reject any remaining confirmation marker."""
 
-    payload = _verified_draft_bytes(workspace, artifact, code="APPROVAL_STALE")
+    payload = _verified_draft_bytes(workspace, artifact, code="APPROVAL_STALE", deep=deep)
     _require_marker_free(payload)
     return payload
 

@@ -7,6 +7,7 @@ import os
 import re
 import sys
 from collections.abc import Callable
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -15,6 +16,7 @@ from pydantic import ValidationError
 from typer.core import _click as click
 
 from video_evidence_pipeline import __version__
+from video_evidence_pipeline.acquisition.authentication import authentication_handoff
 from video_evidence_pipeline.acquisition.runtime import (
     AcquisitionRuntimeConfig,
     BrowserCookieSource,
@@ -53,7 +55,7 @@ from video_evidence_pipeline.domain.job import (
     load_job_yaml,
     primary_input_kind,
 )
-from video_evidence_pipeline.domain.lecture import AuditKind
+from video_evidence_pipeline.domain.lecture import RENDER_OUTPUTS, AuditKind
 from video_evidence_pipeline.domain.transcription import (
     MAXIMUM_ASR_WORKER_REQUEST_BYTES,
     AsrWorkerRequest,
@@ -66,9 +68,34 @@ from video_evidence_pipeline.domain.transcription import (
 from video_evidence_pipeline.errors import VepError, configuration_error, state_error
 from video_evidence_pipeline.schemas.generation import check_schemas, export_schemas
 from video_evidence_pipeline.url_workflow import (
+    UrlWorkflowStage,
     run_url_workflow,
     start_url_workflow,
+    url_workflow_workspace_path,
 )
+
+
+class DocumentPreset(StrEnum):
+    SUMMARY = "summary"
+    MEETING_MINUTES = "meeting-minutes"
+    REPORT = "report"
+
+
+def _document_task_type(
+    task_type: str | None, preset: DocumentPreset | None, *, default: str | None = None
+) -> str:
+    if task_type is not None and preset is not None:
+        raise configuration_error(
+            "DOCUMENT_PRESET_CONFLICT", "choose either --preset or --task-type"
+        )
+    if preset is not None:
+        return preset.value
+    if task_type is not None:
+        return task_type
+    if default is not None:
+        return default
+    raise configuration_error("DOCUMENT_PRESET_REQUIRED", "choose --preset or specify --task-type")
+
 
 _ASR_CONTAINER_ROOT = Path("/opt/vep")
 _ASR_INTERNAL_MARKER = "VEP_ASR_INTERNAL_RUNTIME"
@@ -365,14 +392,44 @@ def doctor(
         raise typer.Exit(code=2)
 
 
+@app.command("presets")
+def list_presets(
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """List public document kinds, generation entry points, and output formats."""
+    _emit(
+        {
+            "ok": True,
+            "presets": [
+                {
+                    "id": preset.value,
+                    "authoring": "job init --preset",
+                    "formats": ["markdown", "html", "pdf"],
+                }
+                for preset in DocumentPreset
+            ]
+            + [
+                {
+                    "id": "lecture",
+                    "authoring": "lecture prepare",
+                    "modes": ["worked_explanation", "submission_answer"],
+                    "formats": ["markdown", "mdx", "html", "pdf", "sites"],
+                }
+            ],
+        },
+        json_output=json_output,
+    )
+
+
 @job_app.command("init")
 def job_init(
     job_id: str,
     source_kind: Annotated[SourceKind, typer.Option("--source-kind")],
     source: Annotated[str, typer.Option("--source")],
-    task_type: Annotated[str, typer.Option("--task-type")],
     language: Annotated[str, typer.Option("--language")],
     output_format: Annotated[str, typer.Option("--output-format")],
+    task_type: Annotated[str | None, typer.Option("--task-type")] = None,
+    preset: Annotated[DocumentPreset | None, typer.Option("--preset")] = None,
     requirement: Annotated[
         list[str] | None,
         typer.Option("--requirement", help="Repeat for each ordered assignment requirement."),
@@ -406,7 +463,7 @@ def job_init(
             job_id=job_id,
             source_kind=source_kind,
             source=source,
-            task_type=task_type,
+            task_type=_document_task_type(task_type, preset),
             language=language,
             output_format=output_format,
             requirements=requirement,
@@ -444,6 +501,7 @@ def job_recover(
     basis: Annotated[str, typer.Option("--basis")],
     confirm: Annotated[bool, typer.Option("--confirm")] = False,
     child_spec: Annotated[Path | None, typer.Option("--child-spec")] = None,
+    with_clarifications: Annotated[bool, typer.Option("--with-clarifications")] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     """Fork verified pre-semantic artifacts from a transcript-bearing parent."""
@@ -455,6 +513,7 @@ def job_recover(
             confirm=confirm,
             basis=basis,
             child_spec_path=child_spec,
+            with_clarifications=with_clarifications,
         ),
         json_output=json_output,
     )
@@ -467,6 +526,15 @@ def job_recover(
             "parent_job_id": result.manifest.parent_job_id,
             "parent_finding_ids": result.manifest.parent_finding_ids,
             "recovery_basis": result.manifest.recovery_basis,
+            **(
+                {
+                    "clarification_snapshot": result.manifest.clarification_snapshot.model_dump(
+                        mode="json"
+                    )
+                }
+                if result.manifest.clarification_snapshot is not None
+                else {}
+            ),
         },
         json_output=json_output,
     )
@@ -528,11 +596,14 @@ def status(
 @job_app.command("guide")
 def guide(
     workspace: Path,
+    plan: Annotated[
+        bool, typer.Option("--plan", help="Include input and dependency information for the job.")
+    ] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     """Show the next safe public operation without changing the workspace."""
 
-    result = _run(lambda: job_guide(workspace), json_output=json_output)
+    result = _run(lambda: job_guide(workspace, include_plan=plan), json_output=json_output)
     _emit({"ok": result["status"] != "integrity-error", **result}, json_output=json_output)
 
 
@@ -589,6 +660,18 @@ def export_delivery(
     confirm_private_export: Annotated[bool, typer.Option("--confirm-private-export")] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
+    if export_format in {"html", "pdf"}:
+        from video_evidence_pipeline.delivery.document import render_document_job
+
+        def render_document():
+            if destination is None or confirm_private_export:
+                raise configuration_error(
+                    "DOCUMENT_EXPORT_OPTIONS_INVALID", "HTML and PDF export require --destination"
+                )
+            return render_document_job(workspace, destination, export_format)
+
+        _emit(_run(render_document, json_output=json_output), json_output=json_output)
+        return
     if export_format == "study-bundle":
         from video_evidence_pipeline.application import export_study_bundle_job
 
@@ -675,7 +758,21 @@ def acquire(
             maximum_download_seconds=maximum_download_seconds,
             maximum_download_bytes=maximum_download_bytes,
         )
-        return acquire_job(workspace, runtime)
+        try:
+            return acquire_job(workspace, runtime)
+        except VepError as error:
+            handoff = authentication_handoff(
+                error, runtime=runtime, panopto_locator=None, via_workflow=False
+            )
+            if handoff is not None:
+                _workflow_failure(
+                    workspace,
+                    error,
+                    runtime=runtime,
+                    operation="acquire",
+                    json_output=json_output,
+                )
+            raise
 
     result = _run(acquire_with_runtime_config, json_output=json_output)
     artifact = result.source_manifest.artifact_record.artifact
@@ -784,16 +881,6 @@ def transcribe(
     )
 
 
-_PANOPTO_AUTH_WAIT_CODES = {
-    "PANOPTO_AUTH_REFERENCE_REQUIRED",
-    "PANOPTO_AUTHENTICATION_REQUIRED",
-    "PANOPTO_AUTHENTICATION_EXPIRED",
-    "PANOPTO_CREDENTIAL_REQUIRED",
-    "PANOPTO_MFA_REQUIRED",
-    "PANOPTO_REAUTH_REQUIRED",
-    "PANOPTO_SSO_REQUIRED",
-}
-
 _GPU_RETRY_CODES = {
     "ASR_CONTAINER_RUNTIME_UNAVAILABLE",
     "ASR_DEVICE_UNAVAILABLE",
@@ -803,6 +890,7 @@ _GPU_RETRY_CODES = {
 }
 
 _WORKFLOW_STOP_CODES = {
+    "BOX_ACCESS_DENIED",
     "PANOPTO_ACCESS_DENIED",
     "PANOPTO_DRM_RESTRICTED",
     "PANOPTO_PLAYBACK_DENIED",
@@ -810,8 +898,10 @@ _WORKFLOW_STOP_CODES = {
     "PANOPTO_SESSION_NOT_FOUND",
     "PANOPTO_TENANT_MISMATCH",
     "PANOPTO_VIEWER_DENIED",
+    "PANOPTO_VIEWER_ID_MISMATCH",
     "SOURCE_CONTENT_CHANGED",
     "URL_WORKFLOW_JOB_MISMATCH",
+    "URL_WORKFLOW_INPUT_UNSUPPORTED",
     "URL_WORKFLOW_SOURCE_UNSUPPORTED",
     "URL_WORKFLOW_STATE_UNSUPPORTED",
 }
@@ -843,35 +933,64 @@ def _workflow_result_payload(result: Any) -> dict[str, Any]:
     }
 
 
-def _workflow_failure(workspace: Path, error: VepError, *, json_output: bool) -> None:
+def _workflow_failure(
+    workspace: Path,
+    error: VepError,
+    *,
+    runtime: AcquisitionRuntimeConfig | None = None,
+    operation: str = "workflow.run",
+    panopto_locator: str | None = None,
+    stop_after: UrlWorkflowStage | None = None,
+    json_output: bool,
+) -> None:
     stored_state: str | None = None
+    status_valid = False
     try:
-        status, _status_code = job_status(workspace)
+        status, status_code = job_status(workspace)
         stored_state = status.get("stored_state")
+        status_valid = status_code == 0
     except VepError:
         pass
-    waiting_for_authentication = error.code in _PANOPTO_AUTH_WAIT_CODES
+    if panopto_locator is None and status_valid:
+        from video_evidence_pipeline.storage.layout import JobWorkspace
+
+        try:
+            job = load_job_yaml(JobWorkspace.open(workspace).job_yaml)
+        except VepError:
+            pass
+        else:
+            if job.source.kind is SourceKind.PANOPTO:
+                panopto_locator = job.source.locator
+    authentication = authentication_handoff(
+        error,
+        runtime=runtime,
+        panopto_locator=panopto_locator,
+        via_workflow=operation != "acquire",
+    )
+    waiting_for_authentication = authentication is not None and (
+        (status_valid and stored_state == "AUTHORIZED")
+        or (operation == "workflow.start" and stored_state is None)
+    )
     resume_supported = (
-        stored_state in {"AUTHORIZED", "ACQUIRED", "NORMALIZED"}
+        status_valid
+        and stored_state in {"AUTHORIZED", "ACQUIRED", "NORMALIZED"}
         and error.exit_code.value != 5
         and error.code not in _WORKFLOW_STOP_CODES
-    ) or (waiting_for_authentication and stored_state is None)
+    ) or waiting_for_authentication
     if waiting_for_authentication:
-        if stored_state == "AUTHORIZED":
+        assert authentication is not None
+        if authentication["provider"] == "panopto" and stored_state == "AUTHORIZED":
             action = (
                 "Refresh the configured Panopto browser session or token reference, then rerun this "
                 "same command. The job remains authorized and no credential value is stored."
             )
-        elif stored_state is None:
+        elif authentication["provider"] == "panopto" and stored_state is None:
             action = (
                 "Select the same learner's browser session or token reference, then rerun this "
                 "command. No job was created and no credential value was stored."
             )
         else:
-            action = (
-                "Refresh the configured Panopto browser session or token reference, then rerun this "
-                "command. No credential value is stored."
-            )
+            action = "Configure or refresh the Box token reference, then resume acquisition."
         status_name = "waiting_for_authentication"
     elif error.code in _GPU_RETRY_CODES and stored_state == "NORMALIZED":
         action = (
@@ -888,24 +1007,34 @@ def _workflow_failure(workspace: Path, error: VepError, *, json_output: bool) ->
     else:
         action = None
         status_name = "stopped"
-    _emit(
-        {
-            "ok": False,
-            "workflow_status": status_name,
-            "job_id": workspace.name,
-            "job_state": stored_state,
-            "resume_supported": resume_supported,
-            "resume_action": action,
-            "error": {"code": error.code, "message": error.safe_message},
-        },
-        json_output=json_output,
-    )
+    payload = {
+        "ok": False,
+        "workflow_status": status_name,
+        "job_id": workspace.name,
+        "job_state": stored_state,
+        "resume_supported": resume_supported,
+        "resume_action": action,
+        "error": {"code": error.code, "message": error.safe_message},
+    }
+    if waiting_for_authentication:
+        payload["authentication"] = authentication
+    if resume_supported:
+        next_operation = (
+            "workflow.run" if operation == "workflow.start" and stored_state else operation
+        )
+        payload["resume"] = {
+            "operation": next_operation,
+            "workspace": str(workspace.absolute()) if stored_state else None,
+            "reuse_runtime_options": True,
+            **({"stop_after": stop_after.value} if stop_after is not None else {}),
+        }
+    _emit(payload, json_output=json_output)
     raise typer.Exit(code=int(error.exit_code))
 
 
 def _workflow_workspace_path(job_id: str | None) -> Path:
     if job_id and re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", job_id):
-        return Path.cwd() / ".local" / "jobs" / job_id
+        return url_workflow_workspace_path(Path.cwd(), job_id)
     return Path.cwd()
 
 
@@ -934,7 +1063,8 @@ def workflow_start(
         bool,
         typer.Option("--confirm-save", help="Confirm authorized saving and local processing."),
     ] = False,
-    task_type: Annotated[str, typer.Option("--task-type")] = "summary",
+    task_type: Annotated[str | None, typer.Option("--task-type")] = None,
+    preset: Annotated[DocumentPreset | None, typer.Option("--preset")] = None,
     language: Annotated[str, typer.Option("--language")] = "ja",
     output_format: Annotated[str, typer.Option("--output-format")] = "markdown",
     requirement: Annotated[
@@ -973,6 +1103,10 @@ def workflow_start(
         str,
         typer.Option("--asr-device", help="Explicit GPU device: cuda or cuda:<index>."),
     ] = "cuda",
+    stop_after: Annotated[
+        UrlWorkflowStage,
+        typer.Option("--stop-after", help="Choose acquired for download only, without ASR."),
+    ] = UrlWorkflowStage.TRANSCRIBED,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     # Validate consent before reading a potentially credential-bearing URL from stdin.
@@ -983,9 +1117,12 @@ def workflow_start(
                 "SAVE_AUTHORIZATION_CONFIRMATION_REQUIRED",
                 "starting this workflow requires --confirm-save and an authorization basis",
             ),
+            operation="workflow.start",
             json_output=json_output,
         )
     workspace = _workflow_workspace_path(job_id)
+    runtime = None
+    source_locator = None
     try:
         source_locator = _panopto_workflow_source(source, source_stdin=source_stdin)
         if job_id is None:
@@ -993,40 +1130,51 @@ def workflow_start(
 
             job_id = f"panopto-{locator_fingerprint(source_locator)[:32]}"
             workspace = _workflow_workspace_path(job_id)
+        runtime = AcquisitionRuntimeConfig(
+            cookies_from_browser=cookies_from_browser,
+            panopto_token_env=panopto_token_env,
+            panopto_tenant_host=panopto_tenant_host,
+            panopto_ytdlp_fallback=cookies_from_browser is not None,
+            network_timeout_seconds=network_timeout,
+            maximum_download_seconds=maximum_download_seconds,
+            maximum_download_bytes=maximum_download_bytes,
+        )
         result = start_url_workflow(
             Path.cwd(),
             job_id=job_id,
             source_locator=source_locator,
             authorization_basis=basis,
             confirm_save=confirm_save,
-            task_type=task_type,
+            task_type=_document_task_type(task_type, preset, default="summary"),
             language=language,
             output_format=output_format,
             requirements=requirement,
             purpose=purpose,
             audience=audience,
             confirmer_identity=confirmer,
-            runtime_config=AcquisitionRuntimeConfig(
-                cookies_from_browser=cookies_from_browser,
-                panopto_token_env=panopto_token_env,
-                panopto_tenant_host=panopto_tenant_host,
-                panopto_ytdlp_fallback=cookies_from_browser is not None,
-                network_timeout_seconds=network_timeout,
-                maximum_download_seconds=maximum_download_seconds,
-                maximum_download_bytes=maximum_download_bytes,
-            ),
+            runtime_config=runtime,
             preferred_languages=preferred_language,
             minimum_caption_coverage=minimum_caption_coverage,
             asr_language=asr_language,
             asr_profile=asr_profile,
             asr_device=asr_device,
+            stop_after=stop_after,
         )
     except VepError as error:
-        _workflow_failure(workspace, error, json_output=json_output)
+        _workflow_failure(
+            workspace,
+            error,
+            runtime=runtime,
+            operation="workflow.start",
+            panopto_locator=source_locator,
+            stop_after=stop_after,
+            json_output=json_output,
+        )
     except ValidationError:
         _workflow_failure(
             workspace,
             configuration_error("CONFIG_INVALID", "workflow configuration is invalid"),
+            operation="workflow.start",
             json_output=json_output,
         )
     _emit(_workflow_result_payload(result), json_output=json_output)
@@ -1039,6 +1187,7 @@ def workflow_run(
         BrowserCookieSource | None,
         typer.Option("--cookies-from-browser"),
     ] = None,
+    box_token_env: Annotated[str | None, typer.Option("--box-token-env")] = None,
     panopto_token_env: Annotated[str | None, typer.Option("--panopto-token-env")] = None,
     panopto_tenant_host: Annotated[str | None, typer.Option("--panopto-tenant-host")] = None,
     network_timeout: Annotated[float, typer.Option("--network-timeout")] = 30.0,
@@ -1064,28 +1213,37 @@ def workflow_run(
         str,
         typer.Option("--asr-device", help="Explicit GPU device: cuda or cuda:<index>."),
     ] = "cuda",
+    stop_after: Annotated[
+        UrlWorkflowStage,
+        typer.Option("--stop-after", help="Choose acquired for download only, without ASR."),
+    ] = UrlWorkflowStage.TRANSCRIBED,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
+    runtime = None
     try:
+        runtime = AcquisitionRuntimeConfig(
+            cookies_from_browser=cookies_from_browser,
+            box_token_env=box_token_env,
+            panopto_token_env=panopto_token_env,
+            panopto_tenant_host=panopto_tenant_host,
+            network_timeout_seconds=network_timeout,
+            maximum_download_seconds=maximum_download_seconds,
+            maximum_download_bytes=maximum_download_bytes,
+        )
         result = run_url_workflow(
             workspace,
-            runtime_config=AcquisitionRuntimeConfig(
-                cookies_from_browser=cookies_from_browser,
-                panopto_token_env=panopto_token_env,
-                panopto_tenant_host=panopto_tenant_host,
-                panopto_ytdlp_fallback=cookies_from_browser is not None,
-                network_timeout_seconds=network_timeout,
-                maximum_download_seconds=maximum_download_seconds,
-                maximum_download_bytes=maximum_download_bytes,
-            ),
+            runtime_config=runtime,
             preferred_languages=preferred_language,
             minimum_caption_coverage=minimum_caption_coverage,
             asr_language=asr_language,
             asr_profile=asr_profile,
             asr_device=asr_device,
+            stop_after=stop_after,
         )
     except VepError as error:
-        _workflow_failure(workspace, error, json_output=json_output)
+        _workflow_failure(
+            workspace, error, runtime=runtime, stop_after=stop_after, json_output=json_output
+        )
     except ValidationError:
         _workflow_failure(
             workspace,
@@ -1365,6 +1523,38 @@ def evidence_import(
     )
 
 
+@evidence_app.command("uncertainties")
+def evidence_uncertainties(
+    workspace: Path,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """List unresolved evidence, questions, and recorded clarifications."""
+    from video_evidence_pipeline.evidence.clarifications import list_uncertainties
+
+    _emit(
+        _run(lambda: list_uncertainties(workspace), json_output=json_output),
+        json_output=json_output,
+    )
+
+
+@evidence_app.command("clarify")
+def evidence_clarify(
+    workspace: Path,
+    response: Annotated[Path, typer.Option("--response")],
+    operator: Annotated[str, typer.Option("--operator")],
+    confirm: Annotated[bool, typer.Option("--confirm")] = False,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Record a clarification against the validated evidence without replacing the source."""
+    from video_evidence_pipeline.evidence.clarifications import record_clarification
+
+    result = _run(
+        lambda: record_clarification(workspace, response, operator=operator, confirm=confirm),
+        json_output=json_output,
+    )
+    _emit(result, json_output=json_output)
+
+
 @author_app.command("prepare")
 def author_prepare(
     workspace: Path,
@@ -1637,6 +1827,7 @@ def lecture_prepare(
     archive: Annotated[bool, typer.Option("--archive")] = False,
     documents: Annotated[bool, typer.Option("--documents")] = False,
     document_index: Annotated[Path | None, typer.Option("--document-index")] = None,
+    with_clarifications: Annotated[bool, typer.Option("--with-clarifications")] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     """Freeze validated evidence and the lecture authoring profile."""
@@ -1650,6 +1841,7 @@ def lecture_prepare(
             archive=archive,
             documents=documents,
             document_index=document_index,
+            with_clarifications=with_clarifications,
         ),
         json_output=json_output,
     )
@@ -1699,13 +1891,17 @@ def lecture_render(
     content: Path,
     destination: Annotated[Path, typer.Option("--destination")],
     assets: Annotated[Path | None, typer.Option("--assets")] = None,
+    formats: Annotated[
+        list[str] | None,
+        typer.Option("--format", help="Repeat for markdown, mdx, html, pdf, or sites."),
+    ] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     """Validate the authoring response and render a candidate offline."""
     from video_evidence_pipeline.delivery.lecture import render_lecture
 
     digest, reused = _run(
-        lambda: render_lecture(request, content, destination, assets=assets),
+        lambda: render_lecture(request, content, destination, assets=assets, formats=formats),
         json_output=json_output,
     )
     _emit(
@@ -1715,6 +1911,15 @@ def lecture_render(
             "render_path": str(destination.absolute()),
             "render_fingerprint": digest,
             "reused": reused,
+            **(
+                {
+                    "outputs": {
+                        name: path for name, path in RENDER_OUTPUTS.items() if name in formats
+                    }
+                }
+                if formats is not None
+                else {}
+            ),
         },
         json_output=json_output,
     )

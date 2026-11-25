@@ -416,3 +416,21 @@ documents:
   owners:
   - Xpotato1024
   metadata_mode: front-matter
+- document_id: VEP-OPS-PUBLIC-WORKFLOW
+  path: docs/operations/public-workflow.md
+  document_type: operations
+  status: active
+  canonical: true
+  canonical_for: public-workflow
+  owners:
+  - Xpotato1024
+  metadata_mode: registry-only
+- document_id: VEP-ADR-0003
+  path: docs/decisions/0003-public-pipeline-exchange.md
+  document_type: architecture-decision-record
+  status: proposed
+  canonical: false
+  canonical_for: null
+  owners:
+  - Xpotato1024
+  metadata_mode: front-matter

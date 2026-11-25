@@ -660,6 +660,7 @@
           "enum": [
             "current_lecture",
             "previous_lecture",
+            "clarification",
             "supplement"
           ],
           "title": "Kind",

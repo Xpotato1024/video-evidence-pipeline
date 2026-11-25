@@ -36,6 +36,40 @@ def _workspace_snapshot(root: Path) -> dict[str, tuple[bytes, int]]:
     }
 
 
+def test_public_presets_are_discoverable_and_select_a_document_kind(tmp_path: Path) -> None:
+    presets = run_vep(tmp_path, "presets", "--json")
+    assert presets.returncode == 0, presets.stderr
+    available = {item["id"]: item for item in json.loads(presets.stdout)["presets"]}
+    assert set(available) == {"summary", "meeting-minutes", "report", "lecture"}
+    assert available["meeting-minutes"]["formats"] == ["markdown", "html", "pdf"]
+
+    source = tmp_path / "transcript.txt"
+    source.write_text("The proposal was agreed.", encoding="utf-8")
+    options = (
+        "--source-kind",
+        "local_file",
+        "--source",
+        str(source),
+        "--primary-input",
+        "transcript",
+        "--language",
+        "en",
+        "--output-format",
+        "markdown",
+        "--preset",
+        "meeting-minutes",
+        "--json",
+    )
+    conflict = run_vep(tmp_path, "job", "init", "conflict", *options, "--task-type", "report")
+    assert json.loads(conflict.stdout)["error"]["code"] == "DOCUMENT_PRESET_CONFLICT"
+    assert not (tmp_path / ".local/jobs/conflict").exists()
+    created = run_vep(tmp_path, "job", "init", "minutes", *options)
+    assert created.returncode == 0, created.stderr
+    job = load_job_yaml(tmp_path / ".local/jobs/minutes/job.yaml")
+    assert job.assignment.task_type == "meeting-minutes"
+    assert job.output.format == "markdown"
+
+
 def test_cli_assignment_intent_and_job_guide_are_read_only(tmp_path: Path) -> None:
     source = tmp_path / "synthetic.txt"
     source.write_text("synthetic transcript", encoding="utf-8")
@@ -69,7 +103,7 @@ def test_cli_assignment_intent_and_job_guide_are_read_only(tmp_path: Path) -> No
     assert job.assignment.audience == "初めて参加する一般利用者"
 
     before = _workspace_snapshot(workspace)
-    json_result = run_vep(tmp_path, "job", "guide", str(workspace), "--json")
+    json_result = run_vep(tmp_path, "job", "guide", str(workspace), "--plan", "--json")
     human_result = run_vep(tmp_path, "job", "guide", str(workspace))
     after = _workspace_snapshot(workspace)
 
@@ -80,6 +114,9 @@ def test_cli_assignment_intent_and_job_guide_are_read_only(tmp_path: Path) -> No
     assert payload["next_operation"] == "authorize"
     assert payload["guide_read_only"] is True
     assert payload["side_effects"]["workspace_write"] is True
+    assert payload["plan"]["network_acquisition"] is False
+    assert payload["plan"]["speech_recognition"] == "not_required"
+    assert payload["plan"]["requested_output_format"] == "markdown"
     assert "next_operation: authorize" in human_result.stdout
     assert before == after
     assert not (workspace / "refinement/request.json").exists()
