@@ -21,9 +21,15 @@ pub struct ConfirmedPlan {
 impl ConfirmedPlan {
     pub fn new(value: Value, inputs: Inputs, rollback: bool) -> Result<Self, &'static str> {
         let body = &value["plan"];
-        if value["development_only"] != true
+        let user = value["installation_mode"] == "user";
+        if value["development_only"] != !user
             || value["publisher_authenticated"] != false
-            || body["schema"] != "vep.sandbox-plan.v1"
+            || body["schema"]
+                != if user {
+                    "vep.user-plan.v1"
+                } else {
+                    "vep.sandbox-plan.v1"
+                }
             || body["root"] != inputs.root
             || body["manifest_sha256"] != inputs.digest
             || !body["old_generation"].is_u64()
@@ -51,6 +57,9 @@ impl ConfirmedPlan {
             fields
         };
         request["plan_id"] = self.value["plan_id"].clone();
+        if self.value["installation_mode"] == "user" {
+            request["accept_licenses"] = json!(true);
+        }
         Ok(request)
     }
 }

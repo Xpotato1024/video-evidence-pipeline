@@ -16,6 +16,8 @@ pub fn safe_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
         && value.as_bytes()[0].is_ascii_alphanumeric()
+        && relative(value)
+        && !value.contains('/')
         && value
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
@@ -67,8 +69,8 @@ pub fn no_links(path: &Path) -> Result<()> {
 }
 pub fn read(path: &Path, limit: u64) -> Result<Vec<u8>> {
     no_links(path)?;
-    let file = fs::File::open(path).map_err(|_| "FILE_UNAVAILABLE")?;
-    let meta = file.metadata().map_err(|_| "FILE_UNAVAILABLE")?;
+    let file = crate::secure_fs::read(path)?;
+    let meta = file.file.metadata().map_err(|_| "FILE_UNAVAILABLE")?;
     if !meta.is_file() || meta.len() > limit {
         return Err("FILE_LIMIT_EXCEEDED");
     }
@@ -103,6 +105,7 @@ pub struct Input {
     pub bytes: Vec<u8>,
     pub sha256: String,
     pub root: PathBuf,
+    _guard: crate::secure_fs::DirectoryGuard,
 }
 fn directories(manifest: &Manifest) -> Result<BTreeSet<String>> {
     let mut result = BTreeSet::new();
@@ -123,6 +126,96 @@ fn directories(manifest: &Manifest) -> Result<BTreeSet<String>> {
     Ok(result)
 }
 impl Input {
+    pub fn license_page(&self, offset: u32) -> Result<serde_json::Value> {
+        self.user_contract()?;
+        let path = "licenses/THIRD_PARTY_NOTICES.txt";
+        let entry = self
+            .manifest
+            .files
+            .iter()
+            .find(|e| e.path == path)
+            .ok_or("USER_PAYLOAD_INCOMPLETE")?;
+        let bytes = read(&self.root.join(path), 8 * 1024 * 1024)?;
+        if digest(&bytes) != entry.sha256 || bytes.len() as u64 != entry.size {
+            return Err("PAYLOAD_HASH_MISMATCH");
+        }
+        let text = std::str::from_utf8(&bytes).map_err(|_| "LICENSE_TEXT_INVALID")?;
+        let total = text.chars().count();
+        if offset as usize > total {
+            return Err("LICENSE_RANGE_INVALID");
+        }
+        let page: String = text.chars().skip(offset as usize).take(8000).collect();
+        let next = offset as usize + page.chars().count();
+        Ok(
+            serde_json::json!({"text":page,"offset":offset,"next_offset":if next<total {next} else {0},"total_characters":total,"sha256":entry.sha256,"license_index":"licenses/index.json","license_acceptance_required":true}),
+        )
+    }
+    pub fn user_contract(&self) -> Result<()> {
+        for name in [
+            "tools/vep-setup.exe",
+            "tools/vep-setup-gui.exe",
+            "licenses/THIRD_PARTY_NOTICES.txt",
+            "licenses/index.json",
+            "SBOM.spdx.json",
+            "source/vep-source.zip",
+        ] {
+            if !self.manifest.files.iter().any(|entry| entry.path == name) {
+                return Err("USER_PAYLOAD_INCOMPLETE");
+            }
+        }
+        let path = "SBOM.spdx.json";
+        let entry = self
+            .manifest
+            .files
+            .iter()
+            .find(|e| e.path == path)
+            .ok_or("USER_PAYLOAD_INCOMPLETE")?;
+        let bytes = read(&self.root.join(path), 8 * 1024 * 1024)?;
+        if digest(&bytes) != entry.sha256 {
+            return Err("PAYLOAD_HASH_MISMATCH");
+        }
+        let sbom: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| "SBOM_INVALID")?;
+        if sbom["spdxVersion"] != "SPDX-2.3" {
+            return Err("SBOM_INVALID");
+        }
+        let files = sbom["files"].as_array().ok_or("SBOM_INVALID")?;
+        if files.len() > 16384 {
+            return Err("SBOM_INVALID");
+        }
+        let mut inventory = std::collections::BTreeMap::new();
+        for file in files {
+            let name = file["fileName"]
+                .as_str()
+                .ok_or("SBOM_INVALID")?
+                .strip_prefix("./")
+                .ok_or("SBOM_INVALID")?;
+            if !relative(name) {
+                return Err("SBOM_INVALID");
+            }
+            let hashes = file["checksums"].as_array().ok_or("SBOM_INVALID")?;
+            let sha = hashes
+                .iter()
+                .find(|h| h["algorithm"] == "SHA256")
+                .and_then(|h| h["checksumValue"].as_str())
+                .ok_or("SBOM_INVALID")?;
+            if inventory.insert(name, sha).is_some() {
+                return Err("SBOM_INVALID");
+            }
+        }
+        if inventory.len() != self.manifest.files.len() - 1
+            || self
+                .manifest
+                .files
+                .iter()
+                .filter(|e| e.path != "SBOM.spdx.json")
+                .any(|entry| {
+                    inventory.get(entry.path.as_str()).copied() != Some(entry.sha256.as_str())
+                })
+        {
+            return Err("SBOM_INVENTORY_MISMATCH");
+        }
+        Ok(())
+    }
     pub fn load(manifest_path: &Path, root: &Path, expected: &str) -> Result<Self> {
         let bytes = read(manifest_path, 8 * 1024 * 1024)?;
         if digest(&bytes) != expected {
@@ -168,7 +261,7 @@ impl Input {
             "payload/uv.lock",
             "payload/.agents/skill-system.toml",
         ] {
-            if !manifest.files.iter().any(|f| &f.path == required) {
+            if !manifest.files.iter().any(|f| f.path == required) {
                 return Err("PAYLOAD_INCOMPLETE");
             }
         }
@@ -189,6 +282,7 @@ impl Input {
             sha256: digest(&bytes),
             bytes,
             root: root.to_path_buf(),
+            _guard: crate::secure_fs::pin_directory(root)?,
         })
     }
     pub fn verify_copy_with(
@@ -208,22 +302,16 @@ impl Input {
             operation.check()?;
             let source = self.root.join(&entry.path);
             no_links(&source)?;
-            let mut input = fs::File::open(source).map_err(|_| "PAYLOAD_UNAVAILABLE")?;
-            let meta = input.metadata().map_err(|_| "PAYLOAD_UNAVAILABLE")?;
+            let mut input = crate::secure_fs::read(&source)?;
+            let meta = input.file.metadata().map_err(|_| "PAYLOAD_UNAVAILABLE")?;
             if !meta.is_file() || meta.len() != entry.size {
                 return Err("PAYLOAD_HASH_MISMATCH");
             }
             let mut output = if let Some(root) = destination {
                 let path = root.join(&entry.path);
                 no_links(&path)?;
-                fs::create_dir_all(path.parent().unwrap()).map_err(|_| "STORAGE_REQUIRED")?;
-                Some(
-                    fs::OpenOptions::new()
-                        .write(true)
-                        .create_new(true)
-                        .open(path)
-                        .map_err(|_| "STORAGE_REQUIRED")?,
-                )
+                crate::secure_fs::create_dir_all(path.parent().unwrap())?;
+                Some(crate::secure_fs::create_new(&path)?)
             } else {
                 None
             };
@@ -250,7 +338,8 @@ impl Input {
                 return Err("PAYLOAD_HASH_MISMATCH");
             }
             if let Some(file) = output {
-                file.sync_all().map_err(|_| "STORAGE_REQUIRED")?;
+                crate::secure_fs::inspect(&file.file, false)?;
+                file.file.sync_all().map_err(|_| "STORAGE_REQUIRED")?;
             }
             if (index + 1) % 64 == 0 || index + 1 == self.manifest.files.len() {
                 operation.progress(phase, (index + 1) as u64, self.manifest.files.len() as u64)?;

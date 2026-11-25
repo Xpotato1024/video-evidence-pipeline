@@ -236,6 +236,7 @@ def test_hardened_ytdlp_argv_is_fixed_and_single_file(tmp_path: Path) -> None:
     )
     assert argv == [
         sys.executable,
+        "-B",
         "-m",
         "yt_dlp",
         "--ignore-config",
@@ -327,7 +328,7 @@ def test_hardened_argv_is_accepted_by_pinned_ytdlp_parser(
     )
 
     parser = create_parser()
-    options, positional = parser.parse_args(argv[3:])
+    options, positional = parser.parse_args(argv[4:])
 
     assert positional == [locator]
     assert options.ignoreconfig is True

@@ -59,11 +59,15 @@ def find_window(pid):
 
 
 class Screen:
-    def __init__(self, root, fields, *, environment=None):
+    def __init__(self, root, fields, *, environment=None, mode="sandbox"):
+        self.idle_timeout = 300 if mode == "user" else 120
+        startup = subprocess.STARTUPINFO()
+        startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startup.wShowWindow = 4  # SW_SHOWNOACTIVATE for normal builds too.
         self.process = subprocess.Popen(
             [
                 GUI,
-                "--sandbox-root",
+                "--user-root" if mode == "user" else "--sandbox-root",
                 str(root),
                 "--manifest",
                 fields["manifest"],
@@ -73,6 +77,7 @@ class Screen:
                 fields["manifest_sha256"],
             ],
             env=dict(os.environ, VEP_GUI_TEST_NO_ACTIVATE="1", **(environment or {})),
+            startupinfo=startup,
         )
         self.window = wait(lambda: find_window(self.process.pid), timeout=10)
         self.idle()
@@ -104,7 +109,7 @@ class Screen:
 
     def idle(self):
         try:
-            wait(lambda: self.enabled(11), timeout=120)
+            wait(lambda: self.enabled(11), timeout=self.idle_timeout)
         except AssertionError as error:
             raise AssertionError((self.text(19), self.text(18))) from error
 

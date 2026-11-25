@@ -522,6 +522,7 @@ def hardened_argv(
     )
     argv = [
         sys.executable,
+        "-B",  # Child interpreters do not inherit the private launcher's flag.
         "-m",
         module,
         "--ignore-config",

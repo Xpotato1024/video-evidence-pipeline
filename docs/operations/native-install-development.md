@@ -306,3 +306,278 @@ reviewerはcode/保存証拠の確認であり、実行担当はprimary。原本
 - P3/P4: 開発GUI以降のaccessibility/OS受入、TUF/client/key運用/撤回policy、任意component、Linux/macOS/ARM。
 
 設計上の方針やローカルの成功を、本番対応・再配布可能・release-readyと読み替えない。
+
+## Windows user installer continuation checkpoint — 2026-10-24
+
+Local worktree `vep-windows-installer`, branch `codex/windows-user-installer`,
+baseline main `809b352cd471721b1fc4e769880c958c48902705`.
+This continuation is local implementation/testing/package preparation only.
+No push, PR, merge, release, production profile installation, signing credentials,
+account changes, browser changes, or existing ACL repairs are performed.
+It is paused at the user's request to permit an application restart; it is not
+distribution-ready or complete production acceptance.
+
+Implemented, with integration still pending:
+
+- Read-only Known Folder discovery, explicit `--user-root`, normal-token checks,
+  protected current-user/SYSTEM/Administrators DACL at NEW root creation only.
+  Existing roots require verified ownership/private ACL and are never repaired.
+- Separate user marker/root identity and resumable initialization; mode/root/
+  installation identity/generation are bound to plans. All versions/data retained.
+- Shared CLI/GUI user mode, explicit confirmation/license acceptance, bounded
+  license-text pages, receipt-bound retained engine/GUI/launcher preparation.
+  End-to-end installed entrypoint and GUI execution are NOT yet validated.
+- Directory traversal handles and no-follow final file handles, single-link file
+  checks, common state/payload/lock adapters, private state/program inventory checks.
+  Directory handles deny DELETE, allowing child writes/atomic replacement.
+  This is not a claim of protection from malicious current-SID metadata changes
+  or administrators. Adversarial/race/fault acceptance remains pending.
+- Windows reserved/trailing-dot release IDs are rejected. Direct Win32 paths and
+  Python context paths use explicit extended paths; actual long-root runtime
+  acceptance remains pending, without registry/security-policy changes.
+- A pinned notice-source catalog and opt-in local notice collector preserve full
+  runtime/wheel/native/toolchain notices and upstream SBOM evidence. The collector
+  has NOT completed; the final Windows payload/SBOM/bundle is NOT prepared.
+
+Verified checkpoint scope:
+
+- Current Windows process token is unelevated, Administrators not enabled.
+  This is not a clean standard-user account/VM without developer tools.
+- Fault-injection debug build passes. Rust existing units: engine 3, GUI client 2.
+- `tests/test_user_install.py`: 6 passed, latest 0.90 seconds. Fresh isolated roots
+  cover confirmation, repeated initialization/data retention, interruption at both
+  initialization markers, existing non-private/foreign-root unchanged rejection,
+  moved-marker identity rejection, and hardlinked state rejection.
+- Initial root tests failed 5/6 because marker replacement returned Windows
+  sharing violation 32. Parent directory share-write was necessary for child
+  atomic replacement. After correction all 6 passed; prior failed evidence is kept.
+- Ruff focused check/format, Cargo formatting, diff whitespace pass. No full source
+  pytest, real user-mode runtime update/rollback/repair, process concurrency/race,
+  final normal-build GUI integration, disk-full/AV/power-loss or signed VM pass claim.
+
+Known resume issues:
+
+1. Proposed default `%LOCALAPPDATA%\VEP` collides with an older, unowned `models`
+   directory on this host (no installer marker). It was read only and must remain
+   untouched. Select a separate owned namespace or explicitly model coexistence
+   before testing any default-location installation. Current isolated roots work.
+2. Notice collection stops on `r-efi 5.2.0`: no standalone notice file matched the
+   collector. It is an upstream all-target pydantic-core dependency, not established
+   Windows linkage. Inspect the verified cached archive and handle its actual
+   license material honestly; do not silently drop it or call the dossier complete.
+3. CPython upstream SPDX and pydantic-core CycloneDX contain other targets; preserve
+   them as upstream evidence, not exact Windows static-link inventories. Microsoft
+   redistribution qualification/terms and remaining linkage coverage are open gates.
+4. Complete local bundle builder/SPDX file inventory, actual private runtime and
+   retained-entrypoint lifecycle, license-view GUI UX and negative/race/fault tests.
+   Review the changed security/file-operation implementation independently.
+5. Signing/credential decisions and clean general-user environment acceptance are
+   pending. Do not create credentials/accounts, change permissions/security settings,
+   incur costs, or expand online/OS/publication scope without reporting the boundary.
+
+Reproduction and exact local evidence are in the task's
+`evidence/windows-user-installer-resume.md`, `user-root-v1.xml` (initial failures),
+`user-root-v2.xml`, `user-root-pause.xml`, and `user-native-cargo-metadata.json`.
+Downloaded public license sources and the unfinished dossier remain in task-local
+`native-build/license-cache` and `native-build/user-notices-v1`; neither is a release.
+
+## Windows user candidate resume - 2026-10-24
+
+The restart checkpoint above is historical. Local implementation has resumed;
+this is still an unsigned candidate, with no publication or real profile install.
+The default uses the Windows LocalAppData Known Folder plus
+`VideoEvidencePipeline`. An existing older `VEP/models` directory is not adopted,
+moved, modified or deleted. Only a nonexistent selected root or a valid existing
+VEP user marker may initialize/resume. Even an empty unmarked directory is
+rejected; choose a new child directory rather than changing its ACL.
+
+The current layout is:
+
+```text
+<root>/.vep-user-install.json       installation identity, bound to canonical root
+<root>/app/bin/                    retained setup, GUI and VEP entrypoints
+<root>/app/versions/<release-id>/   private Python, packages, resources, tools,
+                                  notices, source snapshot and SPDX inventory
+<root>/app/staging/                verified candidate preparations
+<root>/state/                      selection, receipts, journals, contexts, bindings
+<root>/data/jobs/                  mutable user jobs, kept across selection changes
+<root>/data/models/                optional user models (none installed here)
+```
+
+CLI and Win32 GUI use the same JSONL engine. GUI initialization and application
+require review of the target/plan and an explicit confirmation. The license view
+reads bounded pages of the exact manifest-bound notice text; viewing a license
+invalidates an outstanding mutation confirmation. Apply also requires explicit
+license acceptance at the engine boundary. No elevation request, PATH/registry
+registration, online updater, FFmpeg, ASR package/model or deletion is included.
+The retained initial bootstrap engine is not upgraded in place; a future
+bootstrap-engine update protocol is a separate remaining distribution concern.
+
+New roots are prepared in a fresh private sibling with a complete synced marker
+before publishing the selected path. Initial active state is atomically replaced.
+An interrupted preparation can leave an unreferenced private sibling, which is
+retained rather than guessed safe to delete. Entry-point recovery saves the
+verified bootstrap receipt before publishing files, uses private temporary files
+and renames only complete executables into final names. Existing entrypoints with
+different bytes cause a conflict rather than replacement. Metadata/ownership
+inspection is separate from content reads so a writer lock does not unnecessarily
+prevent status or launching the current version. These changes do not claim
+protection against malicious same-SID code or administrators.
+
+`scripts/prepare_windows_notices.py` now completes a conservative dossier with
+253 notice files, 21 core wheel distributions and 103 upstream pydantic-core
+all-target components. r-efi's complete grant/copyright is preserved from AUTHORS;
+wit-bindgen-rt notices absent from its crate are pinned to that crate's recorded
+upstream VCS commit. Notice storage names follow the existing restricted payload
+path rules. Exact upstream SBOMs are preserved as evidence; their non-Windows
+entries are not described as confirmed Windows linkage.
+
+`scripts/build_windows_candidate.py` prepares a local offline fixture from
+explicit runtime, packages, native and notice inputs. It checks the official
+runtime ZIP hash, wheel RECORD self-consistency and locked name/version,
+Windows x64 PE headers, notice hashes/inventory, input/output separation, and
+source-snapshot coverage of copied resource files. It excludes the empty uv
+preparation lock and refuses untracked runtime sources or unlisted notices.
+It adds the VEP source snapshot, per-file SPDX 2.3 inventory, manifest and
+top-level checksums. RECORD consistency is not publisher authentication or proof
+of the original wheel ZIP hash. Native compile features are not inferred from PE
+headers; use the separate build/preparation evidence. A working-tree snapshot is
+labeled as such, not a clean commit-addressed release source.
+
+The local fault-injection debug fixtures are never distribution artifacts.
+`distribution_ready=false` and `publisher_authenticated=false` remain explicit.
+Microsoft redistribution qualification/downstream conditions, exact static
+linkage/source coverage, signing, clean standard-user acceptance and bootstrap
+upgrade policy remain open. Do not create keys/accounts, repair existing ACLs or
+change platform security settings to make a test pass.
+
+Execution results, failed runs, artifact identities and remaining tests are kept
+in the task's `evidence/windows-user-installer-resume.md`; independent code review
+is in `evidence/windows-user-installer-review.md`. Suite duration is verification
+wall time on a shared developer host, not a comparative installation benchmark.
+
+Verified continuation results (separate runs, not an all-pytest success claim):
+
+- Rust unit tests: engine 4 and GUI client 2 passed with fault injection, and
+  the same 6 passed without features. A separate optimized `--release
+  --no-default-features` build used `-C target-feature=+crt-static`, one job.
+- The actual payload lifecycle passed install/update/rollback, retained launcher
+  help/doctor, old-job runtime binding/data preservation and entrypoint repair.
+- The remaining v4 run passed 16 cases: init/retry, aliases, state hardlinks,
+  manifest/SBOM refusal, three bootstrap publication interruptions and cancellation.
+  That run also had one genuine long-root candidate failure, retained in evidence.
+- The long-root failure was caused by a non-extended context argument to Python.
+  Canonicalizing the context for both candidate checks and launches fixed it.
+  A subsequent driver failure came from CreateProcess's implicit module search
+  limit. Explicit extended application paths passed the complete long Japanese
+  root install and installed doctor case. Explorer/all shell support is unverified.
+- User-mode Win32 GUI license text, confirmation, common plan/result agreement and
+  builder input checks passed 5 cases. Normal optimized binaries passed 2 further
+  cases (CLI install/retained help/doctor/GUI status and plan; junction target/ACL
+  preservation). Normal GUI cancel/failure/repair passed one additional case.
+- Junction refusal can report `FILE_TYPE_INVALID` or `LINK_FORBIDDEN` because
+  no-follow handles can expose the reparse object as a different file type. Both
+  refusal and the untouched target are asserted. An earlier overly narrow error
+  expectation failed and is retained. Cancellation also refused a concurrent
+  staging-directory rename while the directory guard was held.
+- The generated SPDX document passed the official SPDX 2.3 JSON schema. Focused
+  Ruff, UTF-8/newline and whitespace checks pass. Repository validation initially
+  failed at sandboxed uv export, then passed offline with the task-local cache in
+  the normal execution context; no lock regeneration or ASR synchronization.
+
+Acceptance is limited to the existing unelevated developer host and synthetic
+fixtures. It does not certify a clean standard-user machine without toolchains,
+SmartScreen/signing, cross-user attack simulation, disk exhaustion, AV contention,
+power loss, all GUI accessibility/commit-uncertainty states, or other Windows/CPU
+versions. Prior source/main CI and sandbox GUI results are not relabeled as these
+new user-install tests. No new performance improvement is claimed.
+
+## Post-candidate verification and packaging corrections - 2026-10-24
+
+The complete Windows suite at local commit `00aac774` finished with **923 passed,
+17 skipped and 1 failed** in approximately 54 minutes. The failure was the long
+Japanese-root apply driver's 180-second timeout. Read-only inspection found a
+complete staging copy, active generation zero, no selected receipt and no
+published bootstrap receipt. The failed run is retained; increasing a test budget
+does not establish a performance improvement. The follow-up acceptance driver has
+a separate 300-second bound. No full-suite success is claimed for that commit.
+
+The follow-up changes keep all file hashes, no-follow handle checks, ownership
+and private DACL checks. Directory creation retains one inspected deny-delete
+handle per ancestor for the complete walk, avoiding repeated opens of the same
+ancestor chains. Permission inventory checks cancellation and reports `CHECK`
+progress between files/directories; launcher profiling now records
+`private_inventory_ms` separately. Windows invalid characters, reserved device
+aliases and the supported 255 UTF-16-unit component limit are rejected before
+creating an initialization sibling. These changes do not assert a measured
+installation speedup on the shared host.
+
+Audit of the actual copied packages found six generated uv console wrappers with
+build-machine interpreter references. VEP invokes `sys.executable -m yt_dlp` and
+does not need these wrappers. The builder verifies original input RECORDs, omits
+only declared recognizable wrappers from its fresh output, preserves original
+RECORDs and their hashes under `packaging/`, rewrites the affected RECORDs and
+verifies the output again. Unknown executable artifacts cause refusal. The old
+candidate remains unchanged and must not be distributed.
+
+The original embedded Python `._pth` also omitted the private packages directory,
+so the actual module subprocess could not import yt-dlp. The copied configuration
+now adds only the verified relative `../packages` and `../payload/src` paths,
+preserves its original bytes, keeps `site` disabled and records the transformation.
+The latter path is required by the production Windows child-process job gate.
+Offline version probes cover a hostile
+current directory, `PYTHONPATH` and `PYTHONHOME`; no media or network request is
+needed. Native builds use ephemeral rustc source-path remapping and are checked
+for known build-profile prefixes. Remapping is not a general secret scanner or
+publisher attestation.
+
+The first corrected candidate's module probe exposed a further regression:
+child Python does not inherit the launcher's `-B`, and added 74 unlisted bytecode
+files after initial inventory verification. That candidate is retained as failed
+evidence. The yt-dlp and Windows job-gate child commands now explicitly pass
+`-B`; acceptance runs on fresh copied or installed private resources, compares
+their complete file hashes before/after child execution, and checks the next
+native doctor invocation. Original distribution inputs are never executed by
+these probes. Source-mode subprocess behavior retains the same acquisition
+arguments and result contract apart from suppressing bytecode writes.
+
+The top-level SPDX document is an exact file inventory, not a resolved component
+dependency graph. Conservative upstream SBOMs and notices remain supplementary
+evidence. Exact target-specific linkage/corresponding-source closure and the
+distributor's Microsoft runtime/compiler redistribution rights require further
+evidence and owner review; their absence is not a confirmed blanket dependency
+incompatibility or legal clearance. No FFmpeg, ASR runtime or model is bundled.
+
+Processing-version updates do not service the native bootstrap: the first
+`state/bootstrap.json` receipt continues to select the retained engine/GUI bytes.
+Repair also verifies that original version's whole payload, so damage to unused
+original processing files can block recovery. Supported native engine handoff,
+minimum-version policy, replacement/rollback, retention and uninstall are not yet
+implemented or accepted. Legacy source-mode jobs are not automatically migrated;
+installed private-job pinning tests are a narrower compatibility guarantee.
+
+These binary servicing, license evidence, signing/SmartScreen and clean-host
+acceptance gaps block a supported binary publication. They should be explicit in
+a source/tests/docs-only Draft review, which conveys no compiled dependencies.
+External source-sharing authorization is separately pending. Test artifacts stay
+local; no default profile installation, security/permission change, push, PR or
+release is performed by this continuation.
+
+The bounded follow-up checks completed on the same unelevated Windows host:
+
+| Scope | Result |
+| --- | --- |
+| Candidate transforms, acquisition and process-tree regression | 50 passed, 1 unavailable-symlink skip |
+| Native transaction and streaming regression | 12 passed; 6 GUI cases initially not enabled |
+| Explicit GUI transaction/protocol regression | All 6 previously unenabled GUI cases passed |
+| User-root lifecycle, refusal, interruption, cancellation and long-path acceptance | 41 passed |
+| Optimized no-fault CLI/GUI and junction/data preservation | 4 passed |
+
+Both normal and fault-enabled Rust unit sets passed 6 cases each. All-target,
+all-feature Clippy with warnings denied, Cargo formatting, Ruff check/format of
+all 142 Python files, repository validation, schema validation and changed-file
+UTF-8/whitespace checks passed. No separate Python static type-check suite is
+configured; Rust checks include compilation/type checking. The full 941-case
+suite was not restarted after these corrections: unaffected Python/media results
+are reused from the frozen run, and its failed long-path case was explicitly
+rechecked. These scoped results do not turn the original full run into a pass.
