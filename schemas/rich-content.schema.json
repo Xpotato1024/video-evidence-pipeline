@@ -625,6 +625,60 @@
       "type": "object"
     },
     "JsonValue": {},
+    "LectureRelation": {
+      "additionalProperties": false,
+      "description": "A teaching block in this recording and the material discussed in it.",
+      "properties": {
+        "basis": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Basis",
+          "type": "string"
+        },
+        "block_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "title": "Block Id",
+          "type": "string"
+        },
+        "current_source": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "title": "Current Source",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "recap",
+            "solution",
+            "continuation",
+            "correction",
+            "new_condition"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "target_source": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Source"
+        }
+      },
+      "required": [
+        "block_id",
+        "kind",
+        "current_source",
+        "basis"
+      ],
+      "title": "LectureRelation",
+      "type": "object"
+    },
     "LectureSource": {
       "additionalProperties": false,
       "properties": {
@@ -660,6 +714,7 @@
           "enum": [
             "current_lecture",
             "previous_lecture",
+            "previous_assignment",
             "clarification",
             "supplement"
           ],
@@ -1392,6 +1447,14 @@
       "maxItems": 2048,
       "minItems": 1,
       "title": "Blocks",
+      "type": "array"
+    },
+    "continuity": {
+      "items": {
+        "$ref": "#/$defs/LectureRelation"
+      },
+      "maxItems": 2048,
+      "title": "Continuity",
       "type": "array"
     },
     "coverage": {

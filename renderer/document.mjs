@@ -5,7 +5,7 @@ import { escape, identifier, label, sourceIdentifier } from './common.mjs';
 const messages = {
   ja: {
     assumptions: '成立条件', symbols: '記号', sourceList: '出典',
-    current_lecture: '今回の授業', previous_lecture: '過去の授業', clarification: '追加確認', supplement: '補足',
+    current_lecture: '今回の授業', previous_lecture: '過去の授業', previous_assignment: '過去の課題', clarification: '追加確認', supplement: '補足',
     page: 'ページ', region: '領域', math: '数式', values: 'グラフの数値',
     symbolic: '文字式', substitution: '数値代入', intermediate: '途中計算', result: '結果',
     figureTypes: {
@@ -15,7 +15,7 @@ const messages = {
   },
   en: {
     assumptions: 'Assumptions', symbols: 'Symbols', sourceList: 'Sources',
-    current_lecture: 'Current lecture', previous_lecture: 'Previous lecture', clarification: 'Clarification', supplement: 'Supplement',
+    current_lecture: 'Current lecture', previous_lecture: 'Previous lecture', previous_assignment: 'Previous assignment', clarification: 'Clarification', supplement: 'Supplement',
     page: 'Page', region: 'Region', math: 'Equation', values: 'Chart data',
     symbolic: 'Symbolic equation', substitution: 'Substitution', intermediate: 'Intermediate calculation', result: 'Result',
     figureTypes: {

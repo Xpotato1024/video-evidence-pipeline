@@ -893,6 +893,11 @@ def _audit_request(
             "Check equations and step calculations, consistency with diagrams, alt text and visual legibility.",
         ],
     }
+    if kind == "content" and content.continuity:
+        criteria[kind].append(
+            "Verify each cross-session relation against the current utterance and the earlier "
+            "prompt or diagram. Keep ambiguous targets unresolved and identify later corrections."
+        )
     formats = _rendered_formats({item["path"] for item in inventory})
     if kind == "visual" and len(formats) != len(RENDER_OUTPUTS):
         files = ", ".join(RENDER_OUTPUTS[name] for name in formats)

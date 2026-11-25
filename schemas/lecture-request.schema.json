@@ -369,8 +369,11 @@
           "type": "string"
         },
         "revision": {
-          "const": "1",
           "default": "1",
+          "enum": [
+            "1",
+            "2"
+          ],
           "title": "Revision",
           "type": "string"
         },
@@ -430,6 +433,7 @@
           "enum": [
             "current_lecture",
             "previous_lecture",
+            "previous_assignment",
             "clarification",
             "supplement"
           ],
