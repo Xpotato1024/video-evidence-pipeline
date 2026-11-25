@@ -7,7 +7,31 @@ from typing import Literal, Self
 from pydantic import Field, field_validator, model_validator
 
 from video_evidence_pipeline.domain import StrictModel, UtcDateTime
+from video_evidence_pipeline.domain.clarification import ClarificationRecord
+from video_evidence_pipeline.domain.evidence import AmbiguityRecord
 from video_evidence_pipeline.domain.identifiers import JobId, Sha256
+
+
+class RecoveredClarification(StrictModel):
+    fingerprint: Sha256
+    record: ClarificationRecord
+
+
+class RecoveryClarificationPacket(StrictModel):
+    """Versioned notes handed to a later author's evidence exchange."""
+
+    schema_version: Literal["1.0"] = "1.0"
+    role: Literal["clarification_followup"] = "clarification_followup"
+    parent_job_id: JobId
+    evidence_bundle_fingerprint: Sha256
+    ambiguities: list[AmbiguityRecord]
+    clarifications: list[RecoveredClarification]
+    active_resolutions: dict[str, Sha256]
+
+
+class RecoveryClarificationSnapshot(StrictModel):
+    record_count: int = Field(ge=1, le=1000)
+    packet_sha256: Sha256
 
 
 class RecoveryManifest(StrictModel):
@@ -20,6 +44,9 @@ class RecoveryManifest(StrictModel):
     parent_final_draft_sha256: Sha256 | None = None
     parent_audit_bundle_fingerprint: Sha256 | None = None
     parent_finding_ids: list[str] = Field(default_factory=list, max_length=100_000)
+    clarification_snapshot: RecoveryClarificationSnapshot | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     recovery_basis: str = Field(min_length=1, max_length=1024)
     child_job_id: JobId
     child_job_fingerprint: Sha256

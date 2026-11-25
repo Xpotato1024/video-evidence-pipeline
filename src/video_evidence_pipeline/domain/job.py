@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
@@ -20,6 +21,11 @@ from video_evidence_pipeline.domain.locators import (
 )
 from video_evidence_pipeline.domain.serialization import fingerprint
 from video_evidence_pipeline.errors import configuration_error, io_error
+
+RECOVERY_CLARIFICATION_PREFIX = "vep:clarifications/"
+_RECOVERY_CLARIFICATION_LOCATOR = re.compile(
+    rf"{re.escape(RECOVERY_CLARIFICATION_PREFIX)}([0-9]{{6}})/[0-9a-f]{{64}}"
+)
 
 
 class SourceKind(StrEnum):
@@ -155,7 +161,16 @@ class JobSpec(StrictModel):
             and self.source.kind is not SourceKind.LOCAL_FILE
         ):
             raise ValueError("audio and supplied transcript inputs must use a local file source")
-        identities = [(item.kind.value, item.locator) for item in self.supporting_inputs]
+        identities = []
+        for index, item in enumerate(self.supporting_inputs, start=1):
+            generated = item.locator.startswith(RECOVERY_CLARIFICATION_PREFIX)
+            if generated and (
+                item.kind is not SupportingInputKind.NOTES
+                or (match := _RECOVERY_CLARIFICATION_LOCATOR.fullmatch(item.locator)) is None
+                or int(match[1]) != index
+            ):
+                raise ValueError("recovery clarification locator does not match its input slot")
+            identities.append((generated, item.kind.value, item.locator))
         if identities != sorted(set(identities)):
             raise ValueError("supporting inputs must be sorted and unique")
         return self

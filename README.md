@@ -1,6 +1,7 @@
 # Video Evidence Pipeline
 
 The [technical lecture workflow](docs/operations/technical-lecture.md) covers verified sources, a reusable manuscript, HTML/PDF generation and independent review.
+The [public workflow quickstart](docs/operations/public-workflow.md) shows the available document presets, authentication handoff, a synthetic meeting example, and how to select an output format.
 
 認可済みの動画・音声・文字起こしを、根拠と監査結果が結び付いた成果物へ変換する、local-firstの証拠パイプラインです。
 
@@ -51,7 +52,7 @@ VEPはGit操作を実行せず、実データをVEP開発リポジトリへ追�
 - AI／Skillによるcanonical workspace、manifest、transition、approval recordの直接編集
 - sourceにないowner、deadline、number、引用、事実の推測
 - AIによるhuman approvalの代行、またはP0／P1 findingの隠蔽
-- 現時点のDOCX／PDF／HTML export
+- DOCX export
 
 ## Typical use cases
 

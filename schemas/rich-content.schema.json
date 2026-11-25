@@ -715,6 +715,7 @@
             "current_lecture",
             "previous_lecture",
             "previous_assignment",
+            "clarification",
             "supplement"
           ],
           "title": "Kind",

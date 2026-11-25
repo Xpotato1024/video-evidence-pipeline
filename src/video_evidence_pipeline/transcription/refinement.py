@@ -47,7 +47,11 @@ from video_evidence_pipeline.storage.permissions import (
     enforce_private_file,
     ensure_private_directory,
 )
-from video_evidence_pipeline.supporting import load_supporting_inputs, prepare_supporting_inputs
+from video_evidence_pipeline.supporting import (
+    CLARIFICATION_ORIGINAL,
+    load_supporting_inputs,
+    prepare_supporting_inputs,
+)
 from video_evidence_pipeline.transcription.pipeline import normalize_transcript_text
 
 REFINEMENT_IMPLEMENTATION_VERSION = "transcript-refinement-v1"
@@ -166,6 +170,9 @@ def _source_catalog(
         )
     if supporting is not None:
         for record in supporting.inputs:
+            if record.original_artifact.artifact_type == CLARIFICATION_ORIGINAL:
+                # A later confirmation informs the new deliverable, without changing what was said.
+                continue
             artifacts.append(record.original_artifact)
             if record.kind.value == "pdf":
                 refs.append(

@@ -115,12 +115,14 @@ def _fixture_content(request) -> dict[str, object]:
     }
 
 
-def _fake_render(content: Path, stage: Path, *, assets: Path | None) -> None:
+def _fake_render(
+    content: Path, stage: Path, *, assets: Path | None, formats: tuple[str, ...] | None
+) -> None:
     assert assets is None
-    (stage / "sites").mkdir()
     files = {}
-    for name in lecture._RENDER_FILES - {"render-receipt.json"}:
+    for name in (lecture.RENDER_OUTPUTS[name] for name in formats or lecture.RENDER_OUTPUTS):
         payload = b"%PDF-fixture" if name.endswith(".pdf") else b"fixture"
+        (stage / name).parent.mkdir(parents=True, exist_ok=True)
         (stage / name).write_bytes(payload)
         files[name] = {"sha256": sha256_bytes(payload), "size_bytes": len(payload)}
     _write(
@@ -129,6 +131,7 @@ def _fake_render(content: Path, stage: Path, *, assets: Path | None) -> None:
             "schema_version": "2.0",
             "content_sha256": sha256_file(content),
             "files": files,
+            **({"formats": list(formats)} if formats is not None else {}),
             "validation": {
                 "external_network": False,
                 "javascript_in_viewer": False,
@@ -232,6 +235,76 @@ def test_lecture_document_to_review_and_separate_approval(tmp_path: Path, monkey
     source.write_text("Changed", encoding="utf-8")
     with pytest.raises(VepError, match="SHA-256 changed"):
         lecture.prepare_lecture(documents, options, tmp_path / "new", documents=True)
+
+
+def test_selective_render_review_binds_requested_output(tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "notes.txt"
+    source.write_text("Add 2 and 4 and divide by 2.", encoding="utf-8")
+    documents = _write(
+        tmp_path / "docs.json",
+        {
+            "job_id": "selected-output",
+            "sources": [{"id": "notes", "path": source.name, "sha256": sha256_file(source)}],
+        },
+    )
+    prepared = tmp_path / "prepared"
+    request, _ = lecture.prepare_lecture(
+        documents, _options(tmp_path / "input.json"), prepared, documents=True
+    )
+    content = _write(tmp_path / "content.json", _fixture_content(request))
+    request_path = prepared / "request.json"
+    rendered = tmp_path / "markdown"
+    monkeypatch.setattr(lecture, "_render", _fake_render)
+    command = [
+        "lecture",
+        "render",
+        str(request_path),
+        str(content),
+        "--destination",
+        str(rendered),
+        "--format",
+        "markdown",
+        "--json",
+    ]
+    cli = CliRunner().invoke(app, command)
+    assert cli.exit_code == 0, cli.output
+    assert (rendered / "lesson.md").is_file()
+    assert not (rendered / "lesson.mdx").exists()
+    assert not (rendered / "review.pdf").exists()
+    assert not (rendered / "sites").exists()
+    repeated = CliRunner().invoke(app, command)
+    assert repeated.exit_code == 0 and json.loads(repeated.output)["reused"]
+    with pytest.raises(VepError, match="different lecture inputs or formats"):
+        lecture.render_lecture(request_path, content, rendered, formats=["pdf"])
+    with pytest.raises(VepError, match="choose one or more"):
+        lecture.render_lecture(request_path, content, tmp_path / "invalid", formats=["docx"])
+    with pytest.raises(VepError, match="--format mdx"):
+        lecture.import_lecture_source(
+            rendered, tmp_path / "edited.mdx", request_path, tmp_path / "next.json", editor="Test"
+        )
+    visual_request = lecture.prepare_lecture_audit(rendered, "visual")
+    assert "selected outputs (lesson.md)" in visual_request["criteria"][0]
+    audits = [
+        _write(tmp_path / f"{kind}-audit.json", _audit(rendered, kind, f"{kind}-context"))
+        for kind in ("content", "visual")
+    ]
+    bundle = tmp_path / "review"
+    manifest, _ = lecture.publish_lecture_review(rendered, *audits, bundle)
+    assert manifest.entrypoints["markdown"] == "lesson.md"
+    assert "pdf" not in manifest.entrypoints and "source" not in manifest.entrypoints
+    assert "Read lesson.md" in (bundle / "REVIEW.md").read_text(encoding="utf-8")
+    record, _, _ = lecture.approve_lecture_bundle(
+        bundle,
+        target_sha256=manifest.approval_target_sha256,
+        reviewer="Fixture reviewer",
+        basis="Fixture assertion",
+        confirm=True,
+    )
+    assert lecture.validate_lecture_approval(bundle)[0] == record
+    pdf = tmp_path / "pdf"
+    lecture.render_lecture(request_path, content, pdf, formats=["pdf"])
+    with pytest.raises(VepError, match="does not bind"):
+        lecture.publish_lecture_review(pdf, *audits, tmp_path / "different-review")
 
 
 def test_audit_rules_and_omissions_use_frozen_sources(tmp_path: Path, monkeypatch) -> None:

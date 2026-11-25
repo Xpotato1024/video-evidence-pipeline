@@ -70,6 +70,8 @@ _LINEAGE_MAXIMUM_BYTES = 16 * 1024
 _MAXIMUM_STAGING_ENTRIES = 8
 _TOOL_OUTPUT_LIMIT_BYTES = 4 * 1024 * 1024
 _TOOL_DISCOVERY_TIMEOUT_SECONDS = 30.0
+_HTTP_RETRIES = 3
+_FRAGMENT_RETRIES = 3
 _LINEAGE_TEMPLATE = (
     '{"final":%(.{format_id,vcodec,acodec,protocol})j,'
     '"components":%(requested_formats.:.{format_id,vcodec,acodec,protocol})j}'
@@ -391,11 +393,26 @@ def _parse_lineage(
     return AcquisitionMode.ADAPTIVE_MERGED, selected, duration
 
 
+def _last_fragment_index(path: Path) -> int | None:
+    # The pinned downloader's private .ytdl file records an index, not a
+    # validated byte prefix. Use it only to report where the run stopped.
+    try:
+        with path.open("rb") as stream:
+            data = stream.read(_LINEAGE_MAXIMUM_BYTES + 1)
+        if len(data) > _LINEAGE_MAXIMUM_BYTES:
+            return None
+        index = json.loads(data)["downloader"]["current_fragment"]["index"]
+    except (OSError, ValueError, TypeError, KeyError, RecursionError):
+        return None
+    return index if type(index) is int and 0 <= index <= 2**31 - 1 else None
+
+
 def _failed_run_error(run_directory: Path, *, timed_out: bool = False) -> VepError:
     try:
+        entries = _staging_entries(run_directory)
         media_files = [
             entry
-            for entry, metadata in _staging_entries(run_directory)
+            for entry, metadata in entries
             if stat.S_ISREG(metadata.st_mode)
             and entry.name != _LINEAGE_FILENAME
             and ".part" not in entry.name
@@ -403,6 +420,20 @@ def _failed_run_error(run_directory: Path, *, timed_out: bool = False) -> VepErr
         ]
     except VepError as exc:
         return exc
+    if not timed_out:
+        progress = [
+            index
+            for path, metadata in entries
+            if stat.S_ISREG(metadata.st_mode)
+            and path.name.startswith("source.")
+            and path.suffix == ".ytdl"
+            and (index := _last_fragment_index(path)) is not None
+        ]
+        if progress:
+            message = "Segmented acquisition did not complete"
+            if len(progress) == 1:
+                message += f" (last recorded fragment index: {progress[0]})"
+            return io_error("YTDLP_SEGMENTED_INCOMPLETE", message)
     if len(media_files) >= 2:
         return io_error(
             "YTDLP_MERGE_FAILED",
@@ -500,6 +531,13 @@ def hardened_argv(
         "--no-update",
         "--no-playlist",
         "--abort-on-error",
+        "--abort-on-unavailable-fragments",
+        "--retries",
+        str(_HTTP_RETRIES),
+        "--fragment-retries",
+        str(_FRAGMENT_RETRIES),
+        "--concurrent-fragments",
+        "1",
         "--no-cache-dir",
         "--no-write-info-json",
         "--no-write-description",

@@ -114,6 +114,8 @@ class PanoptoAdapter(AcquisitionAdapter):
                 toolchain_factory=self.toolchain_factory,
             )
         except VepError as exc:
+            if exc.code == "PANOPTO_REAUTH_REQUIRED":
+                exc.authentication_method = "browser_session"
             if exc.code != "YTDLP_ACQUISITION_FAILED":
                 raise
             viewer_error = state_error(
@@ -166,19 +168,24 @@ class PanoptoAdapter(AcquisitionAdapter):
             self.runtime.panopto_token_env, provider="panopto"
         )
         api_url = f"https://{tenant}/Panopto/api/v1/sessions/{session_id}"
-        metadata = get_json(
-            api_url,
-            self.runtime,
-            client=self.client,
-            resolver=self.resolver,
-            bearer_token=token,
-            credential_origin=origin(api_url),
-            error_code="PANOPTO_API_FAILED",
-            access_denied_code="PANOPTO_ACCESS_DENIED",
-            unauthorized_code="PANOPTO_REAUTH_REQUIRED",
-            not_found_code="PANOPTO_SESSION_NOT_FOUND",
-            deadline=deadline,
-        ).data
+        try:
+            metadata = get_json(
+                api_url,
+                self.runtime,
+                client=self.client,
+                resolver=self.resolver,
+                bearer_token=token,
+                credential_origin=origin(api_url),
+                error_code="PANOPTO_API_FAILED",
+                access_denied_code="PANOPTO_ACCESS_DENIED",
+                unauthorized_code="PANOPTO_REAUTH_REQUIRED",
+                not_found_code="PANOPTO_SESSION_NOT_FOUND",
+                deadline=deadline,
+            ).data
+        except VepError as exc:
+            if exc.code == "PANOPTO_REAUTH_REQUIRED":
+                exc.authentication_method = "environment_token"
+            raise
         response_id = metadata.get("Id")
         if not isinstance(response_id, str) or response_id.lower() != session_id.lower():
             raise integrity_error("PANOPTO_API_INVALID", "Panopto session identity did not match")

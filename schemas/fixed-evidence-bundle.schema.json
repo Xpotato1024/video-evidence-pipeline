@@ -8,6 +8,17 @@
           "title": "Ambiguity Id",
           "type": "string"
         },
+        "assessment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UncertaintyAssessment"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "description": {
           "maxLength": 65536,
           "minLength": 1,
@@ -120,6 +131,20 @@
           "default": "1.0",
           "title": "Response Schema Version",
           "type": "string"
+        },
+        "uncertainty_policy": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Uncertainty Policy"
         },
         "version": {
           "const": "1.0",
@@ -1258,6 +1283,44 @@
       ],
       "title": "TranscriptSource",
       "type": "string"
+    },
+    "UncertaintyAssessment": {
+      "additionalProperties": false,
+      "properties": {
+        "impact": {
+          "enum": [
+            "minor",
+            "material"
+          ],
+          "title": "Impact",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "source_unclear",
+            "conflicting_sources",
+            "general_knowledge",
+            "organization_rule",
+            "particular_event",
+            "other"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "question": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "impact",
+        "question"
+      ],
+      "title": "UncertaintyAssessment",
+      "type": "object"
     }
   },
   "$id": "https://schemas.video-evidence-pipeline.local/v1/fixed-evidence-bundle.schema.json",

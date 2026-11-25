@@ -78,8 +78,10 @@ from video_evidence_pipeline.domain.authoring import (
     FixedEvidenceBundle,
 )
 from video_evidence_pipeline.domain.authorization import AuthorizationRecord
-from video_evidence_pipeline.domain.delivery import ReviewerIdentity
+from video_evidence_pipeline.domain.delivery import ApprovalRecord, ReviewerIdentity
+from video_evidence_pipeline.domain.hashing import sha256_bytes
 from video_evidence_pipeline.domain.job import (
+    RECOVERY_CLARIFICATION_PREFIX,
     AssignmentSpec,
     JobSpec,
     OutputSpec,
@@ -87,6 +89,7 @@ from video_evidence_pipeline.domain.job import (
     PrimaryInputSpec,
     SourceKind,
     SourceSpec,
+    SupportingInputKind,
     SupportingInputSpec,
     canonicalize_source_locator,
     job_fingerprint,
@@ -98,9 +101,14 @@ from video_evidence_pipeline.domain.job import (
 from video_evidence_pipeline.domain.length import CharacterLengthConstraint
 from video_evidence_pipeline.domain.manifests import SourceManifest, StageManifest
 from video_evidence_pipeline.domain.media import NormalizationConfig
-from video_evidence_pipeline.domain.recovery import RecoveryManifest
+from video_evidence_pipeline.domain.recovery import (
+    RecoveredClarification,
+    RecoveryClarificationPacket,
+    RecoveryClarificationSnapshot,
+    RecoveryManifest,
+)
 from video_evidence_pipeline.domain.semantic import PendingSemanticRequestStatus
-from video_evidence_pipeline.domain.serialization import fingerprint
+from video_evidence_pipeline.domain.serialization import fingerprint, pretty_json_bytes
 from video_evidence_pipeline.domain.state import JobState
 from video_evidence_pipeline.domain.supporting import SupportingInputManifest
 from video_evidence_pipeline.domain.transcription import (
@@ -121,6 +129,7 @@ from video_evidence_pipeline.errors import (
     io_error,
     state_error,
 )
+from video_evidence_pipeline.evidence.clarifications import active_resolutions, load_clarifications
 from video_evidence_pipeline.evidence.pipeline import (
     EvidenceImportResult,
     EvidencePrepareResult,
@@ -172,7 +181,14 @@ from video_evidence_pipeline.storage.jsonl import append_jsonl, exclusive_append
 from video_evidence_pipeline.storage.layout import JobWorkspace, is_link_or_junction
 from video_evidence_pipeline.storage.locking import exclusive_file_lock
 from video_evidence_pipeline.storage.permissions import ensure_private_directory
-from video_evidence_pipeline.supporting import load_supporting_inputs, supporting_fingerprint
+from video_evidence_pipeline.supporting import (
+    SUPPORTING_INPUT_IMPLEMENTATION_VERSION,
+    load_supporting_inputs,
+    publish_recovery_clarification_note,
+    recovery_clarification_note,
+    supporting_fingerprint,
+    verify_recovery_clarification_note,
+)
 from video_evidence_pipeline.transcription.base import AsrBackend
 from video_evidence_pipeline.transcription.pipeline import (
     TranscriptionResult,
@@ -330,6 +346,43 @@ class _RecoveryParent:
     finding_ids: tuple[str, ...]
 
 
+def _recovery_clarification_packet(
+    parent: _RecoveryParent,
+    *,
+    prefix_count: int | None = None,
+    deep: bool = False,
+) -> tuple[bytes, RecoveryClarificationSnapshot]:
+    fixed = _load_fixed_evidence(parent.workspace, parent.job, deep=deep)
+    records = load_clarifications(parent.workspace, fixed, prefix_count=prefix_count)
+    if not records:
+        raise state_error(
+            "RECOVERY_CLARIFICATIONS_REQUIRED", "record a clarification before recovering it"
+        )
+    targets = {record.clarification.ambiguity_id for _, record in records}
+    packet = RecoveryClarificationPacket(
+        parent_job_id=parent.job.job_id,
+        evidence_bundle_fingerprint=fixed.fixed_evidence_fingerprint,
+        ambiguities=[item for item in fixed.ambiguity_records if item.ambiguity_id in targets],
+        clarifications=[
+            RecoveredClarification(fingerprint=digest, record=record) for digest, record in records
+        ],
+        active_resolutions=active_resolutions(records),
+    )
+    payload = pretty_json_bytes(packet)
+    return payload, RecoveryClarificationSnapshot(
+        record_count=len(records), packet_sha256=sha256_bytes(payload)
+    )
+
+
+def _clarification_supporting_input(
+    input_index: int, snapshot: RecoveryClarificationSnapshot
+) -> SupportingInputSpec:
+    return SupportingInputSpec(
+        kind=SupportingInputKind.NOTES,
+        locator=f"{RECOVERY_CLARIFICATION_PREFIX}{input_index:06d}/{snapshot.packet_sha256}",
+    )
+
+
 def _load_recovery_manifest(
     workspace: JobWorkspace,
     job: JobSpec,
@@ -370,6 +423,31 @@ def _load_recovery_manifest(
     child_supporting = (
         load_supporting_inputs(workspace, job, deep=deep) if job.supporting_inputs else None
     )
+    parent_inputs = list(parent.job.supporting_inputs)
+    expected_supporting = list(parent.supporting.inputs) if parent.supporting is not None else []
+    snapshot = manifest.clarification_snapshot
+    if snapshot is not None:
+        payload, verified_snapshot = _recovery_clarification_packet(
+            parent, prefix_count=snapshot.record_count, deep=deep
+        )
+        if verified_snapshot != snapshot:
+            raise integrity_error(
+                "RECOVERY_CLARIFICATION_MISMATCH", "recovery clarification snapshot has changed"
+            )
+        input_index = len(parent_inputs) + 1
+        parent_inputs.append(_clarification_supporting_input(input_index, snapshot))
+        expected_note = recovery_clarification_note(payload, input_index=input_index)
+        expected_supporting.append(expected_note)
+        if (
+            job.supporting_inputs != parent_inputs
+            or child_supporting is None
+            or child_supporting.inputs != expected_supporting
+        ):
+            raise integrity_error(
+                "RECOVERY_CLARIFICATION_MISMATCH", "recovery clarification note has changed"
+            )
+        if not deep:
+            verify_recovery_clarification_note(workspace, expected_note)
     if (
         manifest.parent_job_fingerprint != job_fingerprint(parent.job)
         or (
@@ -390,8 +468,7 @@ def _load_recovery_manifest(
         != parent.media.media_manifest.model_dump(mode="json", exclude={"job_id"})
         or child_transcript.transcript_manifest.model_dump(mode="json", exclude={"job_id"})
         != parent.transcript.transcript_manifest.model_dump(mode="json", exclude={"job_id"})
-        or (tuple(child_supporting.inputs) if child_supporting is not None else ())
-        != (tuple(parent.supporting.inputs) if parent.supporting is not None else ())
+        or (child_supporting.inputs if child_supporting is not None else []) != expected_supporting
     ):
         raise integrity_error(
             "RECOVERY_PROVENANCE_MISMATCH",
@@ -593,6 +670,7 @@ def recover_job(
     confirm: bool,
     basis: str,
     child_spec_path: Path | None = None,
+    with_clarifications: bool = False,
 ) -> RecoveryResult:
     """Fork an eligible transcript-bearing job at its raw-transcript reuse boundary."""
 
@@ -629,6 +707,30 @@ def recover_job(
                 "RECOVERY_SOURCE_IDENTITY_MISMATCH",
                 "changed-assignment recovery must keep source and supporting input identity",
             )
+    clarification_payload = None
+    clarification_snapshot = None
+    clarification_note = None
+    if with_clarifications:
+        if len(child_job.supporting_inputs) >= 32:
+            raise state_error("RECOVERY_SUPPORTING_INPUT_LIMIT", "no supporting input slot remains")
+        with exclusive_append_lock(qualified.workspace.transitions_jsonl):
+            _require_local_processing(qualified.authorization)
+            clarification_payload, clarification_snapshot = _recovery_clarification_packet(
+                qualified, deep=True
+            )
+        input_index = len(child_job.supporting_inputs) + 1
+        clarification_note = recovery_clarification_note(
+            clarification_payload, input_index=input_index
+        )
+        child_job = JobSpec.model_validate(
+            {
+                **child_job.model_dump(mode="python"),
+                "supporting_inputs": [
+                    *child_job.supporting_inputs,
+                    _clarification_supporting_input(input_index, clarification_snapshot),
+                ],
+            }
+        )
     child_fingerprint = job_fingerprint(child_job)
     recorded_at = datetime.now(UTC)
     recovery = RecoveryManifest(
@@ -638,6 +740,7 @@ def recover_job(
         parent_final_draft_sha256=qualified.final_draft_sha256,
         parent_audit_bundle_fingerprint=qualified.audit_bundle_fingerprint,
         parent_finding_ids=list(qualified.finding_ids),
+        clarification_snapshot=clarification_snapshot,
         recovery_basis=basis,
         child_job_id=child_job.job_id,
         child_job_fingerprint=child_fingerprint,
@@ -665,18 +768,18 @@ def recover_job(
     child_transcript_stage = qualified.transcript.stage_manifest.model_copy(
         update={"job_id": child_job.job_id}
     )
-    child_supporting = (
-        qualified.supporting.model_copy(
-            update={
-                "job_id": child_job.job_id,
-                "supporting_fingerprint": supporting_fingerprint(
-                    child_job, qualified.supporting.inputs
-                ),
-            }
+    supporting_records = list(qualified.supporting.inputs) if qualified.supporting else []
+    if clarification_note is not None:
+        supporting_records.append(clarification_note)
+    child_supporting = None
+    if supporting_records:
+        child_supporting = SupportingInputManifest(
+            job_id=child_job.job_id,
+            supporting_fingerprint=supporting_fingerprint(child_job, supporting_records),
+            implementation_version=SUPPORTING_INPUT_IMPLEMENTATION_VERSION,
+            inputs=supporting_records,
+            created_at=qualified.supporting.created_at if qualified.supporting else recorded_at,
         )
-        if qualified.supporting is not None
-        else None
-    )
     authorization = AuthorizationRecord(
         job_id=child_job.job_id,
         job_fingerprint=child_fingerprint,
@@ -738,6 +841,11 @@ def recover_job(
                 ),
             )
             _copy_recovery_artifacts(qualified.workspace, child, artifacts)
+            if clarification_note is not None:
+                assert clarification_payload is not None
+                publish_recovery_clarification_note(
+                    child, clarification_note, clarification_payload
+                )
             atomic_write_json(child.source_manifest_json, child_source, private=True)
             atomic_write_json(child.acquisition_manifest_json, child_source_stage, private=True)
             atomic_write_json(child.media_manifest_json, child_media, private=True)
@@ -2150,6 +2258,29 @@ def export_job(path: Path) -> ExportResult:
             trigger="job.export",
         )
         return result
+
+
+def read_approved_markdown_job(path: Path) -> tuple[ApprovalRecord, str, bytes]:
+    """Read the exact approved Markdown snapshot without changing the job state."""
+    workspace = JobWorkspace.open(path)
+    with exclusive_append_lock(workspace.transitions_jsonl):
+        workspace, job, transitions, state = _load_context(path)
+        if state not in {JobState.HUMAN_APPROVED, JobState.EXPORTED}:
+            raise state_error("STATE_GATE_FAILED", "job must be HUMAN_APPROVED before rendering")
+        try:
+            authorization = _authorization(workspace)
+            _require_current_authorization(job, transitions, authorization)
+            _, draft, audit, review = _approval_upstream(workspace, job, state, stale_code=True)
+            approval = load_approval(workspace, job, draft, audit, review, deep=True)
+        except VepError as exc:
+            raise integrity_error(
+                "APPROVAL_STALE", "approval no longer matches verified upstream state"
+            ) from exc
+        record = approval.record
+        payload = ensure_approved_draft_marker_free(
+            workspace, record.approved_draft_artifact, deep=True
+        )
+    return record, job.assignment.language, payload
 
 
 def _authoring_context_ids(
@@ -3623,7 +3754,7 @@ def _guide_operation(
     }
 
 
-def job_guide(path: Path) -> dict[str, Any]:
+def job_guide(path: Path, *, include_plan: bool = False) -> dict[str, Any]:
     """Return read-only, state-aware guidance without preparing or repairing artifacts."""
 
     workspace, job, transitions, state = _load_context(path)
@@ -3639,13 +3770,34 @@ def job_guide(path: Path) -> dict[str, Any]:
         }
     else:
         operation = _guide_operation(workspace, job, transitions, state, status)
-    return {
+    guidance = {
         "job_id": job.job_id,
         "stored_state": state.value,
         "effective_state": effective.value,
         "guide_read_only": True,
         **operation,
     }
+    if include_plan:
+        primary = primary_input_kind(job)
+        guidance["plan"] = {
+            "source_kind": job.source.kind.value,
+            "primary_input": primary.value,
+            "supporting_inputs": [item.kind.value for item in job.supporting_inputs],
+            "network_acquisition": job.source.kind is not SourceKind.LOCAL_FILE,
+            "authentication": (
+                "provider_dependent"
+                if job.source.kind in {SourceKind.BOX, SourceKind.PANOPTO, SourceKind.GENERIC_YTDLP}
+                else "not_required"
+            ),
+            "speech_recognition": (
+                "not_required"
+                if primary is PrimaryInputKind.TRANSCRIPT
+                else "depends_on_available_captions"
+            ),
+            "document_kind": job.assignment.task_type,
+            "requested_output_format": job.output.format,
+        }
+    return guidance
 
 
 def job_status(path: Path) -> tuple[dict[str, Any], int]:

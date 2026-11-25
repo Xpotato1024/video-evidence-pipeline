@@ -1,0 +1,190 @@
+{
+  "$defs": {
+    "Confirmation": {
+      "additionalProperties": false,
+      "properties": {
+        "provided_by": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Provided By",
+          "type": "string"
+        },
+        "statement": {
+          "maxLength": 8192,
+          "minLength": 1,
+          "title": "Statement",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provided_by",
+        "statement"
+      ],
+      "title": "Confirmation",
+      "type": "object"
+    },
+    "SourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "content_sha256": {
+          "description": "Transcript-record semantic fingerprint or canonical frame artifact SHA-256",
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "end_ms": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Ms"
+        },
+        "kind": {
+          "$ref": "#/$defs/SourceRefKind"
+        },
+        "ref_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Ref Id",
+          "type": "string"
+        },
+        "start_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Ms"
+        }
+      },
+      "required": [
+        "kind",
+        "ref_id",
+        "content_sha256"
+      ],
+      "title": "SourceRef",
+      "type": "object"
+    },
+    "SourceRefKind": {
+      "enum": [
+        "transcript_segment",
+        "frame",
+        "approved_artifact",
+        "pdf_text",
+        "pdf_page",
+        "image",
+        "notes"
+      ],
+      "title": "SourceRefKind",
+      "type": "string"
+    }
+  },
+  "$id": "https://schemas.video-evidence-pipeline.local/v1/clarification-input.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "ambiguity_id": {
+      "pattern": "^A[0-9]{6}$",
+      "title": "Ambiguity Id",
+      "type": "string"
+    },
+    "confirmation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Confirmation"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "decision": {
+      "enum": [
+        "resolved",
+        "supplemented",
+        "deferred"
+      ],
+      "title": "Decision",
+      "type": "string"
+    },
+    "evidence_bundle_fingerprint": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Evidence Bundle Fingerprint",
+      "type": "string"
+    },
+    "rationale": {
+      "maxLength": 8192,
+      "minLength": 1,
+      "title": "Rationale",
+      "type": "string"
+    },
+    "resolution": {
+      "anyOf": [
+        {
+          "maxLength": 8192,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Resolution"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "source_refs": {
+      "items": {
+        "$ref": "#/$defs/SourceRef"
+      },
+      "maxItems": 32,
+      "title": "Source Refs",
+      "type": "array"
+    },
+    "supersedes": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Supersedes"
+    }
+  },
+  "required": [
+    "evidence_bundle_fingerprint",
+    "ambiguity_id",
+    "decision",
+    "rationale"
+  ],
+  "title": "ClarificationInput",
+  "type": "object",
+  "x-schema-version": "1.0"
+}

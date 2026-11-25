@@ -8,7 +8,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,6 +30,7 @@ from video_evidence_pipeline.delivery.lecture_documents import build_document_ev
 from video_evidence_pipeline.delivery.lecture_source import apply_mdx_edits
 from video_evidence_pipeline.delivery.study_bundle import validate_study_bundle
 from video_evidence_pipeline.domain.authoring import AgentIdentity, AgentRole, AuditSeverity
+from video_evidence_pipeline.domain.clarification import ClarificationRecord
 from video_evidence_pipeline.domain.delivery import ReviewerIdentity
 from video_evidence_pipeline.domain.evidence import (
     AmbiguityLedger,
@@ -41,7 +42,7 @@ from video_evidence_pipeline.domain.evidence import (
 from video_evidence_pipeline.domain.hashing import sha256_file
 from video_evidence_pipeline.domain.job import AssignmentSpec
 from video_evidence_pipeline.domain.lecture import (
-    ENTRYPOINTS,
+    RENDER_OUTPUTS,
     AuditKind,
     FigureBlock,
     InventoryFile,
@@ -59,6 +60,7 @@ from video_evidence_pipeline.domain.lecture import (
     SourceLocator,
     StepsBlock,
     payload_fingerprint,
+    review_entrypoints,
 )
 from video_evidence_pipeline.domain.serialization import fingerprint, pretty_json_bytes
 from video_evidence_pipeline.domain.state import JobState
@@ -69,6 +71,7 @@ from video_evidence_pipeline.errors import (
     io_error,
     state_error,
 )
+from video_evidence_pipeline.evidence.clarifications import load_clarifications
 from video_evidence_pipeline.runtime_context import resource_root
 from video_evidence_pipeline.storage.atomic import (
     atomic_write_bytes,
@@ -92,14 +95,8 @@ _TOPICS = {
     "visuals",
     "prior_lessons",
 }
-_RENDER_FILES = {
-    "lesson.mdx",
-    "lesson.md",
-    "review.html",
-    "review.pdf",
-    "render-receipt.json",
-    "sites/index.html",
-}
+_RENDER_FILES = {*RENDER_OUTPUTS.values(), "render-receipt.json"}
+_SITE_FILES = {"sites/lesson.css", "sites/robots.txt"}
 _EVIDENCE_STATES = {
     JobState.EVIDENCE_READY,
     JobState.DRAFTED,
@@ -330,7 +327,39 @@ def _archive_evidence(path: Path) -> dict[str, Any]:
     }
 
 
-def _workspace_evidence(path: Path) -> dict[str, Any]:
+def _clarification_sources(records: Sequence[ClarificationRecord]) -> list[LectureSource]:
+    active = {}
+    for record in records:
+        if record.clarification.decision == "resolved":
+            active[record.clarification.ambiguity_id] = record
+    sources = []
+    for ambiguity_id, record in sorted(active.items()):
+        item = record.clarification
+        digest = fingerprint(record)
+        confirmation = item.confirmation
+        sources.append(
+            LectureSource(
+                id=f"clarification-{digest[:32]}",
+                kind="clarification",
+                title=f"{ambiguity_id} · {confirmation.provided_by if confirmation else record.recorded_by}",
+                locator=SourceLocator(
+                    ref_id=ambiguity_id,
+                    sha256=digest,
+                    note=item.rationale,
+                ),
+                excerpt=item.resolution,
+                source_refs=item.source_refs,
+            )
+        )
+    return sources
+
+
+def _workspace_evidence(
+    path: Path,
+    *,
+    with_clarifications: bool = False,
+    frozen: LectureRequest | None = None,
+) -> dict[str, Any]:
     workspace, job, transitions, state = _load_context(path)
     if state not in _EVIDENCE_STATES:
         raise state_error("LECTURE_EVIDENCE_MISSING", "lecture jobs require verified VEP evidence")
@@ -345,12 +374,22 @@ def _workspace_evidence(path: Path) -> dict[str, Any]:
             evidence.frame_refs, (frame.artifact for frame in evidence.frame_records), strict=True
         ),
     ]
+    clarifications = None
+    if with_clarifications:
+        prefix_count = len(frozen.clarifications or []) if frozen is not None else None
+        clarifications = [
+            record for _, record in load_clarifications(workspace, fixed, prefix_count=prefix_count)
+        ]
     return {
         "job_id": job.job_id,
         "source_state": state.value,
         "evidence_bundle_fingerprint": fixed.fixed_evidence_fingerprint,
-        "sources": _current_sources(fixed.evidence_records),
+        "sources": [
+            *_current_sources(fixed.evidence_records),
+            *_clarification_sources(clarifications or []),
+        ],
         "ambiguities": fixed.ambiguity_records,
+        "clarifications": clarifications,
         "requirements": evidence.assignment.requirements,
         "crop_assets": _crop_assets(
             fixed.evidence_records,
@@ -378,18 +417,37 @@ def prepare_lecture(
     archive: bool = False,
     documents: bool = False,
     document_index: Path | None = None,
+    with_clarifications: bool = False,
 ) -> tuple[LectureRequest, bool]:
     if documents and (archive or document_index is not None):
         raise configuration_error(
             "LECTURE_SOURCE_MODE_INVALID", "select a single lecture source mode"
         )
+    if with_clarifications and (archive or documents):
+        raise configuration_error(
+            "LECTURE_CLARIFICATION_WORKSPACE_REQUIRED",
+            "clarifications are available on a verified evidence workspace",
+        )
     options = _read_model(input_path, LectureInput)
+    target = _safe_absolute(destination) / "request.json"
+    frozen = validate_lecture_request(target) if target.is_file() else None
+    if frozen is not None and with_clarifications != (frozen.clarifications is not None):
+        raise configuration_error(
+            "LECTURE_CLARIFICATION_VERSION_REQUIRED",
+            "use a new lecture version to change clarification inclusion",
+        )
     source_images: dict[str, bytes] = {}
     if documents:
         document_index = workspace
         evidence: dict[str, Any] = {}
     else:
-        evidence = _archive_evidence(workspace) if archive else _workspace_evidence(workspace)
+        evidence = (
+            _archive_evidence(workspace)
+            if archive
+            else _workspace_evidence(
+                workspace, with_clarifications=with_clarifications, frozen=frozen
+            )
+        )
     if document_index is not None:
         index = _read_model(document_index, LectureDocumentIndex)
         with tempfile.TemporaryDirectory(prefix="vep-documents-") as temporary:
@@ -415,8 +473,6 @@ def prepare_lecture(
     evidence["sources"] += options.previous_context
     if len({item.id for item in evidence["sources"]}) != len(evidence["sources"]):
         raise configuration_error("LECTURE_SOURCE_COLLISION", "lecture source IDs collide")
-    target = _safe_absolute(destination) / "request.json"
-    frozen = validate_lecture_request(target) if target.is_file() else None
     request = LectureRequest(
         **evidence,
         guidance=frozen.guidance if frozen is not None else _lecture_guidance(),
@@ -474,6 +530,8 @@ def _check_request(request: LectureRequest) -> None:
         or request.profile_snapshot_sha256 != fingerprint(request.profile)
         or len(ids) != len(request.sources)
         or any(source.kind == "supplement" for source in request.sources)
+        or [source for source in request.sources if source.kind == "clarification"]
+        != _clarification_sources(request.clarifications or [])
         or not any(source.kind == "current_lecture" for source in request.sources)
         or len(asset_paths) != len(request.crop_assets)
         or any(not set(asset.source_refs) <= ids for asset in request.crop_assets)
@@ -542,7 +600,9 @@ def _renderer() -> Path:
     return path
 
 
-def _render(content_path: Path, stage: Path, *, assets: Path | None) -> None:
+def _render(
+    content_path: Path, stage: Path, *, assets: Path | None, formats: tuple[str, ...] | None
+) -> None:
     node = shutil.which("node")
     if not node:
         raise configuration_error(
@@ -551,6 +611,8 @@ def _render(content_path: Path, stage: Path, *, assets: Path | None) -> None:
     command = [node, str(_renderer()), "--input", str(content_path), "--output", str(stage)]
     if assets is not None:
         command.extend(["--assets", str(assets)])
+    for output_format in formats or ():
+        command.extend(["--format", output_format])
     child_env = {
         key: value
         for key, value in os.environ.items()
@@ -620,8 +682,21 @@ def _selected_assets(content: RichContent, request: LectureRequest) -> dict[str,
 
 
 def render_lecture(
-    request_path: Path, content_path: Path, destination: Path, *, assets: Path | None = None
+    request_path: Path,
+    content_path: Path,
+    destination: Path,
+    *,
+    assets: Path | None = None,
+    formats: Sequence[str] | None = None,
 ) -> tuple[str, bool]:
+    if formats is not None and (not formats or set(formats) - RENDER_OUTPUTS.keys()):
+        choices = ", ".join(RENDER_OUTPUTS)
+        raise configuration_error(
+            "LECTURE_FORMAT_INVALID", f"choose one or more output formats from: {choices}"
+        )
+    selected_formats = (
+        tuple(name for name in RENDER_OUTPUTS if name in formats) if formats is not None else None
+    )
     request = _read_model(request_path, LectureRequest)
     content = _read_model(content_path, RichContent)
     _check_content(content, request)
@@ -634,10 +709,13 @@ def render_lecture(
     destination = _safe_absolute(destination)
     if destination.exists():
         existing_request, existing_content, inventory = _load_render(destination)
-        if (existing_request, existing_content) == (request, content):
+        paths = {item["path"] for item in inventory}
+        if (existing_request, existing_content) == (request, content) and _rendered_formats(
+            paths
+        ) == (selected_formats or tuple(RENDER_OUTPUTS)):
             return fingerprint(inventory), True
         raise integrity_error(
-            "LECTURE_RENDER_STALE", "existing render binds different lecture inputs"
+            "LECTURE_RENDER_STALE", "existing render binds different lecture inputs or formats"
         )
     with _stage(destination) as stage:
         inputs = stage.parent / "content.json"
@@ -656,21 +734,34 @@ def render_lecture(
             atomic_write_bytes(target, data, private=True)
             if target.stat().st_size != item.size_bytes or sha256_file(target) != item.sha256:
                 raise integrity_error("LECTURE_CROP_UNBOUND", "crop source identity changed")
-        _render(inputs, stage, assets=isolated_assets if selected else None)
+        _render(
+            inputs, stage, assets=isolated_assets if selected else None, formats=selected_formats
+        )
         atomic_write_bytes(stage / "content.json", inputs.read_bytes(), private=True)
         atomic_write_json(stage / "authoring-request.json", request, private=True)
         inventory = _render_inventory(stage)
+        if _rendered_formats({item["path"] for item in inventory}) != (
+            selected_formats or tuple(RENDER_OUTPUTS)
+        ):
+            raise integrity_error(
+                "LECTURE_RENDER_INCOMPLETE", "renderer did not produce the requested formats"
+            )
         atomic_write_json(stage / "render-inventory.json", inventory, private=True)
     return fingerprint(inventory), False
 
 
 def _render_inventory(root: Path) -> list[dict[str, Any]]:
     inventory = _inventory(root, exclude={"render-inventory.json"})
+    _validate_render_inventory(root, inventory)
+    return [item.model_dump(mode="json") for item in inventory]
+
+
+def _rendered_formats(paths: set[str]) -> tuple[str, ...]:
+    return tuple(name for name, path in RENDER_OUTPUTS.items() if path in paths)
+
+
+def _validate_render_inventory(root: Path, inventory: list[InventoryFile]) -> None:
     paths = {item.path for item in inventory}
-    if not paths >= _RENDER_FILES:
-        raise integrity_error(
-            "LECTURE_RENDER_INCOMPLETE", "required lecture render files are missing"
-        )
     if any(
         path not in _RENDER_FILES | {"content.json", "authoring-request.json"}
         and not path.startswith(("figures/", "math/", "data/", "sites/", "inputs/"))
@@ -680,6 +771,21 @@ def _render_inventory(root: Path) -> list[dict[str, Any]]:
     by_path = {item.path: item for item in inventory}
     try:
         receipt = json.loads(_read(root / "render-receipt.json"))
+        formats = _rendered_formats(paths)
+        if not formats or receipt.get("formats", list(RENDER_OUTPUTS)) != list(formats):
+            raise ValueError
+        if "formats" in receipt:
+            site_paths = {path for path in paths if path.startswith("sites/")}
+            if "sites" in formats and not site_paths >= _SITE_FILES:
+                raise ValueError
+            if "sites" not in formats and site_paths:
+                raise ValueError
+            if ("sites/review.pdf" in site_paths) != ("sites" in formats and "pdf" in formats):
+                raise ValueError
+            if "sites/review.pdf" in site_paths and (
+                by_path["sites/review.pdf"].sha256 != by_path["review.pdf"].sha256
+            ):
+                raise ValueError
         described = {
             item.path: {"sha256": item.sha256, "size_bytes": item.size_bytes}
             for item in inventory
@@ -698,9 +804,8 @@ def _render_inventory(root: Path) -> list[dict[str, Any]]:
         raise integrity_error(
             "LECTURE_RENDER_INVALID", "render receipt disagrees with its validated outputs"
         ) from exc
-    if _read_prefix(root / "review.pdf", 5) != b"%PDF-":
+    if "pdf" in formats and _read_prefix(root / "review.pdf", 5) != b"%PDF-":
         raise integrity_error("LECTURE_RENDER_INVALID", "lecture PDF signature is missing")
-    return [item.model_dump(mode="json") for item in inventory]
 
 
 def _read_prefix(path: Path, limit: int) -> bytes:
@@ -728,13 +833,17 @@ def import_lecture_source(
     else:
         old_request, base_content, _inventory = _load_render(base)
         base_version = old_request.version
+    if not (base / RENDER_OUTPUTS["mdx"]).is_file():
+        raise configuration_error(
+            "LECTURE_MDX_MISSING", "render the base lecture with --format mdx to import its edits"
+        )
     request = validate_lecture_request(request_path)
     if request.version <= base_version:
         raise state_error("LECTURE_VERSION_REQUIRED", "edits require a newer lecture version")
     try:
         updated = apply_mdx_edits(
             base_content.model_dump(mode="json"),
-            _read(base / "lesson.mdx").decode("utf-8"),
+            _read(base / RENDER_OUTPUTS["mdx"]).decode("utf-8"),
             _read(edited).decode("utf-8"),
         )
         updated["request_fingerprint"] = request.request_fingerprint
@@ -789,6 +898,13 @@ def _audit_request(
             "Verify each cross-session relation against the current utterance and the earlier "
             "prompt or diagram. Keep ambiguous targets unresolved and identify later corrections."
         )
+    formats = _rendered_formats({item["path"] for item in inventory})
+    if kind == "visual" and len(formats) != len(RENDER_OUTPUTS):
+        files = ", ".join(RENDER_OUTPUTS[name] for name in formats)
+        criteria[kind][0] = (
+            f"Inspect the selected outputs ({files}) and each referenced figure "
+            "independently against its source and calculations."
+        )
     if kind == "visual" and request.guidance is not None:
         criteria[kind].append(request.guidance.visual_audit)
     criteria[kind].extend(
@@ -816,6 +932,13 @@ def _audit_request(
         ],
         "criteria": criteria[kind],
     }
+    if request.clarifications is not None:
+        result["clarifications"] = [item.model_dump(mode="json") for item in request.clarifications]
+        if kind == "content":
+            result["criteria"].append(
+                "Check that a recorded confirmation answers the specific question, including "
+                "scope and date, and that educational supplements leave source facts open."
+            )
     return {**result, "request_fingerprint": fingerprint(result)}
 
 
@@ -895,7 +1018,7 @@ def _manifest(request: LectureRequest, inventory: list[InventoryFile]) -> RichDe
         "content_sha256": content.sha256,
         "evidence_bundle_fingerprint": request.evidence_bundle_fingerprint,
         "profile_snapshot_sha256": request.profile_snapshot_sha256,
-        "entrypoints": ENTRYPOINTS,
+        "entrypoints": review_entrypoints({item.path for item in inventory}),
         "inventory": [item.model_dump(mode="json") for item in inventory],
     }
     return RichDeliverableManifest(**values, approval_target_sha256=fingerprint(values))
@@ -954,14 +1077,20 @@ def publish_lecture_review(
             },
             private=True,
         )
+        formats = _rendered_formats({item["path"] for item in render_inventory})
+        review_views = (
+            "review.pdf or review.html"
+            if len(formats) == len(RENDER_OUTPUTS)
+            else ", ".join(RENDER_OUTPUTS[name] for name in formats)
+        )
         atomic_write_bytes(
             stage / "REVIEW.md",
             (
-                b"# Review candidate\n\n"
-                b"Read review.pdf or review.html, then inspect audit-findings.json and the sources "
-                b"in content.json. Record feedback against the version and approval_target_sha256 "
-                b"in bundle-manifest.json. This package is awaiting human review.\n"
-            ),
+                "# Review candidate\n\n"
+                f"Read {review_views}, then inspect audit-findings.json and the sources "
+                "in content.json. Record feedback against the version and approval_target_sha256 "
+                "in bundle-manifest.json. This package is awaiting human review.\n"
+            ).encode(),
             private=True,
         )
         manifest = _manifest(request, _inventory(stage))
@@ -976,8 +1105,8 @@ def validate_lecture_bundle(root: Path) -> RichDeliverableManifest:
     if inventory != manifest.inventory:
         raise integrity_error("LECTURE_BUNDLE_CHANGED", "review package inventory does not match")
     raw_inventory = _read(root / "render-inventory.json")
-    from_render = [
-        item.model_dump(mode="json")
+    rendered_files = [
+        item
         for item in inventory
         if item.path
         not in {
@@ -989,10 +1118,12 @@ def validate_lecture_bundle(root: Path) -> RichDeliverableManifest:
             "REVIEW.md",
         }
     ]
+    from_render = [item.model_dump(mode="json") for item in rendered_files]
     if raw_inventory != pretty_json_bytes(from_render):
         raise integrity_error(
             "LECTURE_RENDER_CHANGED", "review package render inventory is inconsistent"
         )
+    _validate_render_inventory(root, rendered_files)
     request = _read_model(root / "authoring-request.json", LectureRequest)
     content = _read_model(root / "content.json", RichContent)
     _check_content(content, request)

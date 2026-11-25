@@ -17,6 +17,7 @@ from test_authoring_pipeline import (
 from typer.testing import CliRunner
 
 import video_evidence_pipeline.application as application_module
+import video_evidence_pipeline.delivery.document as document_module
 import video_evidence_pipeline.delivery.pipeline as delivery_pipeline_module
 from video_evidence_pipeline.application import (
     _import_authoring_fixture,
@@ -27,9 +28,11 @@ from video_evidence_pipeline.application import (
     validate_job,
 )
 from video_evidence_pipeline.cli import app
+from video_evidence_pipeline.delivery.document import render_markdown_html
 from video_evidence_pipeline.delivery.pipeline import read_approval_records
 from video_evidence_pipeline.domain.delivery import ReviewerIdentity, approval_record_fingerprint
-from video_evidence_pipeline.domain.serialization import canonical_json_bytes
+from video_evidence_pipeline.domain.hashing import sha256_bytes
+from video_evidence_pipeline.domain.serialization import canonical_json_bytes, pretty_json_bytes
 from video_evidence_pipeline.domain.state import JobState
 from video_evidence_pipeline.domain.transitions import TransitionRecord
 from video_evidence_pipeline.errors import VepError
@@ -98,6 +101,118 @@ def _transition_count(workspace: JobWorkspace, state: JobState) -> int:
     return [
         record.to_state for record in read_jsonl(workspace.transitions_jsonl, TransitionRecord)
     ].count(state)
+
+
+def test_derived_html_export_binds_approved_bytes_and_leaves_markdown_available(
+    tmp_path: Path,
+) -> None:
+    workspace, _draft, audit = _human_review_ready(tmp_path, "approved-derived-html")
+    runner = CliRunner()
+    destination = tmp_path / "html"
+    arguments = [
+        "export",
+        str(workspace.root),
+        "--format",
+        "html",
+        "--destination",
+        str(destination),
+        "--json",
+    ]
+    unapproved = runner.invoke(app, arguments)
+    assert (
+        unapproved.exit_code
+        and json.loads(unapproved.stdout)["error"]["code"] == "STATE_GATE_FAILED"
+    )
+    assert not destination.exists()
+
+    approval = _approve(workspace, audit.human_review.approval_target_sha256)
+    repository = workspace.jobs_root.parent.parent
+    alias = repository / "alias"
+    alias.mkdir()
+    alias_workspace = alias / ".." / workspace.root.relative_to(repository)
+    inside = workspace.root / "delivery" / "derived-html"
+    arguments[1] = str(alias_workspace)
+    arguments[5] = str(inside)
+    refused = runner.invoke(app, arguments)
+    assert refused.exit_code
+    assert json.loads(refused.stdout)["error"]["code"] == "DOCUMENT_DESTINATION_UNSAFE"
+    assert not inside.exists()
+
+    arguments[5] = str(destination)
+    output = runner.invoke(app, arguments)
+    assert output.exit_code == 0, output.output
+    result = json.loads(output.stdout)
+    assert not result["reused"]
+    assert {path.name for path in destination.iterdir()} == {"document.html", "render-receipt.json"}
+    receipt = json.loads((destination / "render-receipt.json").read_bytes())
+    assert receipt["approval_record_sha256"] == approval.record.record_sha256
+    approved_artifact = approval.record.approved_draft_artifact
+    assert receipt["approved_markdown_sha256"] == approved_artifact.content_sha256
+    assert receipt["artifact"]["sha256"] == result["sha256"]
+    assert receipt["rendered_html_sha256"] == result["sha256"]
+    assert _transition_count(workspace, JobState.EXPORTED) == 0
+    assert json.loads(runner.invoke(app, arguments).stdout)["reused"]
+
+    markdown = export_job(workspace.root)
+    assert markdown.manifest.final_artifact.content_sha256 == approved_artifact.content_sha256
+    approved = workspace.safe_path(approved_artifact.relative_storage_path)
+    payload = approved.read_bytes()
+    approved.write_bytes(bytes([payload[0] ^ 1]) + payload[1:])
+    tampered = runner.invoke(app, arguments)
+    assert tampered.exit_code and json.loads(tampered.stdout)["error"]["code"] == "APPROVAL_STALE"
+
+
+def test_derived_pdf_retry_checks_workspace_binding(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, _draft, audit = _human_review_ready(tmp_path, "approved-derived-pdf")
+    _approve(workspace, audit.human_review.approval_target_sha256)
+    original = b"%PDF-1.7\nSynthetic original"
+    renders = []
+
+    def print_fixture(html: bytes, output: Path, _scratch: Path, _script: Path) -> None:
+        renders.append(html)
+        output.write_bytes(original)
+
+    monkeypatch.setattr(document_module, "_publish_pdf", print_fixture)
+    destination = tmp_path / "pdf"
+    rendered = document_module.render_document_job(workspace.root, destination, "pdf")
+    assert not rendered["reused"]
+    assert document_module.render_document_job(workspace.root, destination, "pdf")["reused"]
+    assert len(renders) == 1
+    assert rendered["sha256"] == sha256_bytes(original)
+    binding = list(workspace.safe_path("exports/derived-pdf").iterdir())
+    assert len(binding) == 1
+    receipt_path = destination / "render-receipt.json"
+    bound_receipt = receipt_path.read_bytes()
+    assert binding[0].read_bytes() == bound_receipt
+
+    replacement = original.replace(b"original", b"forged!!")
+    (destination / "document.pdf").write_bytes(replacement)
+    receipt = json.loads(bound_receipt)
+    receipt["artifact"]["sha256"] = sha256_bytes(replacement)
+    receipt_path.write_bytes(pretty_json_bytes(receipt))
+    with pytest.raises(VepError) as rejected:
+        document_module.render_document_job(workspace.root, destination, "pdf")
+    assert rejected.value.code == "DOCUMENT_DESTINATION_CONFLICT"
+    assert len(renders) == 1
+
+
+def test_derived_document_markdown_uses_static_accessible_markup() -> None:
+    html = render_markdown_html(
+        (
+            "# 議事録\n\n| 対応事項 | 担当 |\n| --- | --- |\n| 見積もり | 未定 |\n\n"
+            "![議題写真](https://example.test/picture.png)\n\n"
+            "<script>alert(1)</script>\n\n[危険](javascript:alert%281%29)"
+        ).encode(),
+        "ja",
+    ).decode()
+    assert '<html lang="ja">' in html and "<h1>議事録</h1>" in html
+    assert "<table>" in html and "<td>見積もり</td>" in html
+    assert "議題写真" in html and "<img" not in html and "example.test" not in html
+    assert "&lt;script&gt;" in html and "<script>" not in html
+    assert 'href="javascript:' not in html
 
 
 def test_approval_gates_cli_privacy_exact_replay_and_markdown_export(

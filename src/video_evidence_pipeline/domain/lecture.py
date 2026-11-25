@@ -16,6 +16,7 @@ from pydantic import (
 
 from video_evidence_pipeline.domain import StrictModel, UtcDateTime
 from video_evidence_pipeline.domain.authoring import AgentIdentity, AgentRole, AuditSeverity
+from video_evidence_pipeline.domain.clarification import ClarificationRecord
 from video_evidence_pipeline.domain.delivery import NonBlankBasis, ReviewerIdentity
 from video_evidence_pipeline.domain.evidence import (
     AmbiguityRecord,
@@ -50,17 +51,32 @@ Topic = Literal[
     "visuals",
     "prior_lessons",
 ]
-ENTRYPOINTS = {
-    "source": "lesson.mdx",
+RENDER_OUTPUTS = {
     "markdown": "lesson.md",
+    "mdx": "lesson.mdx",
     "html": "review.html",
     "pdf": "review.pdf",
     "sites": "sites/index.html",
+}
+REVIEW_ENTRYPOINTS = {
     "content": "content.json",
     "audit_findings": "audit-findings.json",
     "human_review": "human-review-bundle.json",
     "render_receipt": "render-receipt.json",
 }
+ENTRYPOINTS = {
+    "source": RENDER_OUTPUTS["mdx"],
+    **{kind: path for kind, path in RENDER_OUTPUTS.items() if kind != "mdx"},
+    **REVIEW_ENTRYPOINTS,
+}
+
+
+def review_entrypoints(paths: set[str]) -> dict[str, str]:
+    return {
+        name: path
+        for name, path in ENTRYPOINTS.items()
+        if name in REVIEW_ENTRYPOINTS or path in paths
+    }
 
 
 def payload_fingerprint(value: StrictModel, field: str) -> str:
@@ -90,7 +106,9 @@ class SourceLocator(StrictModel):
 
 class LectureSource(StrictModel):
     id: Identifier
-    kind: Literal["current_lecture", "previous_lecture", "previous_assignment", "supplement"]
+    kind: Literal[
+        "current_lecture", "previous_lecture", "previous_assignment", "clarification", "supplement"
+    ]
     title: Text
     locator: SourceLocator
     excerpt: Text | None = None
@@ -113,6 +131,9 @@ class LectureSource(StrictModel):
             case "supplement":
                 if not self.locator.note or self.source_refs:
                     raise ValueError("supplement must explain its origin separately")
+            case "clarification":
+                if not self.locator.note or not self.locator.sha256 or not self.excerpt:
+                    raise ValueError("clarification requires a bound source and confirmation text")
         if self.kind != "current_lecture" and self.evidence_roles:
             raise ValueError("only current lecture evidence has evidence roles")
         return self
@@ -228,6 +249,9 @@ class LectureRequest(StrictModel):
     profile: AuthoringProfile
     sources: list[LectureSource] = Field(min_length=1, max_length=10000)
     ambiguities: list[AmbiguityRecord] = Field(default_factory=list, max_length=10000)
+    clarifications: list[ClarificationRecord] | None = Field(
+        default=None, max_length=1000, exclude_if=lambda value: value is None
+    )
     requirements: list[AssignmentRequirement] = Field(default_factory=list, max_length=100)
     crop_assets: list[LectureAsset] = Field(default_factory=list, max_length=10000)
     legacy_draft_sha256: Sha256 | None = None
@@ -580,7 +604,12 @@ class RichDeliverableManifest(StrictModel):
             paths
         ):
             raise ValueError("inventory must be sorted with unique portable paths")
-        if self.entrypoints != ENTRYPOINTS or not set(self.entrypoints.values()) <= set(paths):
+        path_set = set(paths)
+        if (
+            self.entrypoints != review_entrypoints(path_set)
+            or not set(self.entrypoints.values()) <= path_set
+            or path_set.isdisjoint(RENDER_OUTPUTS.values())
+        ):
             raise ValueError("required review files are missing")
         if "bundle-manifest.json" in paths:
             raise ValueError("a manifest cannot inventory itself")

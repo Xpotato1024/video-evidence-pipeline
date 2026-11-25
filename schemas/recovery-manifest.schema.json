@@ -1,4 +1,30 @@
 {
+  "$defs": {
+    "RecoveryClarificationSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "packet_sha256": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Packet Sha256",
+          "type": "string"
+        },
+        "record_count": {
+          "maximum": 1000,
+          "minimum": 1,
+          "title": "Record Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "record_count",
+        "packet_sha256"
+      ],
+      "title": "RecoveryClarificationSnapshot",
+      "type": "object"
+    }
+  },
   "$id": "https://schemas.video-evidence-pipeline.local/v1/recovery-manifest.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
@@ -32,6 +58,17 @@
       "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
       "title": "Child Job Id",
       "type": "string"
+    },
+    "clarification_snapshot": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RecoveryClarificationSnapshot"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "created_at": {
       "format": "date-time",
